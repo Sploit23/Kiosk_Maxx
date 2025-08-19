@@ -1,0 +1,572 @@
+/* ===== CARRINHO DE IMPRESSÃO - TEMA NATALINO ===== */
+
+/* Botão do Carrinho - MANTÉM COMO ESTÁ */
+#cart-button {
+    position: fixed;
+    top: 700px;
+    left: 450px;
+    background: linear-gradient(135deg, var(--christmas-red) 0%, var(--dark-red) 100%);
+    color: var(--snow-white);
+    border: 3px solid var(--christmas-gold);
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: bold;
+    border-radius: 25px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 6px 20px rgba(196, 30, 58, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.2);
+    z-index: 1000;
+    min-width: 140px;
+    min-height: 75px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-family: 'Mountains of Christmas', cursive;
+    text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    overflow: hidden;
+}
+
+#cart-button:hover {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: 0 8px 25px rgba(196, 30, 58, 0.6), inset 0 2px 0 rgba(255, 255, 255, 0.3);
+    background: linear-gradient(135deg, var(--light-red) 0%, var(--christmas-red) 100%);
+}
+
+#cart-button:active {
+    transform: translateY(-1px) scale(1.01);
+}
+
+/* ===== MODAL DO CARRINHO - LATERAL DIREITO ===== */
+
+#cart-container {
+    position: fixed;
+    top: 0;
+    right: -400px;
+    width: 380px;
+    height: 100vh;
+    background: linear-gradient(135deg, var(--christmas-green) 0%, var(--dark-green) 50%, var(--christmas-green) 100%);
+    border-left: 3px solid var(--christmas-gold);
+    box-shadow: -8px 0 25px rgba(0, 0, 0, 0.4);
+    z-index: 1001;
+    transition: right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    font-family: 'Mountains of Christmas', cursive;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.cart-visible {
+    right: 0 !important;
+}
+
+.cart-hidden {
+    right: -400px !important;
+}
+
+.cart-header {
+    background: linear-gradient(135deg, var(--christmas-gold) 0%, #f4e4a6 50%, var(--christmas-gold) 100%);
+    color: var(--christmas-green);
+    padding: 15px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 3px solid var(--christmas-green);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+    flex-shrink: 0;
+}
+
+.cart-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: bold;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.cart-close {
+    background: none;
+    border: none;
+    color: var(--christmas-green);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 5px 8px;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+    font-weight: bold;
+}
+
+.cart-close:hover {
+    background-color: rgba(15, 76, 58, 0.2);
+    transform: scale(1.1);
+}
+
+.cart-content {
+    padding: 15px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#cart-items {
+    flex: 1;
+    overflow-y: auto;
+    margin-bottom: 15px;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.cart-empty {
+    text-align: center;
+    color: var(--christmas-gold);
+    font-style: italic;
+    padding: 40px 15px;
+    font-size: 16px;
+}
+
+.cart-item {
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-sizing: border-box;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+    width: 100%;
+}
+
+.cart-item:hover {
+    border-color: #007bff;
+    box-shadow: 0 4px 12px rgba(0, 123, 255, 0.15);
+    transform: translateY(-1px);
+}
+
+.cart-item-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.cart-item-thumbnail {
+    flex-shrink: 0;
+}
+
+.cart-thumbnail {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+}
+
+.cart-item-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.cart-item-name {
+    color: #333;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 0;
+}
+
+.cart-item-format {
+    color: #666;
+    font-size: 12px;
+    font-weight: 500;
+    margin: 0;
+}
+
+.cart-item-price {
+    color: #007bff;
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.cart-item-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
+.quantity-section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.quantity-label {
+    color: #666;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.quantity-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.subtotal-section {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.quantity-btn {
+    background: #007bff;
+    color: white;
+    border: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+}
+
+.quantity-btn:hover {
+    background: #0056b3;
+}
+
+.quantity-display {
+    background: white;
+    color: #333;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 30px;
+    text-align: center;
+    border: 1px solid #ccc;
+}
+
+.cart-item-subtotal {
+    color: #007bff;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.remove-btn {
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+    align-self: flex-start;
+}
+
+.remove-btn:hover {
+    background: #c82333;
+}
+
+.cart-summary {
+    border-top: 3px solid rgba(212, 175, 55, 0.5);
+    padding-top: 15px;
+    flex-shrink: 0;
+}
+
+.cart-total {
+    margin-bottom: 15px;
+}
+
+.cart-total-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 10px 15px;
+    border-radius: 10px;
+    border: 2px solid var(--christmas-gold);
+    backdrop-filter: blur(5px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.cart-total-items {
+    color: var(--christmas-gold);
+    font-size: 13px;
+    font-weight: bold;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.cart-total-price {
+    color: #90ee90;
+    font-size: 16px;
+    font-weight: bold;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.cart-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cart-print {
+    background: linear-gradient(135deg, #28a745 0%, #34ce57 50%, #28a745 100%);
+    color: var(--snow-white);
+    border: 2px solid #20c997;
+    padding: 12px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+    font-family: 'Mountains of Christmas', cursive;
+}
+
+.cart-print:hover {
+    background: linear-gradient(135deg, #218838 0%, #2fb344 50%, #218838 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(40, 167, 69, 0.6);
+}
+
+.cart-clear {
+    background: linear-gradient(135deg, var(--christmas-red) 0%, var(--dark-red) 50%, var(--christmas-red) 100%);
+    color: var(--snow-white);
+    border: 2px solid #dc3545;
+    padding: 10px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.4);
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+    font-family: 'Mountains of Christmas', cursive;
+}
+
+.cart-clear:hover {
+    background: linear-gradient(135deg, #c82333 0%, #dc2626 50%, #c82333 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(220, 53, 69, 0.6);
+}
+
+/* Notificações */
+.cart-notification {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    background: transparent;
+    color: white;
+    padding: 12px 18px;
+    border-radius: 8px;
+    z-index: 1002;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    animation: slideInRight 0.4s ease;
+    font-family: 'Mountains of Christmas', cursive;
+    font-weight: bold;
+    border: 2px solid #28a745;
+}
+
+.cart-notification.error {
+    background: var(--christmas-red);
+}
+
+.cart-notification.info {
+    background: #17a2b8;
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.notification-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.notification-message {
+    font-size: 13px;
+    font-weight: bold;
+}
+
+/* ===== MODAL DE CONFIRMAÇÃO DE IMPRESSÃO ===== */
+.print-confirmation-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+    animation: fadeIn 0.3s ease;
+}
+
+.print-confirmation-content {
+    background: linear-gradient(135deg, var(--christmas-green), var(--dark-green));
+    border-radius: 15px;
+    padding: 25px;
+    max-width: 450px;
+    width: 90%;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    animation: slideInUp 0.4s ease;
+    border: 3px solid var(--christmas-gold);
+}
+
+.confirmation-header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.confirmation-header h3 {
+    color: white;
+    font-family: 'Mountains of Christmas', cursive;
+    font-size: 24px;
+    margin: 0;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.confirmation-body {
+    margin-bottom: 25px;
+}
+
+.confirmation-body p {
+    color: white;
+    font-size: 16px;
+    text-align: center;
+    margin-bottom: 15px;
+    font-family: 'Mountains of Christmas', cursive;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.confirmation-details {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 15px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.print-item-preview {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    color: white;
+    font-size: 14px;
+}
+
+.print-item-preview:last-child {
+    border-bottom: none;
+}
+
+.format-badge {
+    background: var(--christmas-gold);
+    color: var(--christmas-green);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.quantity-badge {
+    background: var(--christmas-red);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.confirmation-actions {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+}
+
+.btn-cancel, .btn-confirm {
+    padding: 12px 25px;
+    border: none;
+    border-radius: 25px;
+    font-family: 'Mountains of Christmas', cursive;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.btn-cancel {
+    background: linear-gradient(135deg, #dc3545, #c82333);
+    color: white;
+    box-shadow: 0 4px 15px rgba(220, 53, 69, 0.4);
+}
+
+.btn-cancel:hover {
+    background: linear-gradient(135deg, #c82333, #a71e2a);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(220, 53, 69, 0.6);
+}
+
+.btn-confirm {
+    background: linear-gradient(135deg, var(--christmas-gold), #e6ac00);
+    color: var(--christmas-green);
+    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4);
+}
+
+.btn-confirm:hover {
+    background: linear-gradient(135deg, #e6ac00, #cc9900);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(255, 215, 0, 0.6);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideInUp {
+    from {
+        transform: translateY(50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}

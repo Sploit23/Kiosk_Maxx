@@ -1,0 +1,167 @@
+/* THEME.CSS (Christmas) - Estilos visuais para o tema de Natal. */
+@import url('https://fonts.googleapis.com/css2?family=Mountains+of+Christmas:wght@700&family=Comfortaa:wght@400;700&display=swap');
+
+:root {
+    --christmas-red: #c41e3a;
+    --christmas-green: #228b22;
+    --christmas-gold: #ffd700;
+    --snow-white: #ffffff;
+    --dark-green: #0f5132;
+    --dark-red: #8b0000;
+}
+
+body {
+    font-family: 'Comfortaa', cursive;
+    background: radial-gradient(ellipse at top, #1e3c72, #0f4c75);
+    color: var(--snow-white);
+}
+
+/* --- Flocos de Neve (controlados por theme.js) --- */
+.snowflake {
+    position: fixed;
+    top: -10px;
+    color: var(--snow-white);
+    font-size: 1.5em;
+    animation: fall linear infinite;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.8;
+}
+
+@keyframes fall {
+    to { transform: translateY(105vh) rotate(360deg); }
+}
+
+/* --- Welcome Screen --- */
+.welcome-screen {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--dark-red);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--snow-white);
+    text-align: center;
+    z-index: 5000;
+    transition: opacity 1s ease;
+    opacity: 1;
+}
+.welcome-screen.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+.welcome-santa {
+    font-size: 8rem;
+    animation: bounce 1s infinite alternate;
+}
+.welcome-title {
+    font-family: 'Mountains of Christmas', cursive;
+    font-size: 5rem;
+    color: var(--christmas-gold);
+    text-shadow: 2px 2px var(--christmas-red);
+}
+
+@keyframes bounce {
+    from { transform: translateY(0); }
+    to { transform: translateY(-20px); }
+}
+
+/* --- Sidebar --- */
+.sidebar {
+    background: var(--dark-green);
+}
+
+.sidebar-header h2 {
+    font-family: 'Mountains of Christmas', cursive;
+    color: var(--christmas-gold);
+    font-size: 1.5em;
+    text-shadow: 1px 1px var(--christmas-red);
+}
+
+.thumbnail-item {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.thumbnail-item.selected {
+    box-shadow: 0 0 10px var(--christmas-gold);
+    transform: scale(1.05);
+}
+
+.thumbnail-item:hover {
+    box-shadow: 0 0 15px var(--christmas-gold);
+}
+
+/* --- Main Content --- */
+.main-content {
+    background: rgba(255, 255, 255, 0.05);
+}
+.main-header h1 {
+    font-family: 'Mountains of Christmas', cursive;
+    font-size: 2.5em;
+    color: var(--christmas-red);
+    text-shadow: 2px 2px var(--christmas-gold);
+}
+
+.preview-image {
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    border: 5px solid var(--snow-white);
+}
+
+.variation-item-label {
+    color: var(--snow-white);
+    background: var(--christmas-red);
+    padding: 5px 10px;
+    border-radius: 20px;
+    font-weight: bold;
+    font-size: 1.2em;
+}
+
+/* --- Botões --- */
+.btn-print {
+    background: var(--christmas-green);
+    color: var(--snow-white);
+    border: 2px solid var(--christmas-gold);
+    border-radius: 50px;
+    padding: 0.8rem 1.5rem;
+    font-size: 1.1em;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    margin-top: 1rem;
+}
+.btn-print:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 20px var(--christmas-gold);
+}
+.btn-print:disabled {
+    background: #6c757d;
+    opacity: 0.7;
+}
+
+/* --- Loading & Messages --- */
+.loading-indicator {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 4000;
+}
+.spinner {
+    width: 60px;
+    height: 60px;
+    border: 8px solid var(--christmas-red);
+    border-top: 8px solid var(--christmas-green);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.message.success { background: var(--christmas-green); }
+.message.error { background: var(--christmas-red); }
+.message.info { background: var(--dark-green); }

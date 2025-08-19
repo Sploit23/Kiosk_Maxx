@@ -1,0 +1,41 @@
+/* Tema padrão - copiar do kioskBase */
+:root {
+    --primary-color: #2c3e50;
+    --secondary-color: #3498db;
+    --accent-color: #e74c3c;
+    --background-color: #ecf0f1;
+    --text-color: #2c3e50;
+    --border-color: #bdc3c7;
+}
+
+/* Estilos específicos do tema padrão */
+.theme-default {
+    background: var(--background-color);
+    color: var(--text-color);
+}
+
+body {
+    background-color: var(--background);
+    color: var(--text);
+    font-family: Arial, sans-serif;
+}
+
+.sidebar {
+    background-color: white;
+    border-right: 1px solid #ddd;
+}
+
+.sidebar-header h2 {
+    color: var(--primary);
+}
+
+.thumbnail-item:hover {
+    border-color: var(--primary);
+}
+
+.btn-print {
+    background-color: var(--primary);
+    color: white;
+}
+
+/* (Estilos básicos para outros elementos) */

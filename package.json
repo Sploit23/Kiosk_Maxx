@@ -1,0 +1,52 @@
+{
+  "name": "photo-kiosk-desktop",
+  "version": "2.0.0",
+  "description": "Aplicativo Desktop de Kiosk de Fotos com Auto-Update",
+  "main": "src/electron/main.js",
+  "homepage": "https://github.com/seu-usuario/photo-kiosk-desktop",
+  "scripts": {
+    "start": "electron src/electron/main.js",
+    "dev": "electron src/electron/main.js --enable-logging",
+    "build": "npx electron-builder --win --publish=never",
+    "pack": "npx electron-builder --dir",
+    "setup": "npm install"
+  },
+  "keywords": [
+    "photo",
+    "kiosk",
+    "desktop",
+    "electron",
+    "auto-update",
+    "ask300",
+    "printer"
+  ],
+  "author": {
+    "name": "Photo Kiosk System",
+    "email": "contato@photokiosk.com"
+  },
+  "license": "MIT",
+  "build": {
+    "appId": "com.photokiosk.desktop",
+    "productName": "Photo Kiosk Desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "config/**/*",
+      "imagens/**/*",
+      "temp/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "portable"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.1.7"
+  },
+  "devDependencies": {
+    "electron": "^28.1.0",
+    "electron-builder": "^26.0.12"
+  }
+}

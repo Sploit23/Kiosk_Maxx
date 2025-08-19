@@ -1,0 +1,28 @@
+{
+  "printers": [
+    {
+      "name": "FUJIFILM ASK-300",
+      "status": "ready",
+      "type": "local",
+      "ip": "",
+      "port": "",
+      "description": "FUJIFILM ASK-300 - USB001"
+    },
+    {
+      "name": "FUJIFILM ASK-400",
+      "status": "ready",
+      "type": "local",
+      "ip": "",
+      "port": "",
+      "description": "FUJIFILM ASK-400 - USB012"
+    },
+    {
+      "name": "OneNote for Windows 10",
+      "status": "ready",
+      "type": "local",
+      "ip": "",
+      "port": "",
+      "description": "Microsoft Software Printer Driver - Microsoft.Office.OneNote_16001.14326.22594.0_x64__8wekyb3d8bbwe_microsoft.onenoteim_S-1-5-21-2548624430-2744859175-1516051492-1001"
+    }
+  ]
+}

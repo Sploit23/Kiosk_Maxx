@@ -1,0 +1,41 @@
+{
+  "last_used_printer": "FUJIFILM ASK-400",
+  "user_preferences": {
+    "default_printer": "FUJIFILM ASK-400",
+    "default_format": "10x15",
+    "auto_print_copies": 1,
+    "last_session_date": "2025-08-19T19:31:03.646Z"
+  },
+  "format_mappings": {
+    "10x15": {
+      "printer": "FUJIFILM ASK-400",
+      "java_class": "ImprimirFoto10x15ASK400"
+    },
+    "15x20": {
+      "printer": "FUJIFILM ASK-400 (15x20)",
+      "java_class": "ImprimirFoto15x20ASK400"
+    },
+    "bolas": {
+      "printer": "FUJIFILM ASK-400",
+      "java_class": "ImprimirFotoBolasASK400"
+    }
+  },
+  "available_printers": {
+    "FUJIFILM ASK-400": {
+      "name": "FUJIFILM ASK-400",
+      "devmode_path": "spool_devmodes/FUJIFILM_ASK_400_devmode.bin",
+      "status": "online"
+    },
+    "FUJIFILM ASK-400 (15x20)": {
+      "name": "FUJIFILM ASK-400 (15x20)",
+      "devmode_path": "spool_devmodes/FUJIFILM_ASK_400__15x20__devmode.bin",
+      "status": "online"
+    }
+  },
+  "default_settings": {
+    "orientation": "landscape",
+    "margins": 0,
+    "scale": "fit",
+    "quality": "high"
+  }
+}

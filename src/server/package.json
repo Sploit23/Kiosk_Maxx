@@ -1,0 +1,23 @@
+{
+  "name": "kiosk-server",
+  "version": "1.0.1",
+  "description": "Servidor HTTP para o sistema Kiosk de Fotos",
+  "main": "server-simple.js",
+  "scripts": {
+    "start": "node server-simple.js",
+    "dev": "node server-simple.js --dev",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {},
+  "keywords": [
+    "http-server",
+    "kiosk",
+    "photo-printing",
+    "api"
+  ],
+  "author": "Equipe Kiosk",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

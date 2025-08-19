@@ -1,0 +1,76 @@
+{
+    "sales": [
+        {
+            "id": "28597952-cd42-4ff3-a97b-0632574ca32c",
+            "timestamp": "2025-08-09T20:45:19.977882",
+            "items": [
+                {
+                    "photoName": "10x15_20250808_100808.jpg",
+                    "format": "10x15",
+                    "price": 15,
+                    "quantity": 1
+                }
+            ],
+            "total": 15,
+            "payment_method": "pending"
+        },
+        {
+            "id": "444ef8b6-48aa-4dde-82f6-e08178d6062f",
+            "timestamp": "2025-08-09T20:45:30.890874",
+            "items": [
+                {
+                    "photoName": "10x15_20250808_100808.jpg",
+                    "format": "10x15",
+                    "price": 15,
+                    "quantity": 1
+                },
+                {
+                    "photoName": "15x20_20250808_100808.jpg",
+                    "format": "15x21",
+                    "price": 25,
+                    "quantity": 1
+                }
+            ],
+            "total": 40,
+            "payment_method": "pending"
+        },
+
+        {
+            "id": "9d9d322b-8b02-44e5-82c6-57d326ecdfb8",
+            "timestamp": "2025-08-09T21:41:22.636193",
+            "items": [
+                {
+                    "photoName": "15x20_20250808_100808.jpg",
+                    "format": "15x21",
+                    "price": 25,
+                    "quantity": 1
+                }
+            ],
+            "total": 25,
+            "payment_method": "dinheiro"
+        },
+        {
+            "id": "784482d6-dd01-4e80-981f-3565a4e3f130",
+            "timestamp": "2025-08-09T21:43:09.169156",
+            "items": [
+                {
+                    "photoName": "10x15_20250808_100808.jpg",
+                    "format": "10x15",
+                    "price": 15,
+                    "quantity": 1
+                }
+            ],
+            "total": 15,
+            "payment_method": "dinheiro"
+        },
+
+    ],
+    "daily_totals": {
+        "2025-08-09": 95
+    },
+    "statistics": {
+        "total_sales": 95,
+        "total_photos_sold": 5,
+        "most_popular_format": ""
+    }
+}

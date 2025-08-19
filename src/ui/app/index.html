@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Kiosk de Fotos</title>
+    <link rel="stylesheet" href="/static/css/core.css">
+    <link rel="stylesheet" href="/static/css/carrinho.css">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:*; img-src 'self' data: http://127.0.0.1:* http://localhost:*; font-src 'self' data:;">
+</head>
+<body class="electron-app">
+
+<div id="sidebar">
+    <div class="sidebar-header">
+        <h2>🎄 Fotos Mágicas 🎅</h2>
+    </div>
+    <div id="lista-fotos"></div>
+</div>
+
+<button id="config-button" title="Configurações" onclick="window.location.href='/login'">⚙️</button>
+<button id="fullscreen-button" title="Tela Cheia" onclick="toggleFullscreen()">⛶</button>
+
+<div id="main">
+    <div id="foto-grande">
+        <h2>Selecione uma foto</h2>
+        
+        <!-- Resumo da Impressora -->
+        <div id="printer-summary" class="printer-summary">
+            <div class="summary-header">
+                <h3>🖨️ Resumo da Impressora</h3>
+            </div>
+            <div class="summary-content">
+                <div class="printer-info">
+                    <span class="info-label">Impressora:</span>
+                    <span id="current-printer" class="info-value">Carregando...</span>
+                </div>
+                <div class="format-mappings">
+                    <div class="format-item">
+                        <span class="format-label">10x15:</span>
+                        <span id="printer-10x15" class="printer-name">-</span>
+                    </div>
+                    <div class="format-item">
+                        <span class="format-label">15x20:</span>
+                        <span id="printer-15x20" class="printer-name">-</span>
+                    </div>
+                    <div class="format-item">
+                        <span class="format-label">Bolas:</span>
+                        <span id="printer-bolas" class="printer-name">-</span>
+                    </div>
+                </div>
+                
+                <div class="last-preferences">
+                    <h4>🕒 Última Sessão do Cliente</h4>
+                    <div class="preference-item">
+                        <span class="preference-label">Formato:</span>
+                        <span class="preference-value" id="last-format">Carregando...</span>
+                    </div>
+                    <div class="preference-item">
+                        <span class="preference-label">Impressora:</span>
+                        <span class="preference-value" id="last-printer">Carregando...</span>
+                    </div>
+                    <div class="preference-item">
+                        <span class="preference-label">Papel:</span>
+                        <span class="preference-value" id="last-paper">Carregando...</span>
+                    </div>
+                    <div class="preference-item">
+                        <span class="preference-label">Data:</span>
+                        <span class="preference-value" id="last-session-date">Carregando...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Painel de Controle ASK-300 -->
+        <div id="ask300-panel" class="ask300-panel" style="display: none;">
+            <div class="panel-header">
+                <h3>🖨️ Controle ASK-300</h3>
+                <button id="toggle-ask300" class="btn-toggle">Mostrar/Ocultar</button>
+            </div>
+            <div class="panel-content">
+                <div id="paper-size-container"></div>
+                <div id="test-buttons-container"></div>
+                <div class="print-actions">
+                    <button id="print-current-photo" class="btn-print" disabled>
+                        📸 Imprimir Foto Atual
+                    </button>
+                    <div class="copies-control">
+                        <label for="copies-input">Cópias:</label>
+                        <input type="number" id="copies-input" min="1" max="10" value="1">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="miniaturas"></div>
+</div>
+
+<!-- Notificação do Carrinho -->
+<div id="cart-notification" class="cart-notification">
+    <div class="notification-content"></div>
+</div>
+
+<!-- Rodapé removido - versão disponível apenas na área administrativa -->
+
+<!-- Scripts em ordem de dependência -->
+<script src="/static/js/config-manager.js"></script>
+<script src="/static/js/printer-summary.js"></script>
+
+<script src="/app/js/ask300-kiosk-integration.js"></script>
+<script src="/app/js/printer.js"></script>
+<script src="/static/js/cart.js"></script>
+<script src="/static/js/app.js"></script>
+<script src="/static/js/updater.js"></script>
+
+<!-- Electron Integration -->
+<script>
+    if (window.electronAPI) {
+        console.log('Rodando no Electron');
+        
+        window.electronAPI.getAppVersion().then(version => {
+            console.log('Versão do app:', version);
+            const versionElement = document.getElementById('app-version');
+            if (versionElement) {
+                versionElement.textContent = `v${version}`;
+            }
+        });
+    }
+</script>
+
+</body>
+</html>

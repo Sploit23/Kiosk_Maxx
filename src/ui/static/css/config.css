@@ -1,0 +1,584 @@
+/* CSS para config.html - Layout Full Screen SEM FUNDO CINZA */
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: white;                /* MUDANÇA: fundo branco em vez de cinza */
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* Estilos específicos para preview de imagem */
+.preview-image-container {
+    background: #f0f0f0 !important;
+    padding: 20px !important;
+    border-radius: 8px !important;
+    border: 2px dashed #ccc !important;
+    text-align: center !important;
+}
+
+.preview-image-container img {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+    border: 1px solid #ddd !important;
+    background: white !important;
+    padding: 0 !important;
+    max-width: 90% !important;
+    max-height: 600px !important;
+    object-fit: contain !important;
+}
+
+.config-container {
+    display: flex;
+    min-height: 100vh;
+    width: 100vw;
+    position: relative;
+    background: white;                /* MUDANÇA: fundo branco em vez de cinza */
+}
+
+/* Menu Lateral - FIXO À ESQUERDA */
+.admin-sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: #2c3e50;
+    color: white;
+    padding: 20px 0;
+    box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    z-index: 1000;
+    overflow-y: auto;
+}
+
+.sidebar-header {
+    text-align: center;
+    padding: 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 20px;
+}
+
+.sidebar-title {
+    margin: 0;
+    font-size: 1.5rem;
+    color: #fff;
+}
+
+.sidebar-subtitle {
+    margin: 5px 0 0 0;
+    color: #bdc3c7;
+    font-size: 0.9rem;
+}
+
+/* Itens do Menu */
+.menu-item {
+    display: flex;
+    align-items: center;
+    padding: 15px 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-left: 3px solid transparent;
+}
+
+.menu-item:hover {
+    background: rgba(52, 152, 219, 0.2);
+    border-left-color: #3498db;
+}
+
+.menu-item.active {
+    background: rgba(52, 152, 219, 0.3);
+    border-left-color: #3498db;
+}
+
+.menu-icon {
+    margin-right: 10px;
+    font-size: 1.2rem;
+}
+
+.menu-text {
+    font-size: 0.95rem;
+}
+
+/* Área de Conteúdo - OCUPA TODA A LARGURA E ALTURA */
+.admin-content {
+    margin-left: 280px;
+    width: calc(100vw - 280px);
+    min-height: 100vh;                /* MUDANÇA: altura mínima em vez de fixa */
+    background: white;                /* MUDANÇA: fundo branco */
+    position: relative;
+    overflow-y: auto;                 /* MUDANÇA: permite scroll vertical */
+    overflow-x: hidden;               /* MUDANÇA: evita scroll horizontal */
+}
+
+/* Seções - OCUPAM TODA A TELA SEM MARGEM */
+.config-section {
+    display: none !important;
+    background: white;
+    margin: 0;                        /* SEM margem */
+    padding: 30px;
+    min-height: calc(100vh - 60px);   /* MUDANÇA: altura mínima para permitir scroll */
+    width: 100%;
+    box-sizing: border-box;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    position: relative;               /* MUDANÇA: posição relativa em vez de absoluta */
+    z-index: 10;                      /* MUDANÇA: z-index maior para evitar sobreposição */
+}
+
+.config-section.active {
+    display: block !important;
+    animation: fadeIn 0.3s ease;
+    position: relative;
+    z-index: 10;
+    background: white;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.config-section h2 {
+    margin: 0 0 25px 0;
+    color: #2c3e50;
+    font-size: 1.8rem;
+    border-bottom: 2px solid #3498db;
+    padding-bottom: 10px;
+}
+
+.config-section h3 {
+    color: #34495e;
+    margin: 25px 0 15px 0;
+    font-size: 1.3rem;
+}
+
+/* Dashboard Stats */
+.sales-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+    width: 100%;
+}
+
+.stat-card {
+    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+    color: white;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: center;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    transition: transform 0.2s ease;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+}
+
+.stat-card h4 {
+    margin: 0 0 10px 0;
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.stat-value {
+    font-size: 1.8rem;
+    font-weight: bold;
+    margin: 0;
+}
+
+.stat-card small {
+    opacity: 0.8;
+    font-size: 0.8rem;
+}
+
+/* Top Photos List */
+.top-photos-list {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
+    margin-bottom: 20px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Configuração de Imagens */
+.config-group {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    border: 1px solid #e9ecef;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.config-group label {
+    display: block;
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 10px;
+    font-size: 1rem;
+}
+
+.config-help {
+    background: #e8f4fd;
+    padding: 20px;
+    border-radius: 6px;
+    border-left: 4px solid #3498db;
+    margin-top: 20px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.config-help h4 {
+    margin: 0 0 10px 0;
+    color: #2c3e50;
+}
+
+.config-help ul {
+    margin: 10px 0;
+    padding-left: 20px;
+}
+
+.config-help li {
+    margin-bottom: 5px;
+    color: #34495e;
+}
+
+.folder-info {
+    background: white;
+    padding: 15px;
+    border-radius: 4px;
+    border: 1px solid #dee2e6;
+    margin-bottom: 10px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.folder-path {
+    font-family: 'Courier New', monospace;
+    background: #e9ecef;
+    padding: 8px;
+    border-radius: 3px;
+    margin: 0 0 8px 0;
+    word-break: break-all;
+    font-size: 0.85rem;
+}
+
+.folder-status {
+    margin: 0;
+    padding: 6px 10px;
+    border-radius: 3px;
+    font-weight: 500;
+    font-size: 0.85rem;
+}
+
+.folder-status.success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.folder-status.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.folder-status.warning {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+/* Estilos para pastas de data */
+.date-folder {
+    display: inline-block;
+    background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+    color: #1565c0;
+    padding: 4px 8px;
+    margin: 2px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid #90caf9;
+}
+
+.available-folders {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 6px;
+    border: 1px solid #dee2e6;
+    line-height: 1.6;
+}
+
+.folder-path {
+    font-family: 'Courier New', monospace;
+    background-color: #f1f3f4;
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #dadce0;
+    word-break: break-all;
+    font-size: 12px;
+    margin: 5px 0;
+}
+
+.folder-info {
+    margin-bottom: 15px;
+}
+
+.available-folders-old {
+    background: white;
+    padding: 15px;
+    border-radius: 4px;
+    border: 1px solid #dee2e6;
+    min-height: 80px;
+    max-height: 150px;
+    overflow-y: auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Seção de Preços */
+.pricing-section {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 20px;
+    width: 100%;
+}
+
+.price-format {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
+}
+
+.price-format label {
+    display: block;
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 8px;
+}
+
+.price-format input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    box-sizing: border-box;
+}
+
+/* Seção de Impressoras */
+.printer-section {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 5px;
+}
+
+.form-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    box-sizing: border-box;
+}
+
+.info-text {
+    color: #6c757d;
+    font-size: 0.9rem;
+    margin-bottom: 15px;
+}
+
+/* Botões */
+.btn-primary, .btn-secondary, .btn-danger, .btn-success {
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    margin: 5px;
+}
+
+.btn-primary {
+    background: #3498db;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #2980b9;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #5a6268;
+}
+
+.btn-danger {
+    background: #e74c3c;
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #c0392b;
+}
+
+.btn-success {
+    background: #27ae60;
+    color: white;
+}
+
+.btn-success:hover {
+    background: #229954;
+}
+
+/* Mensagens (melhoradas) */
+.success-message, .error-message {
+    padding: 15px 20px;
+    border-radius: 6px;
+    margin: 20px 0;
+    display: none;
+    position: relative;
+    z-index: 1000;
+    font-weight: 500;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    transition: opacity 0.3s ease-in-out;
+    opacity: 0;
+}
+
+.success-message {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+    border-left: 4px solid #28a745;
+}
+
+.error-message {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    border-left: 4px solid #dc3545;
+}
+
+/* Estilos para grupos de botões */
+.button-group {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.button-group .btn-primary,
+.button-group .btn-success {
+    flex: 1;
+    min-width: 150px;
+}
+
+/* Estilos para botão de sucesso */
+.btn-success {
+    background: linear-gradient(135deg, #28a745, #20c997);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(40, 167, 69, 0.2);
+}
+
+.btn-success:hover {
+    background: linear-gradient(135deg, #218838, #1ea085);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.3);
+}
+
+.btn-success:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(40, 167, 69, 0.2);
+}
+
+.btn-success:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Animação de salvamento */
+.saving {
+    position: relative;
+    overflow: hidden;
+}
+
+.saving::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+    animation: saving-shimmer 1.5s infinite;
+}
+
+@keyframes saving-shimmer {
+    0% { left: -100%; }
+    100% { left: 100%; }
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .admin-sidebar {
+        position: relative;
+        width: 100%;
+        height: auto;
+    }
+    
+    .admin-content {
+        margin-left: 0;
+        width: 100%;
+    }
+    
+    .config-container {
+        flex-direction: column;
+    }
+    
+    .sales-stats, .pricing-section {
+        grid-template-columns: 1fr;
+    }
+    
+    .config-section {
+        padding: 20px;
+        position: relative;
+    }
+}

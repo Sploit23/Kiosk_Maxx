@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Administração - Kiosk de Fotos</title>
+    <link rel="stylesheet" href="/static/css/core.css">
+    <link rel="stylesheet" href="/static/css/config.css">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:*; img-src 'self' data: http://127.0.0.1:* http://localhost:*; font-src 'self' data:;">
+    <style>
+        .admin-container {
+            display: flex;
+            min-height: 100vh;
+            background: linear-gradient(135deg, var(--christmas-red), var(--christmas-green));
+        }
+        
+        .admin-sidebar {
+            width: 280px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            padding: 0;
+            overflow-y: auto;
+        }
+        
+        .sidebar-header {
+            background: var(--christmas-red);
+            color: white;
+            padding: 25px 20px;
+            text-align: center;
+            border-bottom: 3px solid var(--christmas-gold);
+        }
+        
+        .sidebar-title {
+            font-size: 1.8rem;
+            margin: 0 0 5px 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .sidebar-subtitle {
+            margin: 0;
+            opacity: 0.9;
+            font-size: 0.9rem;
+        }
+        
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+        
+        .menu-item:hover {
+            background: rgba(var(--christmas-red-rgb), 0.1);
+            transform: translateX(5px);
+        }
+        
+        .menu-item.active {
+            background: var(--christmas-red);
+            color: white;
+            border-left: 4px solid var(--christmas-gold);
+        }
+        
+        .menu-icon {
+            font-size: 1.2rem;
+            margin-right: 12px;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .menu-text {
+            font-weight: 500;
+        }
+        
+        .sidebar-footer {
+            padding: 20px;
+            border-top: 1px solid rgba(0,0,0,0.1);
+            margin-top: auto;
+        }
+        
+        .admin-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+        
+        .content-header {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .content-header h1 {
+            color: var(--christmas-red);
+            font-size: 2.2rem;
+            margin: 0 0 10px 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .content-header p {
+            color: #666;
+            margin: 0;
+            font-size: 1.1rem;
+        }
+        
+        .config-section {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            display: none;
+        }
+        
+        .config-section.active {
+            display: block;
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        .config-section h2 {
+            color: var(--christmas-red);
+            margin: 0 0 25px 0;
+            font-size: 1.8rem;
+            border-bottom: 2px solid var(--christmas-gold);
+            padding-bottom: 10px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #fff, #f8f9fa);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--christmas-gold);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        
+        .stat-card h4 {
+            color: var(--christmas-red);
+            margin: 0 0 10px 0;
+            font-size: 1rem;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--christmas-green);
+            margin: 10px 0;
+        }
+        
+        .stat-card small {
+            color: #666;
+            font-size: 0.85rem;
+        }
+        
+        .btn-primary, .btn-secondary, .btn-danger {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+        
+        .btn-primary {
+            background: var(--christmas-red);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--dark-red);
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background: var(--christmas-green);
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: var(--pine-green);
+            transform: translateY(-2px);
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+        }
+        
+        .success-message, .error-message {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @media (max-width: 768px) {
+            .admin-container {
+                flex-direction: column;
+            }
+            
+            .admin-sidebar {
+                width: 100%;
+                height: auto;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body class="electron-app">
+    <div class="admin-container">
+        <!-- Menu Lateral -->
+        <div class="admin-sidebar">
+            <div class="sidebar-header">
+                <h1 class="sidebar-title">🎄 Admin Panel</h1>
+                <p class="sidebar-subtitle">Kiosk de Fotos</p>
+            </div>
+            
+            <div class="menu-item active" data-section="dashboard">
+                <span class="menu-icon">📊</span>
+                <span class="menu-text">Dashboard</span>
+            </div>
+            
+            <div class="menu-item" data-section="images">
+                <span class="menu-icon">📁</span>
+                <span class="menu-text">Imagens</span>
+            </div>
+            
+            <div class="menu-item" data-section="pricing">
+                <span class="menu-icon">💰</span>
+                <span class="menu-text">Preços</span>
+            </div>
+            
+            <div class="menu-item" data-section="printer-management">
+                <span class="menu-icon">🖨️</span>
+                <span class="menu-text">Impressoras</span>
+            </div>
+            
+
+            
+            <div class="menu-item" data-section="system">
+                <span class="menu-icon">⚙️</span>
+                <span class="menu-text">Sistema</span>
+            </div>
+            
+            <div class="sidebar-footer">
+                <a href="/" class="btn-secondary" style="width: 100%; margin-bottom: 10px; display: block; text-decoration: none; box-sizing: border-box;">🏠 Voltar ao Kiosk</a>
+                <button id="logout-button" class="btn-danger" style="width: 100%;">🔓 Sair</button>
+            </div>
+        </div>
+        
+        <!-- Conteúdo Principal -->
+        <div class="admin-content">
+            <div class="content-header">
+                <h1>🎅 Painel Administrativo</h1>
+                <p>Controle completo do seu Kiosk de Fotos</p>
+            </div>
+            
+            <!-- Mensagens -->
+            <div id="success-message" class="success-message"></div>
+            <div id="error-message" class="error-message"></div>
+            
+            <!-- Dashboard -->
+            <div class="config-section active" id="dashboard-section">
+                <h2>📊 Dashboard Financeiro</h2>
+                
+                <!-- Estatísticas Principais -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h4>💰 Total de Vendas</h4>
+                        <p class="stat-value" id="total-sales">R$ 0,00</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>📸 Fotos Vendidas</h4>
+                        <p class="stat-value" id="total-photos">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>📅 Vendas Hoje</h4>
+                        <p class="stat-value" id="today-sales">R$ 0,00</p>
+                    </div>
+                    <div class="stat-card">
+                        <h4>📊 Ticket Médio</h4>
+                        <p class="stat-value" id="average-ticket">R$ 0,00</p>
+                    </div>
+                </div>
+                
+                <!-- Vendas por Método de Pagamento -->
+                <h3 style="color: var(--christmas-red); margin: 30px 0 15px 0;">💳 Vendas por Método de Pagamento</h3>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h4>💵 Dinheiro</h4>
+                        <p class="stat-value" id="cash-sales">R$ 0,00</p>
+                        <small id="cash-count">0 vendas</small>
+                    </div>
+                    <div class="stat-card">
+                        <h4>💳 Cartão</h4>
+                        <p class="stat-value" id="card-sales">R$ 0,00</p>
+                        <small id="card-count">0 vendas</small>
+                    </div>
+                    <div class="stat-card">
+                        <h4>⏳ Pendente</h4>
+                        <p class="stat-value" id="pending-sales">R$ 0,00</p>
+                        <small id="pending-count">0 vendas</small>
+                    </div>
+                </div>
+                
+                <!-- Impressões por Formato -->
+                <h3 style="color: var(--christmas-red); margin: 30px 0 15px 0;">📏 Impressões por Formato</h3>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h4>📷 10x15</h4>
+                        <p class="stat-value" id="format-10x15">0 fotos</p>
+                        <small id="format-10x15-revenue">R$ 0,00</small>
+                    </div>
+                    <div class="stat-card">
+                        <h4>📷 15x21</h4>
+                        <p class="stat-value" id="format-15x21">0 fotos</p>
+                        <small id="format-15x21-revenue">R$ 0,00</small>
+                    </div>
+                    <div class="stat-card">
+                        <h4>📷 20x30</h4>
+                        <p class="stat-value" id="format-20x30">0 fotos</p>
+                        <small id="format-20x30-revenue">R$ 0,00</small>
+                    </div>
+                </div>
+                
+                <button id="refresh-sales-button" class="btn-primary" style="margin-top: 20px;">🔄 Atualizar Dashboard</button>
+            </div>
+            
+            <!-- Outras seções serão carregadas dinamicamente -->
+            <div class="config-section" id="images-section">
+                <h2>📁 Configuração de Imagens</h2>
+                <p>Configurações de imagens serão carregadas aqui...</p>
+            </div>
+            
+            <div class="config-section" id="pricing-section">
+                <h2>💰 Configuração de Preços</h2>
+                <p>Configurações de preços serão carregadas aqui...</p>
+            </div>
+            
+            <div class="config-section" id="printer-management-section">
+                <h2>🖨️ Configuração de Impressoras</h2>
+                <p>Configurações de impressoras serão carregadas aqui...</p>
+            </div>
+            
+
+            
+            <div class="config-section" id="system-section">
+                <h2>⚙️ Configurações do Sistema</h2>
+                <p>Configurações do sistema serão carregadas aqui...</p>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>

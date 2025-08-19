@@ -1,0 +1,10 @@
+{
+    "default_price": 15,
+    "formats": {
+        "10x15": 15,
+        "15x21": 25,
+        "20x30": 35
+    },
+    "currency": "BRL",
+    "tax_rate": 0
+}

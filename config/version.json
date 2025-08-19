@@ -1,0 +1,31 @@
+{
+    "version": "1.0.1",
+    "build_date": "2025-01-09",
+    "build_number": 1736434800,
+    "update_url": "https://raw.githubusercontent.com/Sploit23/kiosk-updates/main",
+    "changelog": [
+        {
+            "version": "1.0.1",
+            "date": "2025-01-09",
+            "changes": [
+                "Executável standalone criado",
+                "Estrutura modular reorganizada",
+                "Interface responsiva corrigida (F11)",
+                "Sistema de configurações centralizado",
+                "Módulos de impressão e atualização integrados",
+                "Documentação profissional completa"
+            ]
+        },
+        {
+            "version": "1.0.0",
+            "date": "2023-12-15",
+            "changes": [
+                "Versão inicial do quiosque de fotos",
+                "Interface com tema de Natal",
+                "Visualização e impressão básica de fotos"
+            ]
+        }
+    ],
+    "min_compatible_version": "1.0.0",
+    "required_update": false
+}

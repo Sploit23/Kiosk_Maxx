@@ -1,0 +1,12 @@
+{
+    "current_theme": "christmas",
+    "available_themes": [
+        {
+            "name": "christmas",
+            "label": "Natal",
+            "description": "Tema festivo de Natal com efeitos de neve",
+            "author": "Equipe Kiosk",
+            "version": "1.0"
+        }
+    ]
+}
