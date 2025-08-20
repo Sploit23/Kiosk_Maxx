@@ -3,13 +3,20 @@
   "version": "2.0.0",
   "description": "Aplicativo Desktop de Kiosk de Fotos com Auto-Update",
   "main": "src/electron/main.js",
-  "homepage": "https://github.com/seu-usuario/photo-kiosk-desktop",
+  "homepage": "https://github.com/Sploit23/kiosk-updates",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sploit23/kiosk-updates.git"
+  },
   "scripts": {
     "start": "electron src/electron/main.js",
-    "dev": "electron src/electron/main.js --enable-logging",
+    "dev": "electron src/electron/main.js --enable-logging --dev",
     "build": "npx electron-builder --win --publish=never",
+    "build-and-publish": "npx electron-builder --win --publish=always",
     "pack": "npx electron-builder --dir",
-    "setup": "npm install"
+    "setup": "npm install",
+    "release": "npx electron-builder --win --publish=always",
+    "dist": "npx electron-builder --win"
   },
   "keywords": [
     "photo",
@@ -39,7 +46,23 @@
       "node_modules/**/*"
     ],
     "win": {
-      "target": "portable"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "publisherName": "Photo Kiosk System"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Sploit23",
+      "repo": "kiosk-updates",
+      "private": false
     }
   },
   "dependencies": {

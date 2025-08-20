@@ -4,7 +4,18 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 // Auto-updater configuration
-autoUpdater.checkForUpdatesAndNotify();
+if (!isDev) {
+    autoUpdater.setFeedURL({
+        provider: 'github',
+        owner: 'Sploit23',
+        repo: 'kiosk-updates'
+    });
+    
+    // Verificar atualizações após 5 segundos do app iniciar
+    setTimeout(() => {
+        autoUpdater.checkForUpdatesAndNotify();
+    }, 5000);
+}
 
 // Global variables
 let mainWindow;
@@ -14,30 +25,37 @@ const SERVER_PORT = 5000;
 
 // Auto-updater setup
 function setupAutoUpdater() {
+    if (isDev) {
+        console.log('Auto-updater desabilitado em modo desenvolvimento');
+        return;
+    }
+
     autoUpdater.on('checking-for-update', () => {
-        console.log('Verificando atualizações...');
+        console.log('🔍 Verificando atualizações...');
     });
 
     autoUpdater.on('update-available', (info) => {
-        console.log('Atualização disponível.');
+        console.log('✅ Atualização disponível:', info.version);
         if (mainWindow) {
             mainWindow.webContents.send('update-available', info);
         }
     });
 
     autoUpdater.on('update-not-available', (info) => {
-        console.log('Atualização não disponível.');
+        console.log('ℹ️ Sistema atualizado - versão atual:', info.version);
     });
 
     autoUpdater.on('error', (err) => {
-        console.log('Erro no auto-updater: ' + err);
+        console.error('❌ Erro no auto-updater:', err.message);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-error', err.message);
+        }
     });
 
     autoUpdater.on('download-progress', (progressObj) => {
-        let log_message = "Velocidade de download: " + progressObj.bytesPerSecond;
-        log_message = log_message + ' - Baixado ' + progressObj.percent + '%';
-        log_message = log_message + ' (' + progressObj.transferred + "/" + progressObj.total + ')';
-        console.log(log_message);
+        const percent = Math.round(progressObj.percent);
+        const speed = Math.round(progressObj.bytesPerSecond / 1024);
+        console.log(`📥 Download: ${percent}% - ${speed} KB/s`);
         
         if (mainWindow) {
             mainWindow.webContents.send('download-progress', progressObj);
@@ -45,10 +63,22 @@ function setupAutoUpdater() {
     });
 
     autoUpdater.on('update-downloaded', (info) => {
-        console.log('Atualização baixada');
+        console.log('✅ Atualização baixada e pronta para instalar');
         if (mainWindow) {
             mainWindow.webContents.send('update-downloaded', info);
         }
+        
+        // Mostrar diálogo para reiniciar
+        dialog.showMessageBox(mainWindow, {
+            type: 'info',
+            title: 'Atualização Pronta',
+            message: 'A atualização foi baixada. O aplicativo será reiniciado para aplicar as mudanças.',
+            buttons: ['Reiniciar Agora', 'Mais Tarde']
+        }).then((result) => {
+            if (result.response === 0) {
+                autoUpdater.quitAndInstall();
+            }
+        });
     });
 }
 

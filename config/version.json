@@ -1,9 +1,22 @@
 {
-    "version": "1.0.1",
+    "version": "2.0.0",
     "build_date": "2025-01-09",
     "build_number": 1736434800,
-    "update_url": "https://raw.githubusercontent.com/Sploit23/kiosk-updates/main",
+    "update_url": "https://api.github.com/repos/Sploit23/kiosk-updates/releases/latest",
     "changelog": [
+        {
+            "version": "2.0.0",
+            "date": "2025-01-09",
+            "changes": [
+                "Migração completa para Electron",
+                "Sistema de auto-update integrado",
+                "Interface moderna com tema natalino",
+                "Otimizações para tela touch",
+                "Sistema de carrinho aprimorado",
+                "Detecção automática de impressoras",
+                "Impressão nativa do Windows"
+            ]
+        },
         {
             "version": "1.0.1",
             "date": "2025-01-09",
