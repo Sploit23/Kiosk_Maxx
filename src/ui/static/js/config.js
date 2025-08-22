@@ -921,7 +921,12 @@ function showError(message) {
 // Função para selecionar pasta de imagens (Electron)
 async function selectImageFolder() {
     try {
-        if (typeof window.electronAPI !== 'undefined') {
+        console.log('Verificando electronAPI:', window.electronAPI);
+        console.log('Tipo de window.electronAPI:', typeof window.electronAPI);
+        console.log('window.electronAPI?.selectDirectory existe?', window.electronAPI?.selectDirectory !== undefined);
+        
+        // Verificação mais flexível para detectar o electronAPI
+        if (window.electronAPI && typeof window.electronAPI.selectDirectory === 'function') {
             const result = await window.electronAPI.selectDirectory();
             if (result && !result.canceled && result.filePaths.length > 0) {
                 const selectedPath = result.filePaths[0];

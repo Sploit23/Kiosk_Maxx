@@ -1,7 +1,14 @@
 const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
+
+// Global variables
+let mainWindow;
+let serverProcess;
+const isDev = process.argv.includes('--dev');
+const SERVER_PORT = 5000;
 
 // Auto-updater configuration
 if (!isDev) {
@@ -16,12 +23,6 @@ if (!isDev) {
         autoUpdater.checkForUpdatesAndNotify();
     }, 5000);
 }
-
-// Global variables
-let mainWindow;
-let serverProcess;
-const isDev = process.argv.includes('--dev');
-const SERVER_PORT = 5000;
 
 // Auto-updater setup
 function setupAutoUpdater() {
@@ -84,23 +85,52 @@ function setupAutoUpdater() {
 
 // Start internal server
 function startServer() {
-    const serverPath = path.join(__dirname, '../server/server-simple.js');
+    // Detectar se o app está empacotado
+    const isPackaged = app.isPackaged;
+    let serverPath;
+    
+    if (isPackaged) {
+        // Em produção, o servidor está dentro do app.asar
+        serverPath = path.join(process.resourcesPath, 'app.asar', 'src', 'server', 'server-simple.js');
+    } else {
+        // Em desenvolvimento, usar caminho relativo
+        serverPath = path.join(__dirname, '../server/server-simple.js');
+    }
     
     console.log('Iniciando servidor interno...');
+    console.log('App empacotado:', isPackaged);
     console.log('Caminho do servidor:', serverPath);
     
-    serverProcess = spawn('node', [serverPath], {
-        stdio: 'inherit',
-        cwd: path.dirname(serverPath)
-    });
+    try {
+        // Importar e executar o servidor diretamente no processo principal
+        require(serverPath);
+        console.log('✅ Servidor iniciado com sucesso!');
+    } catch (error) {
+        console.error('❌ Erro ao iniciar servidor:', error);
+        
+        // Fallback: tentar com spawn se require falhar
+        console.log('🔄 Tentando método alternativo...');
+        
+        let nodeExecutable;
+        if (isPackaged) {
+            nodeExecutable = process.execPath.replace('Photo Kiosk Desktop.exe', 'node.exe');
+        } else {
+            nodeExecutable = 'node';
+        }
+        
+        serverProcess = spawn(nodeExecutable, [serverPath], {
+            stdio: 'inherit',
+            cwd: path.dirname(serverPath)
+        });
 
-    serverProcess.on('error', (error) => {
-        console.error('Erro ao iniciar servidor:', error);
-    });
+        serverProcess.on('error', (error) => {
+            console.error('Erro no fallback:', error);
+        });
 
-    serverProcess.on('exit', (code) => {
-        console.log(`Servidor encerrado com código: ${code}`);
-    });
+        serverProcess.on('exit', (code) => {
+            console.log(`Servidor encerrado com código: ${code}`);
+        });
+    }
 }
 
 // Create main window
@@ -143,6 +173,65 @@ ipcMain.handle('compile-java-scripts', async () => {
 });
 
 function createWindow() {
+    // Detectar se o app está empacotado
+    const isPackaged = app.isPackaged;
+    let preloadPath, iconPath;
+    
+    if (isPackaged) {
+        preloadPath = path.join(process.resourcesPath, 'app.asar', 'src', 'electron', 'preload.js');
+        iconPath = path.join(process.resourcesPath, 'app.asar', 'src', 'ui', 'static', 'images', 'icon.png');
+        
+        // Verificar se o arquivo preload.js existe
+        const fs = require('fs');
+        if (fs.existsSync(preloadPath)) {
+            console.log('✅ Arquivo preload.js encontrado:', preloadPath);
+        } else {
+            console.error('❌ Arquivo preload.js NÃO encontrado:', preloadPath);
+            
+            // Tentar encontrar o arquivo em caminhos alternativos
+            const alternativePaths = [
+                path.join(process.resourcesPath, 'app', 'src', 'electron', 'preload.js'),
+                path.join(app.getAppPath(), 'src', 'electron', 'preload.js'),
+                path.join(__dirname, 'preload.js')
+            ];
+            
+            for (const altPath of alternativePaths) {
+                if (fs.existsSync(altPath)) {
+                    console.log('✅ Arquivo preload.js encontrado em caminho alternativo:', altPath);
+                    preloadPath = altPath;
+                    break;
+                }
+            }
+        }
+    } else {
+        preloadPath = path.join(__dirname, 'preload.js');
+        iconPath = path.join(__dirname, '../ui/static/images/icon.png');
+    }
+    
+    // Verificar e logar o caminho do preload
+    console.log('Caminho final do preload:', preloadPath);
+    console.log('Arquivo preload existe?', fs.existsSync(preloadPath));
+    
+    if (!fs.existsSync(preloadPath)) {
+        console.error('❌ ERRO CRÍTICO: Arquivo preload.js não encontrado!');
+        console.log('Tentando caminhos alternativos...');
+        
+        const emergencyPaths = [
+            path.join(__dirname, 'preload.js'),
+            path.join(process.cwd(), 'src', 'electron', 'preload.js'),
+            path.join(app.getAppPath(), 'preload.js')
+        ];
+        
+        for (const emergencyPath of emergencyPaths) {
+            console.log('Testando caminho de emergência:', emergencyPath);
+            if (fs.existsSync(emergencyPath)) {
+                console.log('✅ Encontrado em caminho de emergência!');
+                preloadPath = emergencyPath;
+                break;
+            }
+        }
+    }
+    
     // Create the browser window
     mainWindow = new BrowserWindow({
         width: 1200,
@@ -153,10 +242,11 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             enableRemoteModule: false,
-            preload: path.join(__dirname, 'preload.js'),
-            webSecurity: true
+            preload: preloadPath,
+            webSecurity: true,
+            sandbox: false // Desabilitar sandbox para garantir que o preload funcione
         },
-        icon: path.join(__dirname, '../ui/static/images/icon.png'),
+        icon: iconPath,
         show: false,
         titleBarStyle: 'default',
         autoHideMenuBar: !isDev
