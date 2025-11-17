@@ -5,12 +5,35 @@ const url = require('url');
 const querystring = require('querystring');
 const { spawn, exec } = require('child_process');
 const crypto = require('crypto');
+const os = require('os');
 
 // Configurações
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-// Função removida - agora usando apenas Electron
+// --- LÓGICA DE CAMINHOS REFINADA ---
+
+// Obter o caminho 'userData' de forma segura. Como o servidor roda no processo principal do Electron,
+// podemos acessar o módulo 'app' diretamente.
+const electronApp = require('electron').app;
+const isPackaged = electronApp.isPackaged || process.env.KIOSK_FORCE_PACKAGED === '1';
+const userDataPath = electronApp.getPath('userData');
+
+// Função única e confiável para obter o caminho de um arquivo de configuração.
+// Todos os arquivos de configuração DEVEM estar em 'userDataPath/config'.
+function getConfigPath(filename) {
+    // Garante que subdiretórios como 'temas' sejam resolvidos corretamente.
+    return path.join(userDataPath, 'config', filename);
+}
+
+console.log(`[INFO] Usando diretório de dados do usuário: ${userDataPath}`);
+
+// --- FIM DA LÓGICA DE CAMINHOS ---
+
+function getResourcePath(relativePath) {
+    if (path.isAbsolute(relativePath)) return relativePath;
+    return path.join(__dirname, relativePath);
+}
 
 // Carregar configurações
 let config = {};
@@ -21,41 +44,27 @@ let fileWatcher = null;
 let connectedClients = new Set();
 let lastImagesList = {};
 
-function launchKioskMode() {
-    const url = `http://localhost:${PORT}`;
-    console.log('🖥️ Abrindo interface em modo kiosk...');
-    
-    // Tenta diferentes navegadores em ordem de preferência
-    const browsers = [
-        `start chrome --kiosk --disable-web-security --disable-features=TranslateUI --disable-extensions --no-first-run --disable-infobars "${url}"`,
-        `start msedge --kiosk --disable-web-security --disable-features=TranslateUI "${url}"`,
-        `start firefox --kiosk "${url}"`
-    ];
-    
-    // Executa o primeiro navegador disponível
-    exec(browsers[0], (error) => {
-        if (error) {
-            console.log('⚠️ Chrome não encontrado, tentando Edge...');
-            exec(browsers[1], (error2) => {
-                if (error2) {
-                    console.log('⚠️ Edge não encontrado, tentando Firefox...');
-                    exec(browsers[2]);
-                }
-            });
-        }
-    });
-}
-
 // Função para carregar arquivos JSON
 function loadJSON(filePath, defaultValue = {}) {
     try {
-        const fullPath = path.resolve(filePath);
+        let fullPath = filePath;
+        if (!path.isAbsolute(fullPath)) {
+            fullPath = getResourcePath(fullPath);
+        }
         if (fs.existsSync(fullPath)) {
             const data = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
             return data;
-        } else {
-            return defaultValue;
         }
+        const userConfigRoot = path.join(userDataPath, 'config');
+        if (fullPath.startsWith(userConfigRoot)) {
+            const rel = path.relative(userConfigRoot, fullPath);
+            const fallback = getResourcePath(path.join('../../config', rel));
+            if (fs.existsSync(fallback)) {
+                const data = JSON.parse(fs.readFileSync(fallback, 'utf8'));
+                return data;
+            }
+        }
+        return defaultValue;
     } catch (error) {
         console.error(`❌ Erro ao carregar ${filePath}:`, error.message);
         return defaultValue;
@@ -65,49 +74,88 @@ function loadJSON(filePath, defaultValue = {}) {
 // Função para salvar JSON
 function saveJSON(filePath, data) {
     try {
-        const dir = path.dirname(filePath);
+        const fullPath = path.resolve(filePath);
+        const dir = path.dirname(fullPath);
+        
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+        
+        const jsonContent = JSON.stringify(data, null, 2);
+        fs.writeFileSync(fullPath, jsonContent);
+        
+        console.log(`✅ Arquivo JSON salvo com sucesso: ${fullPath}`);
         return true;
     } catch (error) {
-        console.error(`Erro ao salvar ${filePath}:`, error.message);
+        console.error(`❌ Erro ao salvar ${filePath}:`, error.message);
+        console.error(`❌ Stack trace:`, error.stack);
         return false;
     }
 }
 
 // Carregar configurações iniciais
-config.settings = loadJSON(path.join(__dirname, '../../config/settings.json'), { admin_password: '869407' });
-config.pricing = loadJSON(path.join(__dirname, '../../config/pricing.json'), { formats: { '10x15': 15.00, '15x21': 25.00 } });
-config.version = loadJSON(path.join(__dirname, '../../config/version.json'), { version: '2.0.0' });
-config.image_settings = loadJSON(path.join(__dirname, '../../config/image_settings.json'), { base_path: path.join(__dirname, '../../imagens'), allowed_extensions: ['.jpg', '.jpeg', '.png', '.gif'] });
+console.log('🔧 Carregando configurações do sistema...');
+config.settings = loadJSON(getConfigPath('settings.json'), { admin_password: '869407' });
+config.pricing = loadJSON(getConfigPath('pricing.json'), { formats: { '10x15': 15.00, '15x21': 25.00 } });
+config.version = loadJSON(getConfigPath('version.json'), { version: '2.0.0' });
+config.image_settings = loadJSON(getConfigPath('image_settings.json'), { base_path: '', allowed_extensions: ['.jpg', '.jpeg', '.png', '.gif'] });
+
+console.log(`[INFO] Pasta de imagens configurada: ${config.image_settings.base_path}`);
+if (!config.image_settings.base_path || !fs.existsSync(config.image_settings.base_path)) {
+    console.warn(`[AVISO] A pasta de imagens configurada não foi encontrada. Por favor, verifique o caminho em "Configurações > Imagens".`);
+}
+
+// Utilitários de formato de data para nome de pasta
+function getDateFormat() {
+    return (config.settings?.date_format?.folder_format) || 'DDMMYYYY';
+}
+
+function buildDateFolderName(date) {
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    const yy = String(yyyy).slice(-2);
+    const format = getDateFormat();
+    switch (format) {
+        case 'DDMMYY':
+            return `${dd}${mm}${yy}`;
+        case 'YYMMDD':
+            return `${yy}${mm}${dd}`;
+        case 'YYYYMMDD':
+            return `${yyyy}${mm}${dd}`;
+        case 'DDMMYYYY':
+        default:
+            return `${dd}${mm}${yyyy}`;
+    }
+}
+
+function getFolderRegexForFormat() {
+    const format = getDateFormat();
+    const sixDigit = format === 'DDMMYY' || format === 'YYMMDD';
+    return new RegExp(`^\\d{${sixDigit ? 6 : 8}}$`);
+}
 
 // Função global para encontrar pasta de imagens (obedece configuração do admin)
 function getImagesFolderPath() {
-    const basePath = config.image_settings?.base_path || './imagens';
-    
+    const basePath = config.image_settings?.base_path || path.join(appPath, 'imagens');
     if (!fs.existsSync(basePath)) {
         console.log(`❌ ERRO: Pasta base de imagens não encontrada: ${basePath}`);
         console.log(`⚠️  Configure o caminho correto em config/image_settings.json`);
         return basePath;
     }
-    
     const hoje = new Date();
-    const dia = String(hoje.getDate()).padStart(2, '0');
-    const mes = String(hoje.getMonth() + 1).padStart(2, '0');
-    const ano = hoje.getFullYear();
-    const dataFormatada = `${dia}${mes}${ano}`;
+    const dataFormatada = buildDateFolderName(hoje);
     const imagesDir = path.join(basePath, dataFormatada);
-    
-    if (!fs.existsSync(imagesDir)) {
-        console.log(`❌ AVISO: Pasta do dia ${dataFormatada} não encontrada em: ${basePath}`);
-        console.log(`📁 Crie a pasta: ${imagesDir}`);
-        console.log(`⚠️  O sistema não irá procurar automaticamente por outras pastas.`);
-    } else {
-        console.log(`✅ Pasta do dia encontrada: ${imagesDir}`);
+    if (fs.existsSync(imagesDir)) {
+        console.log(`✅ Pasta do dia encontrada: ${imagesDir} (formato: ${getDateFormat()})`);
+        return imagesDir;
     }
-    
+    try {
+        fs.mkdirSync(imagesDir, { recursive: true });
+        console.log(`🆕 Pasta do dia criada: ${imagesDir}`);
+    } catch (error) {
+        console.error(`❌ Falha ao criar pasta do dia: ${imagesDir}`, error);
+    }
     return imagesDir;
 }
 
@@ -118,9 +166,7 @@ function generateSessionId() {
 
 // Função para verificar autenticação
 function isAuthenticated(req) {
-    const cookies = parseCookies(req.headers.cookie || '');
-    const sessionId = cookies.session_id;
-    return sessionId && sessions.has(sessionId);
+    return true;
 }
 
 // Função para parsear cookies
@@ -188,7 +234,9 @@ function listImages() {
         const dia = String(today.getDate()).padStart(2, '0');
         const mes = String(today.getMonth() + 1).padStart(2, '0');
         const ano = today.getFullYear();
-        const todayFormatted = `${dia}${mes}${ano}`;
+        
+        // Obter formato de data das configurações
+        const todayFormatted = buildDateFolderName(today);
         
         // Verificar se a pasta do dia existe
         if (!fs.existsSync(todayDir)) {
@@ -205,23 +253,20 @@ function listImages() {
         // Listar imagens da pasta do dia
         const files = fs.readdirSync(todayDir)
             .filter(file => /\.(jpg|jpeg|png|gif)$/i.test(file))
-            .sort();
+            .sort()
+            .reverse();
 
         if (files.length === 0) {
-            return {
-                erro: `Nenhuma imagem encontrada na pasta ${todayFormatted}`,
-                solucao: 'Adicione imagens na pasta do dia atual ou verifique se a pasta existe',
-                status: 'no_images_found',
-                folder_path: todayDir,
-                base_path: basePath
-            };
+            console.log(`ℹ️ Nenhuma imagem na pasta do dia (${todayFormatted}). Enviando grupos vazios.`);
+            return {};
         }
 
         // Agrupar imagens por ID
         files.forEach(file => {
             const parts = file.split('_');
             if (parts.length >= 3) {
-                const id = parts[1] + '_' + parts[2].split('.')[0];
+                // Usar formato_data_hora como ID (ex: 10x15_20250808_102124)
+                const id = parts[0] + '_' + parts[1] + '_' + parts[2].split('.')[0];
                 if (!grupos[id]) {
                     grupos[id] = [];
                 }
@@ -244,6 +289,19 @@ function listImages() {
 }
 
 // Função para iniciar o monitoramento da pasta de imagens
+// Variáveis para otimização do monitoramento
+let debounceTimer = null;
+let pendingChanges = new Set();
+let isProcessingChanges = false;
+
+// Configurações otimizadas para alto volume (2000+ fotos/dia)
+const HIGH_VOLUME_CONFIG = {
+    debounceDelay: 800, // mais responsivo
+    processingDelay: 400, // reduzir atraso de processamento
+    maxPendingChanges: 100, // Processar em lotes de até 100 arquivos
+    batchProcessing: true // Ativar processamento em lote
+};
+
 function startFileWatcher() {
     const imagesDir = getImagesFolderPath();
     
@@ -257,13 +315,17 @@ function startFileWatcher() {
         fileWatcher.close();
     }
     
-    console.log(`🔍 Iniciando monitoramento da pasta: ${imagesDir}`);
+    console.log(`🔍 Iniciando monitoramento otimizado da pasta: ${imagesDir}`);
     
     // Obter lista inicial de imagens
     lastImagesList = listImages();
     
     try {
-        fileWatcher = fs.watch(imagesDir, { persistent: true }, (eventType, filename) => {
+        // Usar fs.watch com configurações otimizadas
+        fileWatcher = fs.watch(imagesDir, { 
+            persistent: true,
+            recursive: false // Monitorar apenas a pasta principal para melhor performance
+        }, (eventType, filename) => {
             if (!filename) return;
             
             // Filtrar apenas arquivos de imagem
@@ -274,12 +336,30 @@ function startFileWatcher() {
             
             if (!isImageFile) return;
             
-            console.log(`📁 Arquivo ${eventType}: ${filename}`);
+            // Adicionar à lista de mudanças pendentes
+            pendingChanges.add(filename);
             
-            // Aguardar um pouco para garantir que o arquivo foi completamente escrito
-            setTimeout(() => {
-                checkForImageChanges();
-            }, 1000);
+            console.log(`📁 Arquivo ${eventType}: ${filename} (${pendingChanges.size} pendentes)`);
+            
+            // Processamento inteligente baseado no volume
+            const shouldProcessImmediately = pendingChanges.size >= HIGH_VOLUME_CONFIG.maxPendingChanges;
+            
+            if (shouldProcessImmediately) {
+                console.log(`🚀 Processamento imediato: ${pendingChanges.size} arquivos pendentes`);
+                if (debounceTimer) {
+                    clearTimeout(debounceTimer);
+                }
+                processImageChanges();
+            } else {
+                // Usar debouncing otimizado para alto volume
+                if (debounceTimer) {
+                    clearTimeout(debounceTimer);
+                }
+                
+                debounceTimer = setTimeout(() => {
+                    processImageChanges();
+                }, HIGH_VOLUME_CONFIG.debounceDelay);
+            }
         });
         
         fileWatcher.on('error', (error) => {
@@ -296,21 +376,68 @@ function startFileWatcher() {
 }
 
 // Função para verificar mudanças nas imagens e notificar clientes
-function checkForImageChanges() {
-    const currentImagesList = listImages();
-    
-    // Verificar se houve mudanças
-    const currentKeys = Object.keys(currentImagesList).sort();
-    const lastKeys = Object.keys(lastImagesList).sort();
-    
-    const hasChanges = JSON.stringify(currentKeys) !== JSON.stringify(lastKeys) ||
-                      JSON.stringify(currentImagesList) !== JSON.stringify(lastImagesList);
-    
-    if (hasChanges) {
-        console.log('🔄 Mudanças detectadas nas imagens, notificando clientes...');
-        lastImagesList = currentImagesList;
-        notifyClients('images-updated', currentImagesList);
+// Função otimizada para processar mudanças em lote
+function processImageChanges() {
+    if (isProcessingChanges) {
+        console.log('⏳ Processamento já em andamento, aguardando...');
+        return;
     }
+    
+    isProcessingChanges = true;
+    const changedFiles = Array.from(pendingChanges);
+    pendingChanges.clear();
+    
+    console.log(`🔄 Processando ${changedFiles.length} mudanças de arquivos...`);
+    
+    try {
+        // Aguardar tempo otimizado para garantir que todos os arquivos foram escritos
+        setTimeout(() => {
+            const currentImagesList = listImages();
+            
+            // Verificar se houve mudanças reais na lista
+            const currentKeys = Object.keys(currentImagesList).sort();
+            const lastKeys = Object.keys(lastImagesList).sort();
+            
+            const hasChanges = JSON.stringify(currentKeys) !== JSON.stringify(lastKeys) ||
+                              JSON.stringify(currentImagesList) !== JSON.stringify(lastImagesList);
+            
+            if (hasChanges) {
+                console.log(`✅ Mudanças confirmadas: ${changedFiles.join(', ')}`);
+                
+                // Calcular diferenças para otimizar notificação
+                const newImages = currentKeys.filter(key => !lastKeys.includes(key));
+                const removedImages = lastKeys.filter(key => !currentKeys.includes(key));
+                
+                console.log(`📊 Estatísticas: +${newImages.length} novas, -${removedImages.length} removidas`);
+                
+                lastImagesList = currentImagesList;
+                
+                // Notificar clientes com informações detalhadas
+                notifyClients('images-updated', {
+                    ...currentImagesList,
+                    _metadata: {
+                        newImages: newImages.length,
+                        removedImages: removedImages.length,
+                        totalImages: currentKeys.length,
+                        timestamp: Date.now()
+                    }
+                });
+            } else {
+                console.log('ℹ️ Nenhuma mudança real detectada após verificação');
+            }
+            
+            isProcessingChanges = false;
+        }, HIGH_VOLUME_CONFIG.processingDelay);
+        
+    } catch (error) {
+        console.error('❌ Erro ao processar mudanças:', error);
+        isProcessingChanges = false;
+    }
+}
+
+// Função legada mantida para compatibilidade
+function checkForImageChanges() {
+    processImageChanges();
 }
 
 // Função para notificar todos os clientes conectados
@@ -348,106 +475,9 @@ function stopFileWatcher() {
 }
 
 // Função para executar script Java
-function executePythonPrinter(imagePath, paperSize, printerName = null) {
-    return new Promise((resolve, reject) => {
-        const pythonScript = path.join(__dirname, '../../kioskBase/Controleask300/ask300_paper_controller.py');
-        
-        // Preparar argumentos para o comando Python
-        const args = [pythonScript, imagePath, paperSize, '--real'];
-        
-        console.log(`Executando controlador Python: python ${args.join(' ')}`);
-        console.log(`Impressora: ${printerName || 'ASK-300 (padrão)'}`);
+// Função executePythonPrinter removida - dependência Python não existe
 
-        // Usar spawn com PowerShell no Windows
-        const child = spawn('python', args, {
-            stdio: ['pipe', 'pipe', 'pipe']
-        });
-
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout.on('data', (data) => {
-            stdout += data.toString();
-        });
-
-        child.stderr.on('data', (data) => {
-            stderr += data.toString();
-        });
-
-        child.on('close', (code) => {
-            if (code !== 0) {
-                console.error(`Erro ao executar controlador Python:`, stderr);
-                reject({ success: false, error: `Processo terminou com código ${code}: ${stderr}` });
-            } else {
-                console.log(`Controlador Python executado com sucesso:`, stdout);
-                resolve({ success: true, output: stdout });
-            }
-        });
-
-        child.on('error', (error) => {
-            console.error(`Erro ao iniciar controlador Python:`, error);
-            reject({ success: false, error: error.message });
-        });
-    });
-}
-
-function executeJavaScript(scriptName, imagePath, printerName = null, javaDir = null) {
-    return new Promise((resolve, reject) => {
-        // Usar diretório padrão se não especificado
-        if (!javaDir) {
-            javaDir = path.join(__dirname, '../printer/impressora', 'ask300');
-        } else {
-            javaDir = path.join(__dirname, '../printer/impressora', javaDir);
-        }
-        
-        // Usar caminho absoluto da imagem para evitar problemas com caminhos relativos
-        const absoluteImagePath = path.resolve(imagePath);
-        
-        // Preparar argumentos para o comando Java
-        const args = ['-cp', '.', scriptName, absoluteImagePath];
-        
-        // Adicionar nome da impressora se especificado
-        if (printerName) {
-            args.push(printerName);
-            console.log(`Executando com impressora específica: ${printerName}`);
-        }
-
-        console.log(`Executando comando: java ${args.join(' ')}`);
-        console.log(`Diretório de execução: ${javaDir}`);
-        console.log(`Caminho da imagem: ${absoluteImagePath}`);
-
-        // Usar spawn com PowerShell no Windows
-        const child = spawn('powershell.exe', ['-Command', `cd '${javaDir}'; java ${args.map(arg => `'${arg}'`).join(' ')}`], {
-            stdio: ['pipe', 'pipe', 'pipe']
-        });
-
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout.on('data', (data) => {
-            stdout += data.toString();
-        });
-
-        child.stderr.on('data', (data) => {
-            stderr += data.toString();
-        });
-
-        child.on('close', (code) => {
-            if (code !== 0) {
-                console.error(`Erro ao executar ${scriptName}:`, stderr);
-                reject({ success: false, error: `Processo terminou com código ${code}: ${stderr}` });
-            } else {
-                console.log(`${scriptName} executado com sucesso:`, stdout);
-                resolve({ success: true, output: stdout });
-            }
-        });
-
-        child.on('error', (error) => {
-            console.error(`Erro ao iniciar processo ${scriptName}:`, error);
-            reject({ success: false, error: error.message });
-        });
-    });
-}
+// Função executeJavaScript removida - dependências Java não existem
 
 // Função para executar impressão nativa do Windows (exatamente como Program.cs)
 function executeWindowsNativePrint(imagePath, printerName, paperSize, copies = 1) {
@@ -461,18 +491,48 @@ function executeWindowsNativePrint(imagePath, printerName, paperSize, copies = 1
         
         let completedCopies = 0;
         const results = [];
+        const printerCfg = loadJSON(getConfigPath('printer_config.json'), {});
+        const formatMapping = (printerCfg.format_mappings && printerCfg.format_mappings[paperSize]) ? printerCfg.format_mappings[paperSize] : {};
+        const masterOverride = !!printerCfg?.paper_override_enabled;
+        const enableOverride = masterOverride && !!formatMapping?.enable_paper_override;
+        const forcedPaperSize = formatMapping?.force_paper_size;
+
+        const runPaperOverrideIfEnabled = (done) => {
+            if (!enableOverride || !forcedPaperSize || !printerName) {
+                done();
+                return;
+            }
+            const psCmd = `Set-PrintConfiguration -PrinterName \"${printerName}\" -PaperSize \"${forcedPaperSize}\"`;
+            exec(psCmd, { shell: 'powershell.exe' }, (error, stdout, stderr) => {
+                if (error) {
+                    console.warn(`⚠️ Erro ao ajustar tamanho de papel para ${printerName}: ${String(error.message || stderr || '').trim()}`);
+                } else {
+                    console.log(`✅ Tamanho de papel ajustado para '${forcedPaperSize}' em ${printerName}`);
+                }
+                done();
+            });
+        };
         
-        // Executar para cada cópia usando exatamente o mesmo comando do C#
+
+
+        // Executar para cada cópia enviando direto para a impressora configurada
+        const buildPrintToCommand = (img, printer) => {
+            const winDir = process.env['WINDIR'] || 'C:/Windows';
+            const sysnative = path.join(winDir, 'Sysnative', 'rundll32.exe');
+            const system32 = path.join(winDir, 'System32', 'rundll32.exe');
+            const exe = fs.existsSync(sysnative) ? sysnative : system32;
+            const dllEntry = `${path.join(winDir, 'System32', 'shimgvw.dll')},ImageView_PrintTo`;
+            return { exe, args: [dllEntry, img, printer] };
+        };
+
         const executeCopy = (copyNumber) => {
             console.log(`🚀 Executando cópia ${copyNumber}/${copies} com método Program.cs`);
             
-            // Usar exatamente o mesmo comando do Program.cs
-            const printProcess = spawn('rundll32.exe', [
-                'shimgvw.dll,ImageView_PrintTo',
-                '/pt',
-                imagePath,
-                printerName
-            ], {
+            const { exe, args } = buildPrintToCommand(imagePath, printerName);
+            console.log(`DEBUG: rundll32: ${exe}`);
+            console.log(`DEBUG: args: ${JSON.stringify(args)}`);
+
+            const printProcess = spawn(exe, args, {
                 stdio: ['pipe', 'pipe', 'pipe'],
                 windowsHide: true
             });
@@ -514,7 +574,9 @@ function executeWindowsNativePrint(imagePath, printerName, paperSize, copies = 1
             });
             
             printProcess.on('error', (error) => {
-                console.error(`❌ Erro ao executar impressão (cópia ${copyNumber}): ${error.message}`);
+                // Include stderr in the error message for better debugging
+                const fullErrorMessage = `Erro ao executar impressão (cópia ${copyNumber}): ${error.message}. Stderr: ${errorOutput}. Comando: ${exe} ${args.join(' ')}`;
+                console.error(`❌ ${fullErrorMessage}`);
                 console.log(`🔄 Tentando método alternativo para cópia ${copyNumber}...`);
                 
                 // Fallback: usar método alternativo como no Program.cs
@@ -600,17 +662,27 @@ function executeWindowsNativePrint(imagePath, printerName, paperSize, copies = 1
              });
         };
         
-        // Executar todas as cópias com delay
-        for (let i = 1; i <= copies; i++) {
-            setTimeout(() => executeCopy(i), (i - 1) * 2000); // Delay de 2s entre cópias
-        }
+        runPaperOverrideIfEnabled(() => {
+            for (let i = 1; i <= copies; i++) {
+                setTimeout(() => executeCopy(i), (i - 1) * 2000);
+            }
+        });
     });
+}
+
+// Helper para encontrar arquivos da UI, que não são arquivos de configuração
+function getUiPath(relativePath) {
+    // __dirname em um app empacotado aponta para dentro do asar,
+    // ex: /path/to/app.asar/src/server
+    // Então, subir um nível para /path/to/app.asar/src nos dá acesso à pasta 'ui'
+    return path.join(__dirname, '..', relativePath);
 }
 
 // Servidor HTTP
 const server = http.createServer(async (req, res) => {
     const parsedUrl = url.parse(req.url, true);
     const pathname = parsedUrl.pathname;
+    const normalizedPath = (pathname || '').replace(/\/+$/, '').toLowerCase();
     const method = req.method;
     
     // Log de todas as requisições
@@ -627,65 +699,59 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // Rotas estáticas
+    // Rotas estáticas da UI
     if (pathname === '/' || pathname === '/index.html') {
-        serveStatic(path.join(__dirname, '../ui/app/index.html'), res);
+        serveStatic(getUiPath('ui/app/index.html'), res);
         return;
     }
 
     if (pathname === '/login') {
-        serveStatic(path.join(__dirname, '../ui/app/login.html'), res);
+        res.writeHead(302, { 'Location': '/config' });
+        res.end();
         return;
     }
 
-    if (pathname === '/config' || pathname === '/configuracao') {
-        if (!isAuthenticated(req)) {
-            res.writeHead(302, { 'Location': '/login' });
-            res.end();
-            return;
-        }
-        serveStatic(path.join(__dirname, '../ui/app/config.html'), res);
+    if (normalizedPath === '/config' || normalizedPath === '/configuracao') {
+        serveStatic(getUiPath('ui/app/config.html'), res);
         return;
     }
 
     if (pathname === '/dashboard') {
-        serveStatic(path.join(__dirname, '../ui/app/dashboard.html'), res);
+        serveStatic(getUiPath('ui/app/dashboard.html'), res);
         return;
     }
 
-    // Arquivos estáticos
-    if (pathname.startsWith('/static/')) {
-        const filePath = path.join(__dirname, '../ui', pathname);
+    // Arquivos estáticos (CSS, JS, etc. da UI)
+    if (normalizedPath.startsWith('/static/') || normalizedPath.startsWith('/app/')) {
+        const filePath = getUiPath(`ui${pathname}`);
         serveStatic(filePath, res);
         return;
     }
 
-    // Arquivos da aplicação
-    if (pathname.startsWith('/app/')) {
-        const filePath = path.join(__dirname, '../ui', pathname);
-        serveStatic(filePath, res);
+    // Arquivos de configuração (exclusivamente via getConfigPath)
+    if (pathname.startsWith('/config/')) {
+        const configFileName = pathname.substring(8); // Remove '/config/'
+        const filePath = getConfigPath(configFileName);
+        
+        if (fs.existsSync(filePath)) {
+            serveStatic(filePath, res);
+        } else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Arquivo de configuração não encontrado' }));
+        }
         return;
     }
 
     // Servir imagens individuais
     if (pathname.startsWith('/imagens/')) {
-        const basePath = config.image_settings?.base_path || '../../imagens';
         const imagePath = decodeURIComponent(pathname.substring(9)); // Remove '/imagens/'
-        
         const imagesDir = getImagesFolderPath();
         
-        if (!imagesDir) {
-            const today = new Date();
-            const dia = String(today.getDate()).padStart(2, '0');
-            const mes = String(today.getMonth() + 1).padStart(2, '0');
-            const ano = today.getFullYear();
-            const todayFormatted = `${dia}${mes}${ano}`;
-            
+        if (!imagesDir || !fs.existsSync(imagesDir)) {
             res.writeHead(404, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
-                error: `Pasta do dia atual '${todayFormatted}' não encontrada`,
-                solucao: `Crie a pasta '${todayFormatted}' e adicione as fotos do dia`,
-                message: 'Certifique-se de que existe uma pasta com a data de hoje no formato DDMMAAAA'
+                error: `Pasta de imagens não encontrada ou não configurada.`,
+                solucao: `Verifique o caminho da pasta de imagens nas configurações.`
             }));
             return;
         }
@@ -719,23 +785,16 @@ const server = http.createServer(async (req, res) => {
     if (pathname.startsWith('/api/')) {
         // API de imagens
         if (pathname === '/api/images' && method === 'GET') {
-            const basePath = config.image_settings?.base_path || './imagens';
+            const basePath = config.image_settings?.base_path;
             
             const imagesDir = getImagesFolderPath();
             
-            if (!imagesDir) {
-                const today = new Date();
-                const dia = String(today.getDate()).padStart(2, '0');
-                const mes = String(today.getMonth() + 1).padStart(2, '0');
-                const ano = today.getFullYear();
-                const todayFormatted = `${dia}${mes}${ano}`;
-                
+            if (!imagesDir || !fs.existsSync(imagesDir)) {
                 res.writeHead(404, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({
-                    erro: `Pasta do dia atual '${todayFormatted}' não encontrada.`,
+                    erro: `Pasta de imagens não encontrada ou não configurada.`,
                     pasta_base: basePath,
-                    pasta_esperada: path.join(basePath, todayFormatted),
-                    solucao: `Crie a pasta '${todayFormatted}' dentro de '${basePath}' e adicione as fotos do dia.`
+                    solucao: `Verifique o caminho da pasta de imagens nas configurações.`
                 }));
                 return;
             }
@@ -748,12 +807,11 @@ const server = http.createServer(async (req, res) => {
                 );
                 
                 if (arquivosImagem.length === 0) {
-                    res.writeHead(404, { 'Content-Type': 'application/json' });
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({
-                        erro: `Nenhuma imagem encontrada na pasta '${path.basename(imagesDir)}'.`,
-                        pasta_base: basePath,
+                        status: 'empty_today_folder',
                         pasta_atual: imagesDir,
-                        solucao: 'Verifique se as imagens foram copiadas para a pasta correta.'
+                        grupos: {}
                     }));
                     return;
                 }
@@ -762,7 +820,8 @@ const server = http.createServer(async (req, res) => {
                 arquivosImagem.forEach(f => {
                     const partes = f.split('_');
                     if (partes.length >= 3) {
-                        const idFoto = partes[partes.length - 1].split('.')[0];
+                        // Usar formato_data_hora como ID (ex: 10x15_20250808_102124)
+                        const idFoto = partes[0] + '_' + partes[1] + '_' + partes[2].split('.')[0];
                         if (!imagensAgrupadas[idFoto]) {
                             imagensAgrupadas[idFoto] = [];
                         }
@@ -788,6 +847,75 @@ const server = http.createServer(async (req, res) => {
                     solucao: 'Verifique as permissões da pasta ou se o formato das imagens é suportado.'
                 }));
             }
+            return;
+        }
+
+        if (pathname === '/api/print-stats/increment' && method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk.toString());
+            req.on('end', () => {
+                try {
+                    const data = JSON.parse(body || '{}');
+                    const date = String(data.date || '').trim();
+                    const format = String(data.format || '').trim().toLowerCase();
+                    const qty = Number.isFinite(parseInt(data.qty)) ? parseInt(data.qty) : 1;
+                    if (!date || !format) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Dados inválidos' }));
+                        return;
+                    }
+                    const statsPath = getConfigPath('print_stats.json');
+                    const stats = loadJSON(statsPath, { days: {}, updated_at: new Date().toISOString() });
+                    if (!stats.days[date]) stats.days[date] = {};
+                    stats.days[date][format] = (stats.days[date][format] || 0) + qty;
+                    stats.updated_at = new Date().toISOString();
+                    const ok = saveJSON(statsPath, stats);
+                    if (ok) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: true }));
+                    } else {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false }));
+                    }
+                } catch (error) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Dados inválidos' }));
+                }
+            });
+            return;
+        }
+
+        if (pathname === '/api/print-stats' && method === 'GET') {
+            const d = parsedUrl.query?.date ? String(parsedUrl.query.date) : '';
+            const statsPath = getConfigPath('print_stats.json');
+            const stats = loadJSON(statsPath, { days: {} });
+            if (d && stats.days[d]) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ date: d, totals: stats.days[d] }));
+            } else if (d) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ date: d, totals: {} }));
+            } else {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ days: stats.days }));
+            }
+            return;
+        }
+
+        if (pathname === '/api/print-stats/dates' && method === 'GET') {
+            const statsPath = getConfigPath('print_stats.json');
+            const stats = loadJSON(statsPath, { days: {} });
+            const dates = Object.keys(stats.days || {}).sort().reverse();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ dates }));
+            return;
+        }
+
+        if (pathname === '/api/print-stats/all' && method === 'GET') {
+            const statsPath = getConfigPath('print_stats.json');
+            const stats = loadJSON(statsPath, { days: {} });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(stats));
             return;
         }
 
@@ -1057,62 +1185,11 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        // API de preços
-        if (pathname === '/api/pricing' && method === 'GET') {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(config.pricing));
-            return;
-        }
-
-        if (pathname === '/api/pricing' && method === 'POST') {
-            if (!isAuthenticated(req)) {
-                res.writeHead(401, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Não autenticado' }));
-                return;
-            }
-            
-            let body = '';
-            req.on('data', chunk => body += chunk.toString());
-            req.on('end', () => {
-                try {
-                    const pricing = JSON.parse(body);
-                    saveJSON('../../config/pricing.json', pricing);
-                    config.pricing = pricing;
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: true }));
-                } catch (error) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: 'Dados inválidos' }));
-                }
-            });
-            return;
-        }
 
         // API de login
         if (pathname === '/api/login' && method === 'POST') {
-            let body = '';
-            req.on('data', chunk => body += chunk.toString());
-            req.on('end', () => {
-                try {
-                    const data = JSON.parse(body);
-                    if (data.password === config.settings.admin_password) {
-                        const sessionId = generateSessionId();
-                        sessions.set(sessionId, { created: Date.now() });
-                        
-                        res.writeHead(200, {
-                            'Content-Type': 'application/json',
-                            'Set-Cookie': `session_id=${sessionId}; HttpOnly; Path=/`
-                        });
-                        res.end(JSON.stringify({ success: true, redirect: '/config' }));
-                    } else {
-                        res.writeHead(401, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ success: false, message: 'Senha incorreta' }));
-                    }
-                } catch (error) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: false, message: 'Dados inválidos' }));
-                }
-            });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, redirect: '/config' }));
             return;
         }
 
@@ -1239,7 +1316,7 @@ const server = http.createServer(async (req, res) => {
                     // Carregar lista atual
                     let printersList;
                     try {
-                        const data = fs.readFileSync('../../config/printers_list.json', 'utf8');
+                        const data = fs.readFileSync(getConfigPath('printers_list.json'), 'utf8');
                         printersList = JSON.parse(data);
                     } catch (error) {
                         printersList = { "printers": [] };
@@ -1271,7 +1348,7 @@ const server = http.createServer(async (req, res) => {
                     }
                     
                     // Salvar lista atualizada
-                    fs.writeFileSync('../../config/printers_list.json', JSON.stringify(printersList, null, 2));
+                    fs.writeFileSync(getConfigPath('printers_list.json'), JSON.stringify(printersList, null, 2));
                     
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ 
@@ -1310,7 +1387,7 @@ const server = http.createServer(async (req, res) => {
                     // Carregar lista atual
                     let printersList;
                     try {
-                        const data = fs.readFileSync('./config/printers_list.json', 'utf8');
+                        const data = fs.readFileSync(getConfigPath('printers_list.json'), 'utf8');
                         printersList = JSON.parse(data);
                     } catch (error) {
                         printersList = { "printers": [] };
@@ -1320,7 +1397,7 @@ const server = http.createServer(async (req, res) => {
                     printersList.printers = printersList.printers.filter(p => p.name !== printer_name);
                     
                     // Salvar lista atualizada
-                    fs.writeFileSync('../../config/printers_list.json', JSON.stringify(printersList, null, 2));
+                    fs.writeFileSync(getConfigPath('printers_list.json'), JSON.stringify(printersList, null, 2));
                     
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ 
@@ -1421,51 +1498,47 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
+
         // API de configuração de impressoras
         if (pathname === '/api/printer-config' && method === 'GET') {
-            const printerConfig = loadJSON('config/printer_config.json', {
-                "formats": {
-                    "10x15": {
-                        "printer": "FUJIFILM ASK-300",
-                        "printSize": "6x4",
-                        "paperSize": "4x6"
-                    },
-                    "15x21": {
-                        "printer": "FUJIFILM ASK-300",
-                        "printSize": "6x8",
-                        "paperSize": "6x8"
-                    },
-                    "Bolas": {
-                        "printer": "FUJIFILM ASK-300",
-                        "printSize": "custom",
-                        "paperSize": "A4"
-                    }
-                },
-                "printers": {
-                    "FUJIFILM ASK-300": "FUJIFILM ASK-300",
-                    "FUJIFILM ASK-400": "FUJIFILM ASK-400"
-                }
-            });
+            const cfg = loadJSON(getConfigPath('printer_config.json'), {});
+            const normalized = { ...cfg };
+            // Construir "formats" a partir de "format_mappings" se necessário
+            if (!normalized.formats && normalized.format_mappings) {
+                normalized.formats = {};
+                Object.keys(normalized.format_mappings).forEach(k => {
+                    const m = normalized.format_mappings[k] || {};
+                    normalized.formats[k] = {
+                        printer: m.printer,
+                        paperSize: m.paperSize || k,
+                        printSize: m.paperSize === '6x8' ? '6x8' : (m.paperSize === '6x4' ? '6x4' : (m.printSize || 'custom'))
+                    };
+                });
+            }
+            // Construir "format_mappings" a partir de "formats" se necessário
+            if (!normalized.format_mappings && normalized.formats) {
+                normalized.format_mappings = {};
+                Object.keys(normalized.formats).forEach(k => {
+                    const f = normalized.formats[k] || {};
+                    normalized.format_mappings[k] = {
+                        printer: f.printer,
+                        paperSize: f.paperSize || k
+                    };
+                });
+            }
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(printerConfig));
+            res.end(JSON.stringify(normalized));
             return;
         }
 
         // API para salvar configuração de impressoras
         if (pathname === '/api/printer-config' && method === 'POST') {
-            // CORRIGIDO: remover verificação de autenticação para configurações básicas
-            // if (!isAuthenticated(req)) {
-            //     res.writeHead(401, { 'Content-Type': 'application/json' });
-            //     res.end(JSON.stringify({ error: 'Não autenticado' }));
-            //     return;
-            // }
-            
             let body = '';
             req.on('data', chunk => body += chunk.toString());
             req.on('end', () => {
                 try {
                     const printerConfig = JSON.parse(body);
-                    const configPath = path.join(__dirname, '../../config/printer_config.json');
+                    const configPath = getConfigPath('printer_config.json');
                     
                     console.log('💾 Salvando configuração de impressora:', configPath);
                     console.log('📋 Dados:', JSON.stringify(printerConfig, null, 2));
@@ -1550,227 +1623,49 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-
-
-
-
-
-
-
-
-        // API de dados do dashboard
-        if (pathname === '/api/dashboard/stats' && method === 'GET') {
-            if (!isAuthenticated(req)) {
-                res.writeHead(401, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Não autenticado' }));
-                return;
-            }
-            
-            const salesData = loadJSON('../../config/sales_data.json', {
-                "sales": [],
-                "daily_totals": {},
-                "statistics": {
-                    "total_sales": 0,
-                    "total_photos_sold": 0,
-                    "most_popular_format": "10x15"
+        if (pathname === '/api/printer-windows-config' && method === 'GET') {
+            try {
+                let target = String(parsedUrl.query?.name || '').trim();
+                if (!target) {
+                    const printerCfg = loadJSON(getConfigPath('printer_config.json'), {});
+                    target = printerCfg.user_preferences?.default_printer || printerCfg.last_used_printer || '';
                 }
-            });
-            
-            // Inicializar contadores
-            const paymentMethods = {
-                dinheiro: { total: 0, count: 0 },
-                cartao: { total: 0, count: 0 }
-            };
-            
-            const formatSales = {};
-            
-            // Processar vendas
-            salesData.sales.forEach(sale => {
-                // Métodos de pagamento
-                if (paymentMethods[sale.payment_method]) {
-                    paymentMethods[sale.payment_method].total += sale.total;
-                    paymentMethods[sale.payment_method].count += 1;
-                }
-                
-                // Formatos
-                sale.items.forEach(item => {
-                    if (!formatSales[item.format]) {
-                        formatSales[item.format] = { total: 0, count: 0 };
-                    }
-                    formatSales[item.format].total += item.price * item.quantity;
-                    formatSales[item.format].count += item.quantity;
-                });
-            });
-            
-            // Preparar vendas recentes com contagem de itens
-            const recentSales = salesData.sales.slice(-10).map(sale => ({
-                ...sale,
-                items_count: sale.items.reduce((sum, item) => sum + item.quantity, 0)
-            }));
-            
-            const stats = {
-                total_sales: salesData.statistics.total_sales || 0,
-                total_photos: salesData.statistics.total_photos_sold || 0,
-                payment_methods: paymentMethods,
-                daily_sales: salesData.daily_totals || {},
-                format_sales: formatSales,
-                recent_sales: recentSales
-            };
-            
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(stats));
-            return;
-        }
-
-        // API de vendas
-        if (pathname === '/api/sales' && method === 'GET') {
-            if (!isAuthenticated(req)) {
-                res.writeHead(401, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Não autenticado' }));
-                return;
-            }
-            
-            const salesData = loadJSON('../../config/sales_data.json', { sales: [], daily_totals: {}, statistics: { total_sales: 0, total_photos_sold: 0 } });
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(salesData));
-            return;
-        }
-
-        if (pathname === '/api/sales' && method === 'POST') {
-            let body = '';
-            req.on('data', chunk => body += chunk.toString());
-            req.on('end', () => {
-                try {
-                    const saleData = JSON.parse(body);
-                    const salesData = loadJSON('../../config/sales_data.json', { sales: [], daily_totals: {}, statistics: { total_sales: 0, total_photos_sold: 0 } });
-                    
-                    // Adicionar nova venda
-                    const newSale = {
-                        id: Date.now().toString(),
-                        timestamp: new Date().toISOString(),
-                        ...saleData
-                    };
-                    
-                    salesData.sales.push(newSale);
-                    
-                    // Atualizar estatísticas
-                    const today = new Date().toISOString().split('T')[0];
-                    salesData.daily_totals[today] = (salesData.daily_totals[today] || 0) + newSale.total;
-                    salesData.statistics.total_sales += newSale.total;
-                    salesData.statistics.total_photos_sold += newSale.items.reduce((sum, item) => sum + item.quantity, 0);
-                    
-                    saveJSON('../../config/sales_data.json', salesData);
-                    
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: true, sale_id: newSale.id }));
-                } catch (error) {
+                if (!target) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: 'Dados inválidos' }));
+                    res.end(JSON.stringify({ error: 'Nome da impressora não fornecido' }));
+                    return;
                 }
-            });
+                const cmd = `Get-PrintConfiguration -PrinterName "${target}" | ConvertTo-Json -Depth 4`;
+                exec(cmd, { shell: 'powershell.exe' }, (error, stdout, stderr) => {
+                    if (error) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Falha ao obter configuração', details: String(error.message || stderr || '').trim() }));
+                        return;
+                    }
+                    let cfg = {};
+                    try { cfg = JSON.parse(stdout); } catch (_) {}
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ printer: target, configuration: cfg }));
+                });
+            } catch (e) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Erro interno' }));
+            }
             return;
         }
+
+
+
+
+
+
+
+
+
+
 
         // API de impressão com Windows nativo (substituindo Java)
-        if (pathname === '/api/print-batch-java' && method === 'POST') {
-            console.log('🔍 Requisição recebida na API /api/print-batch-java (usando impressão nativa)');
-            let body = '';
-            req.on('data', chunk => body += chunk.toString());
-            req.on('end', async () => {
-                try {
-                    const data = JSON.parse(body);
-                    const jobs = data.jobs || [];
-                    console.log(`📋 Processando ${jobs.length} jobs de impressão:`, jobs);
-                    const results = [];
-
-                    // Carregar configuração de impressoras para mapeamento de formato
-                    const printerConfigPath = path.join(__dirname, '../../config/printer_config.json');
-                    const printerConfig = loadJSON(printerConfigPath, {});
-                    console.log('📋 Configuração de impressora carregada:', JSON.stringify(printerConfig, null, 2));
-
-                    // Obter o diretório de imagens uma vez para todos os jobs
-                    const imagesDir = getImagesFolderPath();
-                    
-                    for (const job of jobs) {
-                        const imagePath = path.join(imagesDir, job.photoName);
-
-                        try {
-                            // Determinar impressora baseada no formato configurado
-                            let targetPrinter = job.printer;
-                            const jobFormat = job.format || job.paperSize;
-                            
-                            // Verificar se existe mapeamento de formato para impressora
-                            if (printerConfig.format_mappings && printerConfig.format_mappings[jobFormat]) {
-                                const formatMapping = printerConfig.format_mappings[jobFormat];
-                                if (formatMapping.printer) {
-                                    targetPrinter = formatMapping.printer;
-                                    console.log(`📋 Usando mapeamento de formato: ${jobFormat} -> ${targetPrinter}`);
-                                }
-                            }
-                            
-                            // Fallback: usar configuração padrão se não houver mapeamento
-                            if (!targetPrinter && printerConfig.user_preferences) {
-                                targetPrinter = printerConfig.user_preferences.default_printer;
-                                console.log(`📋 Usando impressora padrão: ${targetPrinter}`);
-                            }
-                            
-                            console.log(`🖨️ Imprimindo ${job.photoName} na impressora: ${targetPrinter} (formato: ${jobFormat})`);
-                            
-                            // Usar impressão nativa do Windows em vez de Java
-                            const result = await executeWindowsNativePrint(
-                                imagePath, 
-                                targetPrinter, 
-                                job.paperSize || job.format, 
-                                1 // uma cópia por job
-                            );
-                            
-                            results.push({
-                                photoName: job.photoName,
-                                format: job.format,
-                                success: true,
-                                output: `Impressão enviada para ${targetPrinter}`,
-                                printer: targetPrinter
-                            });
-                            
-                            console.log(`✅ Sucesso: ${job.photoName} enviado para ${targetPrinter}`);
-                            
-                        } catch (error) {
-                            console.error(`❌ Erro ao imprimir ${job.photoName}:`, error);
-                            results.push({
-                                photoName: job.photoName,
-                                format: job.format,
-                                success: false,
-                                error: error.message || 'Erro na impressão',
-                                printer: targetPrinter || job.printer
-                            });
-                        }
-                    }
-
-                    const successCount = results.filter(r => r.success).length;
-                    const errorCount = results.length - successCount;
-                    
-                    console.log(`📊 Resultado: ${successCount} sucessos, ${errorCount} erros`);
-                    
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({
-                        success: true,
-                        processed: successCount,
-                        total: results.length,
-                        results: results,
-                        message: `${successCount}/${results.length} impressões processadas com sucesso`
-                    }));
-                } catch (error) {
-                    console.error('❌ Erro na API de impressão em lote:', error);
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ 
-                        success: false, 
-                        message: 'Dados inválidos',
-                        error: error.message 
-                    }));
-                }
-            });
-            return;
-        }
+        // API /api/print-batch-java removida - dependia de scripts Java ausentes
 
 
 
@@ -1806,13 +1701,19 @@ const server = http.createServer(async (req, res) => {
                  try {
                      const data = JSON.parse(body);
                      if (data.image_path) {
+                         // Atualiza apenas a configuração relevante
                          config.image_settings.base_path = data.image_path;
                          
-                         // Salvar configurações atualizadas
-                         saveJSON('../../config/settings.json', config);
+                         // Salva o arquivo de configuração correto usando o helper
+                         const saved = saveJSON(getConfigPath('image_settings.json'), config.image_settings);
                          
-                         res.writeHead(200, { 'Content-Type': 'application/json' });
-                         res.end(JSON.stringify({ status: 'success', message: 'Configurações atualizadas com sucesso' }));
+                         if (saved) {
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ status: 'success', message: 'Configurações atualizadas com sucesso' }));
+                         } else {
+                            res.writeHead(500, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ status: 'error', message: 'Falha ao salvar o arquivo de configuração de imagens.' }));
+                         }
                      } else {
                          res.writeHead(400, { 'Content-Type': 'application/json' });
                          res.end(JSON.stringify({ status: 'error', message: 'Caminho da pasta de imagens não fornecido' }));
@@ -1825,31 +1726,271 @@ const server = http.createServer(async (req, res) => {
              return;
          }
          
-         // API de informações do sistema
-         if (pathname === '/api/system/info' && method === 'GET') {
+         // API para salvar formato de data
+        if (pathname === '/api/config/date-format' && method === 'POST') {
              if (!isAuthenticated(req)) {
                  res.writeHead(401, { 'Content-Type': 'application/json' });
                  res.end(JSON.stringify({ error: 'Não autenticado' }));
                  return;
              }
              
-             const systemInfo = {
-                 version: config.version.version || '2.0.0',
-                 build_date: config.version.build_date || new Date().toISOString().split('T')[0],
-                 build_number: config.version.build_number || '1',
-                 status: 'Operacional',
-                 java_integration: 'Ativo',
-                 platform: process.platform,
-                 node_version: process.version,
-                 uptime: process.uptime(),
-                 memory_usage: process.memoryUsage(),
-                 timestamp: new Date().toISOString()
-             };
-             
-             res.writeHead(200, { 'Content-Type': 'application/json' });
-             res.end(JSON.stringify(systemInfo));
+             let body = '';
+             req.on('data', chunk => body += chunk.toString());
+             req.on('end', () => {
+                 try {
+                     const data = JSON.parse(body);
+                     
+                    if (!data.folder_format || !['DDMMYY', 'DDMMYYYY', 'YYMMDD', 'YYYYMMDD'].includes(data.folder_format)) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Formato de data inválido. Use DDMMYY, DDMMYYYY, YYMMDD ou YYYYMMDD.' }));
+                        return;
+                    }
+                     
+                     // Atualizar configuração de formato de data
+                    if (!config.settings.date_format) {
+                        config.settings.date_format = {};
+                    }
+                    config.settings.date_format.folder_format = data.folder_format;
+                    config.settings.date_format.description = 'Formato de pasta de data para busca de imagens (DDMMYY, DDMMYYYY, YYMMDD ou YYYYMMDD)';
+                     
+                     // Salvar configurações atualizadas
+                     saveJSON(getConfigPath('settings.json'), config.settings);
+                     
+                     console.log(`📅 Formato de data alterado para: ${data.folder_format}`);
+                     
+                     res.writeHead(200, { 'Content-Type': 'application/json' });
+                     res.end(JSON.stringify({ 
+                         status: 'success', 
+                         message: `Formato de data alterado para ${data.folder_format} com sucesso!`,
+                         folder_format: data.folder_format
+                     }));
+                 } catch (error) {
+                     console.error('Erro ao salvar formato de data:', error);
+                     res.writeHead(500, { 'Content-Type': 'application/json' });
+                     res.end(JSON.stringify({ error: `Erro ao salvar formato de data: ${error.message}` }));
+                 }
+             });
              return;
          }
+         
+         // API de informações do sistema
+        if (pathname === '/api/system/info' && method === 'GET') {
+            if (!isAuthenticated(req)) {
+                res.writeHead(401, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Não autenticado' }));
+                return;
+            }
+            
+            const systemInfo = {
+                version: config.version.version || '2.0.0',
+                build_date: config.version.build_date || new Date().toISOString().split('T')[0],
+                build_number: config.version.build_number || '1',
+                status: 'Operacional',
+                java_integration: 'Ativo',
+                platform: process.platform,
+                node_version: process.version,
+                uptime: process.uptime(),
+                memory_usage: process.memoryUsage(),
+                timestamp: new Date().toISOString()
+            };
+            
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(systemInfo));
+            return;
+        }
+
+        if (pathname === '/api/system/network' && method === 'GET') {
+            try {
+                const nets = os.networkInterfaces();
+                const ipv4 = [];
+                Object.keys(nets).forEach(name => {
+                    nets[name].forEach(net => {
+                        if (net.family === 'IPv4' && !net.internal) {
+                            ipv4.push(net.address);
+                        }
+                    });
+                });
+                const port = PORT;
+                const urls = [];
+                urls.push(`http://localhost:${port}`);
+                urls.push(`http://127.0.0.1:${port}`);
+                ipv4.forEach(ip => urls.push(`http://${ip}:${port}`));
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ port, host: HOST, ips: ipv4, urls }));
+            } catch (error) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ port: PORT, host: HOST, ips: [], urls: [`http://localhost:${PORT}`] }));
+            }
+            return;
+        }
+
+         // API para obter tema atual
+        if (pathname === '/api/current-theme' && method === 'GET') {
+            try {
+                const themeConfigPath = getConfigPath('current_theme.json');
+                let currentTheme = loadJSON(themeConfigPath, {});
+                if (!currentTheme || !currentTheme.theme_id) {
+                    currentTheme = { theme_id: 'default', updated_at: new Date().toISOString() };
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(currentTheme));
+            } catch (error) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ theme_id: 'default' }));
+            }
+            return;
+        }
+
+
+        if (pathname === '/api/personalization' && method === 'GET') {
+            try {
+                const pPath = getConfigPath('personalization.json');
+                const defaults = {
+                    header_text: 'Fotos Mágicas',
+                    header_bg_color: '#2c3e50',
+                    header_text_color: '#ffffff',
+                    accent_color: '#8b0000',
+                    header_font_size: 20,
+                    header_height: 80,
+                    sidebar_width: 260,
+                    thumb_border_radius: 5,
+                    thumb_gap: 8,
+                    sidebar_thumb_height: 120,
+                    clear_background_mode: false,
+                    enable_premium_theme: false,
+                    disable_photo_shadow: false,
+                    enable_snow_effect: false,
+                    logo_text: '',
+                    logo_image_url: '',
+                    default_variant: '10x15',
+                    main_photo_max_width: 900,
+                    main_photo_max_height: 700,
+                    sidebar_bg_color: '#8b0000',
+                    body_bg_color: '#2c3e50',
+                    enable_vignette: false,
+                    vignette_intensity: 0.12,
+                    enable_glow: false
+                };
+                const data = loadJSON(pPath, defaults);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(data));
+            } catch (error) {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    header_text: 'Fotos Mágicas',
+                    header_bg_color: '#2c3e50',
+                    header_text_color: '#ffffff',
+                    accent_color: '#8b0000',
+                    header_font_size: 20,
+                    header_height: 80,
+                    sidebar_width: 260,
+                    thumb_border_radius: 5,
+                    thumb_gap: 8,
+                    sidebar_thumb_height: 120,
+                    clear_background_mode: false,
+                    enable_premium_theme: false,
+                    disable_photo_shadow: false,
+                    enable_snow_effect: false,
+                    logo_text: '',
+                    logo_image_url: '',
+                    default_variant: '10x15',
+                    main_photo_max_width: 900,
+                    main_photo_max_height: 700,
+                    sidebar_bg_color: '#8b0000',
+                    body_bg_color: '#2c3e50',
+                    enable_vignette: false,
+                    vignette_intensity: 0.12,
+                    enable_glow: false
+                }));
+            }
+            return;
+        }
+
+        if (pathname === '/api/save-personalization' && method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk.toString());
+            req.on('end', () => {
+                try {
+                    const data = JSON.parse(body);
+                    const pPath = getConfigPath('personalization.json');
+                    const payload = {
+                        header_text: String(data.header_text || 'Fotos Mágicas'),
+                        header_bg_color: String(data.header_bg_color || '#2c3e50'),
+                        header_text_color: String(data.header_text_color || '#ffffff'),
+                        accent_color: String(data.accent_color || '#3498db'),
+                        header_font_size: Number.isFinite(parseInt(data.header_font_size)) ? parseInt(data.header_font_size) : 20,
+                        header_height: Number.isFinite(parseInt(data.header_height)) ? parseInt(data.header_height) : 80,
+                        sidebar_width: Number.isFinite(parseInt(data.sidebar_width)) ? parseInt(data.sidebar_width) : 260,
+                        thumb_border_radius: Number.isFinite(parseInt(data.thumb_border_radius)) ? parseInt(data.thumb_border_radius) : 5,
+                        thumb_gap: Number.isFinite(parseInt(data.thumb_gap)) ? parseInt(data.thumb_gap) : 8,
+                        sidebar_thumb_height: Number.isFinite(parseInt(data.sidebar_thumb_height)) ? parseInt(data.sidebar_thumb_height) : 120,
+                        clear_background_mode: !!data.clear_background_mode,
+                        enable_premium_theme: !!data.enable_premium_theme,
+                        disable_photo_shadow: !!data.disable_photo_shadow,
+                        enable_snow_effect: !!data.enable_snow_effect,
+                        logo_text: String(data.logo_text || ''),
+                        logo_image_url: String(data.logo_image_url || ''),
+                        default_variant: String(data.default_variant || '10x15'),
+                        main_photo_max_width: Number.isFinite(parseInt(data.main_photo_max_width)) ? parseInt(data.main_photo_max_width) : 900,
+                        main_photo_max_height: Number.isFinite(parseInt(data.main_photo_max_height)) ? parseInt(data.main_photo_max_height) : 700,
+                        sidebar_bg_color: String(data.sidebar_bg_color || '#1f2a35'),
+                        body_bg_color: String(data.body_bg_color || '#10161b'),
+                        enable_vignette: !!data.enable_vignette,
+                        vignette_intensity: Number.isFinite(parseFloat(data.vignette_intensity)) ? Math.max(0, Math.min(0.5, parseFloat(data.vignette_intensity))) : 0.12,
+                        enable_glow: !!data.enable_glow,
+                        updated_at: new Date().toISOString()
+                    };
+                    const ok = saveJSON(pPath, payload);
+                    if (ok) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: true, personalization: payload }));
+                    } else {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, error: 'Falha ao salvar' }));
+                    }
+                } catch (error) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: 'Dados inválidos' }));
+                }
+            });
+            return;
+        }
+
+        if (pathname === '/api/reset-personalization' && method === 'POST') {
+            try {
+                const pPath = getConfigPath('personalization.json');
+                const defaults = {
+                    header_text: 'Fotos Mágicas',
+                    header_bg_color: '#2c3e50',
+                    header_text_color: '#ffffff',
+                    accent_color: '#8b0000',
+                    header_font_size: 20,
+                    header_height: 80,
+                    sidebar_width: 260,
+                    thumb_border_radius: 5,
+                    thumb_gap: 8,
+                    sidebar_thumb_height: 120,
+                    enable_snow_effect: false,
+                    logo_text: '',
+                    logo_image_url: '',
+                    default_variant: '10x15',
+                    main_photo_max_width: 900,
+                    main_photo_max_height: 700,
+                    sidebar_bg_color: 'linear-gradient(135deg, #c41e3a 0%, #8b0000 100%)',
+                    body_bg_color: 'radial-gradient(ellipse at center, #1e3c72, #0f4c75)',
+                    enable_vignette: false,
+                    enable_glow: false,
+                    updated_at: new Date().toISOString()
+                };
+                saveJSON(pPath, defaults);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, personalization: defaults }));
+            } catch (error) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false }));
+            }
+            return;
+        }
 
         // API de impressão com impressora configurada (Windows nativo)
         if (pathname === '/api/print-configured' && method === 'POST') {
@@ -1863,7 +2004,7 @@ const server = http.createServer(async (req, res) => {
                     console.log('Solicitação de impressão configurada:', { printer_name, paper_size, copies });
                     
                     // Carregar configuração de impressoras
-                    const printerConfigPath = path.join(__dirname, '../../config/printer_config.json');
+                    const printerConfigPath = getConfigPath('printer_config.json');
                     const printerConfig = loadJSON(printerConfigPath, {});
                     
                     // Determinar impressora baseada no formato configurado
@@ -1886,7 +2027,7 @@ const server = http.createServer(async (req, res) => {
                     }
                     
                     // Salvar imagem temporária
-                    const tempDir = path.join(__dirname, 'temp');
+                    const tempDir = path.join(userDataPath, 'temp');
                     if (!fs.existsSync(tempDir)) {
                         fs.mkdirSync(tempDir, { recursive: true });
                     }
@@ -1964,94 +2105,183 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        // API de impressão Java (fallback)
-        if (pathname === '/api/print-java' && method === 'POST') {
+        if (pathname === '/api/mover-config' && method === 'GET') {
+            const moveCfgPath = getConfigPath('move_settings.json');
+            const defaultSrc = getImagesFolderPath();
+            const cfg = loadJSON(moveCfgPath, { src: defaultSrc, dst: path.join(userDataPath, 'moved') });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(cfg));
+            return;
+        }
+
+        if (pathname === '/api/mover-config' && method === 'POST') {
             let body = '';
             req.on('data', chunk => body += chunk.toString());
-            req.on('end', async () => {
+            req.on('end', () => {
                 try {
-                    const printData = JSON.parse(body);
-                    const { image_data, printer_name, paper_size, copies = 1 } = printData;
-                    
-                    console.log('Solicitação de impressão Java (fallback):', { printer_name, paper_size, copies });
-                    
-                    // Salvar imagem temporária
-                    const tempDir = path.join(__dirname, 'temp');
-                    if (!fs.existsSync(tempDir)) {
-                        fs.mkdirSync(tempDir, { recursive: true });
-                    }
-                    
-                    const tempFileName = `java_print_${Date.now()}.jpg`;
-                    const tempFilePath = path.join(tempDir, tempFileName);
-                    
-                    // Converter base64 para arquivo
-                    const base64Data = image_data.replace(/^data:image\/[a-z]+;base64,/, '');
-                    fs.writeFileSync(tempFilePath, base64Data, 'base64');
-                    
-                    // Determinar o script Java baseado no formato e impressora
-                    let javaScript = 'ImprimirFoto10x15ASK300';
-                    let javaDir = path.join(__dirname, 'impressora', 'ask300');
-                    
-                    if (printer_name && printer_name.includes('ASK-400')) {
-                        javaDir = path.join(__dirname, 'impressora', 'ask400');
-                        javaScript = (paper_size === '15x20' || paper_size === '15x21') ? 'ImprimirFoto15x20' : 'ImprimirFoto10x15ASK400';
-                    } else if (paper_size === '15x20' || paper_size === '15x21') {
-                        javaScript = 'ImprimirFoto15x20ASK300';
-                    }
-                    
-                    console.log(`Selecionado Java: ${javaScript} no diretório ${javaDir}`);
-                    
-                    try {
-                        // Executar impressão múltiplas vezes se necessário
-                        let results = [];
-                        for (let i = 0; i < copies; i++) {
-                            const result = await executeJavaScript(javaScript, tempFilePath, printer_name, javaDir);
-                            results.push(result);
-                        }
-                        
-                        // Limpar arquivo temporário
-                        try {
-                            fs.unlinkSync(tempFilePath);
-                        } catch (cleanupError) {
-                            console.warn('Erro ao limpar arquivo temporário:', cleanupError);
-                        }
-                        
+                    const data = JSON.parse(body);
+                    const moveCfgPath = getConfigPath('move_settings.json');
+                    const defaultSrc = getImagesFolderPath();
+                    const payload = {
+                        src: String(data.src || defaultSrc || ''),
+                        dst: String(data.dst || path.join(userDataPath, 'moved'))
+                    };
+                    const ok = saveJSON(moveCfgPath, payload);
+                    if (ok) {
                         res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({
-                            success: true,
-                            message: `Impressão Java enviada com sucesso (${copies} cópia${copies > 1 ? 's' : ''})`,
-                            printer: printer_name,
-                            paper_size: paper_size,
-                            copies: copies,
-                            method: 'java_fallback',
-                            results: results
-                        }));
-                    } catch (error) {
-                        // Limpar arquivo temporário em caso de erro
-                        try {
-                            fs.unlinkSync(tempFilePath);
-                        } catch (cleanupError) {
-                            console.warn('Erro ao limpar arquivo temporário:', cleanupError);
-                        }
-                        
+                        res.end(JSON.stringify({ success: true, config: payload }));
+                    } else {
                         res.writeHead(500, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({
-                            success: false,
-                            message: 'Erro na impressão Java',
-                            error: error.error || error.message
-                        }));
+                        res.end(JSON.stringify({ success: false }));
                     }
                 } catch (error) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ 
-                        success: false, 
-                        message: 'Dados inválidos',
-                        error: error.message 
-                    }));
+                    res.end(JSON.stringify({ error: 'Dados inválidos' }));
                 }
             });
             return;
         }
+
+        if (pathname === '/api/move-today' && method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk.toString());
+            req.on('end', async () => {
+                try {
+                    const data = body ? JSON.parse(body) : {};
+                    const moveCfgPath = getConfigPath('move_settings.json');
+                    const moveCfg = loadJSON(moveCfgPath, { src: getImagesFolderPath(), dst: path.join(userDataPath, 'moved') });
+                    const srcRoot = data.src || moveCfg.src || getImagesFolderPath();
+                    if (!srcRoot || !fs.existsSync(srcRoot)) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, error: 'Pasta de imagens não configurada' }));
+                        return;
+                    }
+                    const today = new Date();
+                    const todayName = buildDateFolderName(today);
+                    const regex = getFolderRegexForFormat();
+                    let srcSub = '';
+                    let effectiveFolderName = '';
+                    // Caso 1: usuário escolheu diretamente a pasta do dia
+                    try {
+                        const baseName = path.basename(srcRoot);
+                        if (regex.test(baseName) && fs.statSync(srcRoot).isDirectory()) {
+                            srcSub = srcRoot;
+                            effectiveFolderName = baseName;
+                        }
+                    } catch (_) {}
+                    // Caso 2: existe subpasta do dia dentro da origem
+                    if (!srcSub) {
+                        const candidate = path.join(srcRoot, todayName);
+                        if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+                            srcSub = candidate;
+                            effectiveFolderName = todayName;
+                        }
+                    }
+                    // Caso 3: fallback para pasta de data mais recente disponível
+                    if (!srcSub) {
+                        try {
+                            const entries = fs.readdirSync(srcRoot, { withFileTypes: true });
+                            const datedDirs = entries
+                                .filter(e => e.isDirectory() && regex.test(e.name))
+                                .map(e => {
+                                    const p = path.join(srcRoot, e.name);
+                                    const stat = fs.statSync(p);
+                                    return { name: e.name, path: p, mtimeMs: stat.mtimeMs };
+                                })
+                                .sort((a, b) => b.mtimeMs - a.mtimeMs);
+                            if (datedDirs.length) {
+                                srcSub = datedDirs[0].path;
+                                effectiveFolderName = datedDirs[0].name;
+                            }
+                        } catch (_) {}
+                    }
+                    // Caso 4: mover diretamente o conteúdo da pasta escolhida
+                    if (!srcSub) {
+                        srcSub = srcRoot;
+                        effectiveFolderName = path.basename(srcRoot) || todayName;
+                    }
+                    const dstRoot = data.dst || moveCfg.dst || path.join(userDataPath, 'moved');
+                    if (!fs.existsSync(dstRoot)) fs.mkdirSync(dstRoot, { recursive: true });
+                    const dstSub = path.join(dstRoot, effectiveFolderName);
+                    if (!fs.existsSync(dstSub)) fs.mkdirSync(dstSub, { recursive: true });
+                    let files = [];
+                    const walk = (dir, relBase) => {
+                        const entries = fs.readdirSync(dir, { withFileTypes: true });
+                        for (const e of entries) {
+                            const p = path.join(dir, e.name);
+                            const rel = path.join(relBase, e.name);
+                            if (e.isDirectory()) walk(p, rel);
+                            else files.push({ full: p, rel });
+                        }
+                    };
+                    walk(srcSub, '');
+                    let moved = 0;
+                    notifyClients('move-progress', { moved: 0, total: files.length, pct: files.length ? 0 : 100, src: srcSub, dst: dstSub });
+                    for (const f of files) {
+                        const target = path.join(dstSub, f.rel);
+                        const dir = path.dirname(target);
+                        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                        try {
+                            fs.renameSync(f.full, target);
+                            moved++;
+                        } catch (err) {
+                            try {
+                                fs.copyFileSync(f.full, target);
+                                fs.unlinkSync(f.full);
+                                moved++;
+                            } catch {}
+                        }
+                        notifyClients('move-progress', { moved, total: files.length, pct: files.length ? Math.round((moved / files.length) * 100) : 100, src: srcSub, dst: dstSub });
+                    }
+                    let remaining = 0;
+                    try { remaining = fs.readdirSync(srcSub).length; } catch {}
+                    notifyClients('move-progress', { moved, total: files.length, pct: files.length ? Math.round((moved / files.length) * 100) : 100, src: srcSub, dst: dstSub });
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, moved, total: files.length, src: srcSub, dst: dstSub, remaining }));
+                } catch (error) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: 'Erro ao mover' }));
+                }
+            });
+            return;
+        }
+
+        if (normalizedPath === '/api/ui/thumbnail-size' && method === 'GET') {
+            const imageConfigPath = getConfigPath('image_settings.json');
+            const cfg = loadJSON(imageConfigPath, {});
+            const sizeArr = cfg.thumbnail_size || [100, 100];
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ size: parseInt(sizeArr[0] || 100, 10) }));
+            return;
+        }
+
+        if (normalizedPath === '/api/ui/thumbnail-size' && method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk.toString());
+            req.on('end', () => {
+                try {
+                    const data = JSON.parse(body);
+                    const size = parseInt(data.size, 10);
+                    if (!size || size < 40 || size > 400) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Tamanho inválido' }));
+                        return;
+                    }
+                    const imageConfigPath = getConfigPath('image_settings.json');
+                    const cfg = loadJSON(imageConfigPath, {});
+                    cfg.thumbnail_size = [size, size];
+                    saveJSON(imageConfigPath, cfg);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, size }));
+                } catch (error) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Dados inválidos' }));
+                }
+            });
+            return;
+        }
+
+        // API /api/print-java removida - dependia de scripts Java ausentes
         
         // API de impressão (mantida para compatibilidade)
         if (pathname === '/api/print' && method === 'POST') {
@@ -2066,11 +2296,29 @@ const server = http.createServer(async (req, res) => {
                     
                     // Construir caminho completo da imagem
                     const today = new Date();
-                    const dia = String(today.getDate()).padStart(2, '0');
-                    const mes = String(today.getMonth() + 1).padStart(2, '0');
-                    const ano = today.getFullYear();
-                    const todayFormatted = `${dia}${mes}${ano}`;
-                    const fullImagePath = path.join(__dirname, '../../imagens', todayFormatted, imagePath);
+                    const todayFormatted = buildDateFolderName(today);
+                    
+                    const imagesDir = getImagesFolderPath();
+                    const basePath = config.image_settings?.base_path || imagesDir;
+                    let fullImagePath = imagePath;
+
+                    // Se vier absoluto, usar direto
+                    if (!path.isAbsolute(fullImagePath)) {
+                        fullImagePath = path.join(imagesDir, imagePath);
+                    }
+                    const allowedExtensions = (config.image_settings?.allowed_extensions) || ['.jpg', '.jpeg', '.png', '.gif'];
+                    
+                    // Resolver extensão ausente automaticamente (ex.: '10x15_20251115_115517')
+                    if (!fs.existsSync(fullImagePath) && !path.extname(imagePath)) {
+                        for (const ext of allowedExtensions) {
+                            const candidate = path.join(imagesDir, imagePath + ext);
+                            if (fs.existsSync(candidate)) {
+                                console.log(`🔎 Extensão resolvida automaticamente: ${candidate}`);
+                                fullImagePath = candidate;
+                                break;
+                            }
+                        }
+                    }
                     
                     console.log('📁 Pasta do dia:', todayFormatted);
                     console.log('📄 Arquivo solicitado:', imagePath);
@@ -2090,12 +2338,20 @@ const server = http.createServer(async (req, res) => {
                     
                     try {
                         console.log('🚀 Executando impressão nativa do Windows...');
-                        const result = await executeWindowsNativePrint(fullImagePath, printerName, paperSize, copies || 1);
+                        // Resolver impressora padrão se necessário
+                        let targetPrinter = printerName;
+                        if (!targetPrinter || targetPrinter === 'default') {
+                            const printerConfigPath = getConfigPath('printer_config.json');
+                            const printerConfig = loadJSON(printerConfigPath, {});
+                            targetPrinter = printerConfig.user_preferences?.default_printer || printerConfig.last_used_printer || targetPrinter;
+                            console.log(`📋 Impressora resolvida: ${targetPrinter || 'não definida'}`);
+                        }
+                        const result = await executeWindowsNativePrint(fullImagePath, targetPrinter, paperSize, copies || 1);
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({
                             success: true,
                             message: 'Impressão enviada com sucesso',
-                            printer: printerName,
+                            printer: targetPrinter,
                             paperSize: paperSize,
                             copies: copies || 1,
                             imagePath: fullImagePath
@@ -2115,6 +2371,109 @@ const server = http.createServer(async (req, res) => {
                         message: 'Dados inválidos',
                         error: error.message 
                     }));
+                }
+            });
+            return;
+        }
+
+        if (pathname === '/api/print-dialog' && method === 'POST') {
+            let body = '';
+            req.on('data', chunk => body += chunk.toString());
+            req.on('end', async () => {
+                try {
+                    const data = JSON.parse(body || '{}');
+                    const { imagePath } = data;
+                    if (!imagePath) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, error: 'imagePath ausente' }));
+                        return;
+                    }
+                    const imagesDir = getImagesFolderPath();
+                    let fullImagePath = path.join(imagesDir, imagePath);
+                    const allowedExtensions = (config.image_settings?.allowed_extensions) || ['.jpg', '.jpeg', '.png', '.gif'];
+                    if (!fs.existsSync(fullImagePath) && !path.extname(imagePath)) {
+                        for (const ext of allowedExtensions) {
+                            const candidate = path.join(imagesDir, imagePath + ext);
+                            if (fs.existsSync(candidate)) {
+                                fullImagePath = candidate;
+                                break;
+                            }
+                        }
+                    }
+                    // Tentativa extra: tentar na basePath diretamente
+                    if (!fs.existsSync(fullImagePath)) {
+                        const direct = path.join(basePath, imagePath);
+                        if (fs.existsSync(direct)) fullImagePath = direct;
+                    }
+                    // Tentativa extra: busca recursiva por nome exato
+                    if (!fs.existsSync(fullImagePath)) {
+                        try {
+                            const { execSync } = require('child_process');
+                            const searchCmd = `powershell -NoProfile -Command "Get-ChildItem -Path \"${basePath}\" -Recurse -File | Where-Object { $_.Name -eq \"${path.basename(imagePath)}\" } | Select-Object -First 1 -ExpandProperty FullName"`;
+                            const found = String(execSync(searchCmd, { stdio: ['pipe', 'pipe', 'ignore'] }).toString()).trim();
+                            if (found) fullImagePath = found;
+                        } catch (_) {}
+                    }
+                    if (!fs.existsSync(fullImagePath)) {
+                        res.writeHead(404, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: false, error: 'Imagem não encontrada', path: fullImagePath }));
+                        return;
+                    }
+                    const tryRundllPrint = () => {
+                        const cmd = `${process.env['WINDIR'] || 'C:/Windows'}/System32/rundll32.exe ${process.env['WINDIR'] || 'C:/Windows'}/System32/shimgvw.dll,ImageView_Print \"${fullImagePath}\"`;
+                        exec(cmd, { shell: 'cmd.exe' }, (err) => {
+                            if (!err) {
+                                res.writeHead(200, { 'Content-Type': 'application/json' });
+                                res.end(JSON.stringify({ success: true, method: 'rundll32_ImageView_Print' }));
+                                return;
+                            }
+                            tryStartProcessVerbPrint();
+                        });
+                    };
+
+                    const tryStartProcessVerbPrint = () => {
+                        const ps = `Start-Process -FilePath \"${fullImagePath}\" -Verb Print`;
+                        exec(ps, { shell: 'powershell.exe' }, (err, stdout, stderr) => {
+                            if (!err) {
+                                res.writeHead(200, { 'Content-Type': 'application/json' });
+                                res.end(JSON.stringify({ success: true, method: 'start_process_verb_print' }));
+                                return;
+                            }
+                            tryMsPhotosPrint();
+                        });
+                    };
+
+                    const tryMsPhotosPrint = () => {
+                        const uri = `ms-photos:print?input=\"${fullImagePath}\"`;
+                        const cmd = `start "" "${uri}"`;
+                        exec(cmd, { shell: 'cmd.exe' }, (err) => {
+                            if (!err) {
+                                res.writeHead(200, { 'Content-Type': 'application/json' });
+                                res.end(JSON.stringify({ success: true, method: 'ms_photos' }));
+                                return;
+                            }
+                            tryPhotoViewerFullscreen();
+                        });
+                    };
+
+                    const tryPhotoViewerFullscreen = () => {
+                        const photoViewerDll = path.join(process.env['ProgramFiles'] || 'C:/Program Files', 'Windows Photo Viewer', 'PhotoViewer.dll');
+                        const args = `\"${photoViewerDll}\", ImageView_Fullscreen \"${fullImagePath}\"`;
+                        exec(`${process.env['WINDIR'] || 'C:/Windows'}/System32/rundll32.exe ${args}`, { shell: 'cmd.exe' }, (err2) => {
+                            if (err2) {
+                                res.writeHead(500, { 'Content-Type': 'application/json' });
+                                res.end(JSON.stringify({ success: false, error: 'Falha ao abrir diálogo de impressão', details: 'Todos os métodos falharam' }));
+                                return;
+                            }
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ success: true, fallback: 'photo_viewer_fullscreen' }));
+                        });
+                    };
+
+                    tryRundllPrint();
+                } catch (error) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: false, error: 'Dados inválidos' }));
                 }
             });
             return;
@@ -2152,17 +2511,18 @@ const server = http.createServer(async (req, res) => {
                     config.image_settings.base_path = folder_path;
                     
                     // Salvar configuração
-                    const configPath = path.join(__dirname, '../../config/image_settings.json');
+                    const configPath = getConfigPath('image_settings.json');
                     const success = saveJSON(configPath, config.image_settings);
                     
                     if (success) {
                         // Verificar pastas de data disponíveis
                         const availableFolders = [];
                         try {
+                            const regex = getFolderRegexForFormat();
                             const folders = fs.readdirSync(folder_path)
                                 .filter(item => {
                                     const fullPath = path.join(folder_path, item);
-                                    return fs.statSync(fullPath).isDirectory() && /^\d{8}$/.test(item);
+                                    return fs.statSync(fullPath).isDirectory() && regex.test(item);
                                 })
                                 .sort().reverse();
                             
@@ -2170,6 +2530,10 @@ const server = http.createServer(async (req, res) => {
                         } catch (error) {
                             console.error('Erro ao verificar pastas de data:', error);
                         }
+
+                        // Reiniciar monitoramento com a nova pasta
+                        console.log('🔄 Reiniciando monitoramento para nova pasta:', folder_path);
+                        startFileWatcher();
 
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({
@@ -2200,26 +2564,47 @@ const server = http.createServer(async (req, res) => {
         if (pathname === '/api/current-image-folder' && method === 'GET') {
             const currentPath = config.image_settings?.base_path || '';
             const exists = currentPath && fs.existsSync(currentPath);
-            
+
+            // Determinar pasta ativa usada pelo Kiosk
+            const today = new Date();
+            const expectedFolderName = buildDateFolderName(today);
+            const expectedDailyPath = currentPath ? path.join(currentPath, expectedFolderName) : '';
+            const activeDir = getImagesFolderPath();
+            const activeExists = activeDir && fs.existsSync(activeDir);
+            let activeOrigin = 'unknown';
+            if (activeDir === expectedDailyPath) {
+                activeOrigin = 'daily';
+            } else if (activeDir === currentPath) {
+                activeOrigin = 'base';
+            } else {
+                activeOrigin = 'fallback';
+            }
+
             let availableFolders = [];
             if (exists) {
                 try {
+                    const regex = getFolderRegexForFormat();
                     availableFolders = fs.readdirSync(currentPath)
                         .filter(item => {
                             const fullPath = path.join(currentPath, item);
-                            return fs.statSync(fullPath).isDirectory() && /^\d{8}$/.test(item);
+                            return fs.statSync(fullPath).isDirectory() && regex.test(item);
                         })
                         .sort().reverse();
                 } catch (error) {
                     console.error('Erro ao listar pastas de data:', error);
                 }
             }
-            
+
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
                 current_path: currentPath,
                 exists: exists,
-                available_date_folders: availableFolders
+                available_date_folders: availableFolders,
+                current_format: getDateFormat(),
+                active_images_dir: activeDir,
+                active_exists: activeExists,
+                active_origin: activeOrigin,
+                today_expected_folder: expectedFolderName
             }));
             return;
         }
@@ -2258,25 +2643,14 @@ const server = http.createServer(async (req, res) => {
 
 
     // 404 - Não encontrado
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Página não encontrada');
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Página não encontrada', path: pathname }));
 });
 
 
 
 // Compilar scripts Java na inicialização
-function compileJavaScripts() {
-    const javaDir = './impressora/ask300';
-    if (fs.existsSync(javaDir)) {
-        exec('javac *.java', { cwd: javaDir }, (error, stdout, stderr) => {
-            if (error) {
-                console.error('Erro ao compilar scripts Java:', error.message);
-            } else {
-                console.log('Scripts Java compilados com sucesso!');
-            }
-        });
-    }
-}
+// Função compileJavaScripts removida - dependências Java não existem
 
 // Iniciar servidor
 // Função para detectar impressoras funcionais automaticamente
@@ -2319,7 +2693,7 @@ function updatePrinterConfig(workingPrinters) {
         return;
     }
     
-    const configPath = path.join(__dirname, '../../config/printer_config.json');
+    const configPath = getConfigPath('printer_config.json');
     const currentConfig = loadJSON(configPath, {});
     
     // Encontrar a melhor impressora disponível
@@ -2398,8 +2772,7 @@ server.listen(PORT, HOST, async () => {
     
     console.log(`📱 Iniciando interface automaticamente...\n`);
     
-    // Compilar scripts Java
-    compileJavaScripts();
+    // Compilação Java removida - dependências não existem
     
     // Iniciar monitoramento de arquivos
     console.log('🔍 Iniciando monitoramento de imagens...');

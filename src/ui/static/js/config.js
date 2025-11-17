@@ -1,12 +1,12 @@
 // JavaScript para config.html
 document.addEventListener('DOMContentLoaded', function() {
-    // Mostrar dashboard por padrão
+    // Mostrar seção de Imagens por padrão
     setTimeout(() => {
-        showSection('dashboard');
+        showSection('images');
     }, 100);
     
     loadCurrentVersion();
-    loadSalesReports();
+    // Dashboard removido: relatórios de vendas não são mais carregados
     loadPrinterConfiguration();
     loadCurrentSettings();
     setupEventListeners();
@@ -40,13 +40,7 @@ function setupEventListeners() {
     if (logoutButton) {
         logoutButton.addEventListener('click', async () => {
             if (confirm('Tem certeza que deseja sair da área administrativa?')) {
-                try {
-                    await fetch('/api/logout', { method: 'POST' });
-                    window.location.href = '/login.html';
-                } catch (error) {
-                    console.error('Erro ao fazer logout:', error);
-                    window.location.href = '/login.html';
-                }
+                window.location.href = '/';
             }
         });
     } else {
@@ -54,14 +48,66 @@ function setupEventListeners() {
     }
     
     // Event listeners adicionais
-    const refreshButton = document.getElementById('refresh-sales-button');
-    if (refreshButton) {
-        refreshButton.addEventListener('click', loadSalesReports);
-    }
+    // Botão de atualizar dashboard removido
     
     const checkUpdatesButton = document.getElementById('check-updates-button');
-    if (checkUpdatesButton) {
-        checkUpdatesButton.addEventListener('click', checkForUpdates);
+    if (checkUpdatesButton && window.electronAPI && window.electronAPI.selectUpdateZip) {
+        checkUpdatesButton.addEventListener('click', async () => {
+            checkUpdatesButton.disabled = true;
+            const original = checkUpdatesButton.textContent;
+            checkUpdatesButton.textContent = '🔎 Selecionando...';
+            try {
+                const sel = await window.electronAPI.selectUpdateZip();
+                if (sel && !sel.canceled && sel.path) {
+                    checkUpdatesButton.textContent = '🔄 Atualizando...';
+                    const r = await window.electronAPI.applyUpdateZip(sel.path);
+                    if (!r || !r.success) {
+                        showError(r && r.error ? r.error : 'Falha ao aplicar atualização');
+                        checkUpdatesButton.textContent = '❌ Falha';
+                    }
+                } else {
+                    checkUpdatesButton.textContent = original;
+                }
+            } catch (e) {
+                showError(e.message || 'Erro na atualização');
+                checkUpdatesButton.textContent = '❌ Erro';
+            } finally {
+                setTimeout(() => {
+                    checkUpdatesButton.disabled = false;
+                    checkUpdatesButton.textContent = original;
+                }, 4000);
+            }
+        });
+    }
+
+    const portableUpdateButton = document.getElementById('portable-update-button');
+    if (portableUpdateButton && window.electronAPI && window.electronAPI.selectUpdateZip) {
+        portableUpdateButton.addEventListener('click', async () => {
+            portableUpdateButton.disabled = true;
+            const original = portableUpdateButton.textContent;
+            portableUpdateButton.textContent = '🔎 Selecionando...';
+            try {
+                const sel = await window.electronAPI.selectUpdateZip();
+                if (sel && !sel.canceled && sel.path) {
+                    portableUpdateButton.textContent = '🔄 Atualizando...';
+                    const r = await window.electronAPI.applyUpdateZip(sel.path);
+                    if (!r || !r.success) {
+                        showError(r && r.error ? r.error : 'Falha ao aplicar atualização');
+                        portableUpdateButton.textContent = '❌ Falha';
+                    }
+                } else {
+                    portableUpdateButton.textContent = original;
+                }
+            } catch (e) {
+                showError(e.message || 'Erro na atualização');
+                portableUpdateButton.textContent = '❌ Erro';
+            } finally {
+                setTimeout(() => {
+                    portableUpdateButton.disabled = false;
+                    portableUpdateButton.textContent = original;
+                }, 4000);
+            }
+        });
     }
     
     // Event listeners para configuração de impressoras
@@ -94,6 +140,8 @@ function setupEventListeners() {
             this.textContent = '🔄 Atualizar Lista';
         });
     }
+
+    
 }
 
 // Função para mostrar seção específica (CORRIGIDA)
@@ -115,10 +163,12 @@ function showSection(sectionName) {
         targetSection.classList.add('active');
         console.log('Seção ativada:', sectionName); // Debug
         
-        // Carregar dados específicos da seção
         if (sectionName === 'images') {
             loadImageConfig();
-
+        } else if (sectionName === 'thumbnails') {
+            loadThumbnailConfig();
+        } else if (sectionName === 'dashboard') {
+            loadPrintStatsDashboard();
         }
     } else {
         console.error('Seção não encontrada:', sectionName + '-section');
@@ -133,6 +183,60 @@ function showSection(sectionName) {
     if (menuItem) {
         menuItem.classList.add('active');
     }
+}
+
+async function loadPrintStatsDashboard() {
+    try {
+        const datesResp = await fetch('/api/print-stats/dates');
+        const datesData = datesResp.ok ? await datesResp.json() : { dates: [] };
+        const sel = document.getElementById('print-stats-date');
+        if (sel) {
+            sel.innerHTML = '';
+            const dates = Array.isArray(datesData.dates) ? datesData.dates : [];
+            dates.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d;
+                opt.textContent = d;
+                sel.appendChild(opt);
+            });
+            sel.onchange = async () => {
+                const d = sel.value;
+                const r = await fetch(`/api/print-stats?date=${encodeURIComponent(d)}`);
+                const j = r.ok ? await r.json() : { totals: {} };
+                renderPrintStatsResult(d, j.totals || {});
+            };
+            if (dates.length) {
+                sel.value = dates[0];
+                const r = await fetch(`/api/print-stats?date=${encodeURIComponent(dates[0])}`);
+                const j = r.ok ? await r.json() : { totals: {} };
+                renderPrintStatsResult(dates[0], j.totals || {});
+            } else {
+                renderPrintStatsResult('', {});
+            }
+        }
+    } catch (_) {
+        renderPrintStatsResult('', {});
+    }
+}
+
+function renderPrintStatsResult(date, totals) {
+    const cont = document.getElementById('print-stats-result');
+    if (!cont) return;
+    const keys = Object.keys(totals || {});
+    if (!date || !keys.length) {
+        cont.textContent = 'Sem dados disponíveis';
+        return;
+    }
+    cont.innerHTML = '';
+    const ul = document.createElement('ul');
+    ul.style.listStyle = 'none';
+    ul.style.padding = '0';
+    keys.sort().forEach(k => {
+        const li = document.createElement('li');
+        li.textContent = `${totals[k]} vezes ${k}`;
+        ul.appendChild(li);
+    });
+    cont.appendChild(ul);
 }
 
 // Funções do Electron
@@ -268,10 +372,47 @@ async function loadCurrentSettings() {
                     imagePathInput.value = config.image_path;
                 }
             }
+            
+            // Carregar configuração de formato de data
+            if (config.date_format && config.date_format.folder_format) {
+                const formatRadio = document.getElementById(`format-${config.date_format.folder_format.toLowerCase()}`);
+                if (formatRadio) {
+                    formatRadio.checked = true;
+                }
+            }
         }
     } catch (error) {
         console.error('Erro ao carregar configurações:', error);
     }
+}
+
+async function loadThumbnailConfig() {
+    try {
+        let r = await fetch('/api/ui/thumbnail-size');
+        if (!r.ok) r = await fetch('/api/ui/thumbnail-size/');
+        if (!r.ok) {
+            const origin = window.location.origin || 'http://localhost:5000';
+            r = await fetch(origin + '/api/ui/thumbnail-size');
+        }
+        if (r.ok) {
+            const d = await r.json();
+            const s = parseInt(d.size || 100, 10);
+            const input = document.getElementById('thumb-size-input');
+            const label = document.getElementById('thumb-size-label');
+            if (input) input.value = s;
+            if (label) label.textContent = `${s} px`;
+            document.documentElement.style.setProperty('--thumb-size', `${s}px`);
+            try { localStorage.setItem('thumb_size', String(s)); } catch (_) {}
+        } else {
+            let s = 100;
+            try { s = parseInt(localStorage.getItem('thumb_size') || '100', 10); } catch (_) {}
+            const input = document.getElementById('thumb-size-input');
+            const label = document.getElementById('thumb-size-label');
+            if (input) input.value = s;
+            if (label) label.textContent = `${s} px`;
+            document.documentElement.style.setProperty('--thumb-size', `${s}px`);
+        }
+    } catch (e) {}
 }
 
 // Salvar configurações de imagem (CORRIGIDO)
@@ -334,35 +475,7 @@ async function saveImageConfig() {
     }
 }
 
-// Carregar relatórios de vendas
-async function loadSalesReports() {
-    try {
-        const response = await fetch('/api/sales/reports');
-        if (response.ok) {
-            const data = await response.json();
-            updateSalesStats(data);
-        }
-    } catch (error) {
-        console.error('Erro ao carregar relatórios:', error);
-    }
-}
-
-// Atualizar estatísticas de vendas
-function updateSalesStats(data) {
-    const elements = {
-        'total-sales': `R$ ${(data.total_sales || 0).toFixed(2)}`,
-        'total-photos': data.total_photos || 0,
-        'today-sales': `R$ ${(data.today_sales || 0).toFixed(2)}`,
-        'average-ticket': `R$ ${(data.average_ticket || 0).toFixed(2)}`
-    };
-    
-    Object.entries(elements).forEach(([id, value]) => {
-        const element = document.getElementById(id);
-        if (element) {
-            element.textContent = value;
-        }
-    });
-}
+// Dashboard e relatórios de vendas removidos
 
 // Carregar configuração de impressoras
 async function loadPrinterConfiguration() {
@@ -399,7 +512,6 @@ async function loadPrinterConfiguration() {
                 // Adiciona listener para atualizar status
                 select.addEventListener('change', function() {
                     const format = this.id.replace('printer-', '');
-                    
                     if (this.value) {
                         updateFormatStatus(format, this.value);
                     } else {
@@ -443,6 +555,8 @@ async function loadPrinterConfiguration() {
         showError('Erro ao carregar configuração de impressoras.');
     }
 }
+
+
 
 
 
@@ -708,6 +822,12 @@ async function savePrinterConfiguration() {
                 quality: 'high'
             }
         };
+        // Compatibilidade: fornecer também "formats" apenas com impressora
+        config.formats = {};
+        Object.keys(formatMappings).forEach(k => {
+            const m = formatMappings[k];
+            config.formats[k] = { printer: m.printer };
+        });
         
         console.log('📤 Enviando configuração para o servidor:', config);
         
@@ -1090,16 +1210,31 @@ async function loadImageConfig() {
         
         if (foldersElement) {
             if (data.available_date_folders && data.available_date_folders.length > 0) {
+                const format = data.current_format || 'DDMMYYYY';
                 const folderList = data.available_date_folders.map(folder => {
-                    // Converter DDMMAAAA para formato legível
-                    const day = folder.substring(0, 2);
-                    const month = folder.substring(2, 4);
-                    const year = folder.substring(4, 8);
+                    let day, month, year;
+                    if (format === 'YYYYMMDD') {
+                        year = folder.substring(0, 4);
+                        month = folder.substring(4, 6);
+                        day = folder.substring(6, 8);
+                    } else if (format === 'YYMMDD') {
+                        year = `20${folder.substring(0, 2)}`;
+                        month = folder.substring(2, 4);
+                        day = folder.substring(4, 6);
+                    } else if (format === 'DDMMYY') {
+                        day = folder.substring(0, 2);
+                        month = folder.substring(2, 4);
+                        year = `20${folder.substring(4, 6)}`;
+                    } else {
+                        day = folder.substring(0, 2);
+                        month = folder.substring(2, 4);
+                        year = folder.substring(4, 8);
+                    }
                     return `<span class="date-folder">${folder} (${day}/${month}/${year})</span>`;
                 }).join(', ');
                 foldersElement.innerHTML = `<strong>📅 Pastas de data encontradas:</strong><br>${folderList}`;
             } else if (data.current_path && data.exists) {
-                foldersElement.innerHTML = '<em>⚠️ Nenhuma pasta de data encontrada. Crie pastas no formato DDMMAAAA (ex: 14082025)</em>';
+                foldersElement.innerHTML = `<em>⚠️ Nenhuma pasta de data encontrada. Crie pastas no formato ${data.current_format || 'DDMMYYYY'}</em>`;
             } else {
                 foldersElement.innerHTML = '<em>Selecione uma pasta de imagens para ver as pastas de data disponíveis</em>';
             }
@@ -1123,6 +1258,337 @@ async function loadImageConfig() {
 
 
 // Inicializar quando a página carregar
+// Função para salvar formato de data
+async function saveDateFormat() {
+    try {
+        const selectedFormat = document.querySelector('input[name="date-format"]:checked')?.value;
+        
+        if (!selectedFormat) {
+            showError('Por favor, selecione um formato de data.');
+            return;
+        }
+        
+        const response = await fetch('/api/config/date-format', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                folder_format: selectedFormat
+            })
+        });
+        
+        if (response.ok) {
+            showSuccess(`Formato de data alterado para ${selectedFormat} com sucesso!`);
+            // Recarregar as pastas disponíveis com o novo formato
+            loadImageConfig();
+        } else {
+            const error = await response.text();
+            showError(`Erro ao salvar formato de data: ${error}`);
+        }
+    } catch (error) {
+        console.error('Erro ao salvar formato de data:', error);
+        showError('Erro ao salvar formato de data. Tente novamente.');
+    }
+}
+
+// Personalização
+let personalization = null;
+
+
 document.addEventListener('DOMContentLoaded', () => {
     loadImageConfig();
+    loadPersonalization();
+    setupPersonalizationEvents();
+    const moveBtn = document.getElementById('move-today-button');
+    if (moveBtn) {
+        moveBtn.addEventListener('click', async () => {
+            const btn = moveBtn;
+            const original = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳ Movendo...';
+            const bar = document.getElementById('move-progress-bar');
+            const text = document.getElementById('move-progress-text');
+            if (bar) bar.style.width = '0%';
+            if (text) text.textContent = '';
+            try {
+                const resp = await fetch('/api/move-today', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.success) {
+                        showSuccess(`Movidos ${data.moved}/${data.total}`);
+                    } else {
+                        showError('Falha ao mover');
+                    }
+                } else {
+                    showError('Erro ao mover');
+                }
+            } catch (_) {
+                showError('Erro ao mover');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = original;
+            }
+        });
+    }
+
+    initMoverConfigUI();
+    loadMoverConfig();
+    try {
+        const es = window.eventSource || (window.__configEventSource || (window.__configEventSource = new EventSource('/api/events')));
+        es.addEventListener('move-progress', function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                const bar = document.getElementById('move-progress-bar');
+                const text = document.getElementById('move-progress-text');
+                if (bar) bar.style.width = `${data.pct || 0}%`;
+                if (text) text.textContent = `Movidos ${data.moved}/${data.total} (${data.pct || 0}%)`;
+            } catch (e) {}
+        });
+    } catch (e) {}
 });
+
+function initMoverConfigUI() {
+    const pickSrc = document.getElementById('pick-move-src');
+    const pickDst = document.getElementById('pick-move-dst');
+    const saveBtn = document.getElementById('save-mover-config');
+    if (pickSrc) {
+        pickSrc.addEventListener('click', async () => {
+            try {
+                if (window.electronAPI?.selectDirectory) {
+                    const res = await window.electronAPI.selectDirectory();
+                    if (res && !res.canceled && res.filePaths?.length) {
+                        document.getElementById('move-src').value = res.filePaths[0];
+                    }
+                } else {
+                    showError('Seleção de pasta disponível apenas no modo desktop');
+                }
+            } catch (e) { showError('Erro ao selecionar origem'); }
+        });
+    }
+    if (pickDst) {
+        pickDst.addEventListener('click', async () => {
+            try {
+                if (window.electronAPI?.selectDirectory) {
+                    const res = await window.electronAPI.selectDirectory();
+                    if (res && !res.canceled && res.filePaths?.length) {
+                        document.getElementById('move-dst').value = res.filePaths[0];
+                    }
+                } else {
+                    showError('Seleção de pasta disponível apenas no modo desktop');
+                }
+            } catch (e) { showError('Erro ao selecionar destino'); }
+        });
+    }
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async () => {
+            const src = document.getElementById('move-src')?.value || '';
+            const dst = document.getElementById('move-dst')?.value || '';
+            try {
+                const resp = await fetch('/api/mover-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ src, dst }) });
+                if (resp.ok) {
+                    showSuccess('Configuração de movimento salva');
+                } else {
+                    showError('Falha ao salvar configuração');
+                }
+            } catch (_) { showError('Erro ao salvar configuração'); }
+        });
+    }
+}
+
+async function loadMoverConfig() {
+    try {
+        const resp = await fetch('/api/mover-config');
+        if (!resp.ok) return;
+        const cfg = await resp.json();
+        const srcEl = document.getElementById('move-src');
+        const dstEl = document.getElementById('move-dst');
+        if (srcEl && cfg.src) srcEl.value = cfg.src;
+        if (dstEl && cfg.dst) dstEl.value = cfg.dst;
+    } catch (_) {}
+}
+
+async function loadPersonalization() {
+    try {
+        const r = await fetch('/api/personalization');
+        if (!r.ok) return;
+        personalization = await r.json();
+        const txt = document.getElementById('personal-text');
+        const bg = document.getElementById('personal-bg-color');
+        const tc = document.getElementById('personal-text-color');
+        const ac = document.getElementById('personal-accent-color');
+                const fs = document.getElementById('personal-font-size');
+                const hh = document.getElementById('personal-header-height');
+                const sw = document.getElementById('personal-sidebar-width');
+                const tr = document.getElementById('personal-thumb-radius');
+                const tg = document.getElementById('personal-thumb-gap');
+                const snow = document.getElementById('personal-snow');
+                const ltxt = document.getElementById('personal-logo-text');
+                const lurl = document.getElementById('personal-logo-url');
+                const dv = document.getElementById('personal-default-variant');
+                const mw = document.getElementById('personal-main-width');
+                const mh = document.getElementById('personal-main-height');
+                const sbg = document.getElementById('personal-sidebar-bg');
+                const bbg = document.getElementById('personal-body-bg');
+                const vig = document.getElementById('personal-vignette');
+                const vin = document.getElementById('personal-vignette-intensity');
+                const dsh = document.getElementById('personal-disable-shadow');
+                const glow = document.getElementById('personal-glow');
+                const sth = document.getElementById('personal-sidebar-thumb-height');
+                const clearBg = document.getElementById('personal-clear-bg');
+        if (txt) txt.value = personalization.header_text || '';
+        if (bg) bg.value = personalization.header_bg_color || '#2c3e50';
+        if (tc) tc.value = personalization.header_text_color || '#ffffff';
+        if (ac) ac.value = personalization.accent_color || '#3498db';
+        if (fs) fs.value = parseInt(personalization.header_font_size || 20, 10);
+        if (hh) hh.value = parseInt(personalization.header_height || 80, 10);
+        if (sw) sw.value = parseInt(personalization.sidebar_width || 260, 10);
+        if (tr) tr.value = parseInt(personalization.thumb_border_radius || 5, 10);
+        if (tg) tg.value = parseInt(personalization.thumb_gap || 8, 10);
+        if (snow) snow.checked = !!personalization.enable_snow_effect;
+                if (ltxt) ltxt.value = personalization.logo_text || '';
+                if (lurl) lurl.value = personalization.logo_image_url || '';
+                if (dv) dv.value = personalization.default_variant || '10x15';
+                if (mw) mw.value = parseInt(personalization.main_photo_max_width || 900, 10);
+                if (mh) mh.value = parseInt(personalization.main_photo_max_height || 700, 10);
+                if (sbg) sbg.value = personalization.sidebar_bg_color || '#1f2a35';
+                if (bbg) bbg.value = personalization.body_bg_color || '#10161b';
+                if (vig) vig.checked = !!personalization.enable_vignette;
+                if (vin) vin.value = parseFloat(personalization.vignette_intensity ?? 0.12);
+                if (dsh) dsh.checked = !!personalization.disable_photo_shadow;
+                if (glow) glow.checked = !!personalization.enable_glow;
+                if (clearBg) clearBg.checked = !!personalization.clear_background_mode;
+                if (sth) sth.value = parseInt(personalization.sidebar_thumb_height || 120, 10);
+        const preview = document.getElementById('theme-preview');
+        if (preview) {
+            preview.textContent = personalization.header_text || preview.textContent;
+            preview.style.background = personalization.header_bg_color || preview.style.background;
+            preview.style.color = personalization.header_text_color || preview.style.color;
+            preview.style.borderColor = personalization.accent_color || preview.style.borderColor;
+            preview.style.fontSize = `${parseInt(personalization.header_font_size || 20, 10)}px`;
+            preview.style.height = `${parseInt(personalization.header_height || 80, 10)}px`;
+        }
+    } catch {}
+}
+
+function setupPersonalizationEvents() {
+    const btn = document.getElementById('save-personalization');
+    if (btn) {
+        btn.addEventListener('click', async () => {
+            const payload = {
+                header_text: document.getElementById('personal-text')?.value || '',
+                header_bg_color: document.getElementById('personal-bg-color')?.value || '#2c3e50',
+                header_text_color: document.getElementById('personal-text-color')?.value || '#ffffff',
+                accent_color: document.getElementById('personal-accent-color')?.value || '#3498db',
+                header_font_size: parseInt(document.getElementById('personal-font-size')?.value || '20', 10),
+                header_height: parseInt(document.getElementById('personal-header-height')?.value || '80', 10),
+                sidebar_width: parseInt(document.getElementById('personal-sidebar-width')?.value || '260', 10),
+                thumb_border_radius: parseInt(document.getElementById('personal-thumb-radius')?.value || '5', 10),
+                thumb_gap: parseInt(document.getElementById('personal-thumb-gap')?.value || '8', 10),
+                enable_snow_effect: !!document.getElementById('personal-snow')?.checked,
+                logo_text: document.getElementById('personal-logo-text')?.value || '',
+                logo_image_url: document.getElementById('personal-logo-url')?.value || '',
+                default_variant: document.getElementById('personal-default-variant')?.value || '10x15',
+                main_photo_max_width: parseInt(document.getElementById('personal-main-width')?.value || '900', 10),
+                main_photo_max_height: parseInt(document.getElementById('personal-main-height')?.value || '700', 10),
+                sidebar_bg_color: document.getElementById('personal-sidebar-bg')?.value || '#1f2a35',
+                body_bg_color: document.getElementById('personal-body-bg')?.value || '#10161b',
+                enable_vignette: !!document.getElementById('personal-vignette')?.checked,
+                vignette_intensity: parseFloat(document.getElementById('personal-vignette-intensity')?.value || '0.12'),
+                disable_photo_shadow: !!document.getElementById('personal-disable-shadow')?.checked,
+                enable_glow: !!document.getElementById('personal-glow')?.checked,
+                sidebar_thumb_height: parseInt(document.getElementById('personal-sidebar-thumb-height')?.value || '120', 10),
+                clear_background_mode: !!document.getElementById('personal-clear-bg')?.checked
+            };
+            try {
+                const resp = await fetch('/api/save-personalization', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (resp.ok) {
+                    showSuccess('Personalização salva');
+                    personalization = payload;
+                    const preview = document.getElementById('theme-preview');
+                    if (preview) {
+                        preview.textContent = payload.header_text;
+                        preview.style.background = payload.header_bg_color;
+                        preview.style.color = payload.header_text_color;
+                        preview.style.borderColor = payload.accent_color;
+                        preview.style.fontSize = `${payload.header_font_size}px`;
+                        preview.style.height = `${payload.header_height}px`;
+                    }
+                } else {
+                    showError('Falha ao salvar personalização');
+                }
+            } catch {
+                showError('Erro ao salvar personalização');
+            }
+        });
+    }
+}
+    const thumbInput = document.getElementById('thumb-size-input');
+    const thumbLabel = document.getElementById('thumb-size-label');
+    const saveThumb = document.getElementById('save-thumb-size');
+    if (thumbInput && thumbLabel) {
+        thumbInput.addEventListener('input', () => {
+            const v = parseInt(thumbInput.value, 10);
+            thumbLabel.textContent = `${v} px`;
+            document.documentElement.style.setProperty('--thumb-size', `${v}px`);
+        });
+    }
+    if (saveThumb && thumbInput) {
+        saveThumb.addEventListener('click', async () => {
+            const v = parseInt(thumbInput.value, 10);
+            const reqOpts = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ size: v })
+            };
+            let ok = false;
+            try {
+                let resp = await fetch('/api/ui/thumbnail-size', reqOpts);
+                if (!resp.ok) {
+                    resp = await fetch('/api/ui/thumbnail-size/', reqOpts);
+                }
+                if (!resp.ok) {
+                    const origin = window.location.origin || 'http://localhost:5000';
+                    resp = await fetch(origin + '/api/ui/thumbnail-size', reqOpts);
+                }
+                if (resp.ok) {
+                    ok = true;
+                    showSuccess(`Tamanho das miniaturas salvo: ${v}px`);
+                }
+            } catch (e) {}
+            if (!ok) {
+                try {
+                    localStorage.setItem('thumb_size', String(v));
+                    document.documentElement.style.setProperty('--thumb-size', `${v}px`);
+                    showSuccess(`Tamanho das miniaturas salvo localmente: ${v}px`);
+                } catch (_) {
+                    showError('Erro ao salvar tamanho (HTTP 404)');
+                }
+            }
+        });
+    }
+    const resetBtn = document.getElementById('reset-personalization');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', async () => {
+            const ok = confirm('Restaurar todas as configurações visuais para o padrão?');
+            if (!ok) return;
+            try {
+                const r = await fetch('/api/reset-personalization', { method: 'POST' });
+                if (r.ok) {
+                    showSuccess('Configurações restauradas');
+                    try {
+                        await fetch('/api/ui/thumbnail-size', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ size: 100 }) });
+                    } catch (_) {}
+                    await loadPersonalization();
+                } else {
+                    showError('Falha ao restaurar');
+                }
+            } catch (e) {
+                showError('Erro ao restaurar');
+            }
+        });
+    }

@@ -1,71 +1,72 @@
 {
-  "name": "photo-kiosk-desktop",
-  "version": "2.0.1",
-  "description": "Aplicativo Desktop de Kiosk de Fotos com Auto-Update",
+  "name": "kiosk-eletron",
+  "version": "1.0.0",
+  "description": "Kiosk de Fotos",
+  "author": "Sploit",
   "main": "src/electron/main.js",
-  "homepage": "https://github.com/Sploit23/kiosk-updates",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Sploit23/kiosk-updates.git"
-  },
   "scripts": {
-    "start": "electron src/electron/main.js",
-    "dev": "electron src/electron/main.js --enable-logging --dev",
-    "build": "npx electron-builder --win --publish=never",
-    "build-and-publish": "npx electron-builder --win --publish=always",
-    "pack": "npx electron-builder --dir",
-    "setup": "npm install",
-    "release": "npx electron-builder --win --publish=always",
-    "dist": "npx electron-builder --win"
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "kiosk": "electron . --kiosk",
+    "server": "node src/server/server-simple.js",
+    "build:win": "electron-builder --win",
+    "build:win:portable": "electron-builder --win portable",
+    "dev:packaged": "set KIOSK_FORCE_PACKAGED=1 && electron .",
+    "kill-processes": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-Process | ? { $_.Name -in 'Kiosk de Fotos','electron','node' } | % { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }\"",
+    "clean:build": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path 'build\\win-unpacked') { Remove-Item 'build\\win-unpacked' -Recurse -Force }\"",
+    "release:portable": "npm run kill-processes && npm run clean:build && node .\\node_modules\\electron-builder\\out\\cli\\cli.js --win portable && powershell -NoProfile -ExecutionPolicy Bypass -Command \"$ts = Get-Date -Format 'yyyyMMdd-HHmm'; $dest = Join-Path 'releases' $ts; New-Item -ItemType Directory -Force -Path $dest | Out-Null; Copy-Item -Recurse -Force 'build\\win-unpacked' $dest\"",
+    "build:win:nsis": "electron-builder --win nsis",
+    "release:nsis": "npm run kill-processes && npm run clean:build && electron-builder --win nsis"
   },
-  "keywords": [
-    "photo",
-    "kiosk",
-    "desktop",
-    "electron",
-    "auto-update",
-    "ask300",
-    "printer"
-  ],
-  "author": {
-    "name": "Photo Kiosk System",
-    "email": "contato@photokiosk.com"
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^26.0.12"
   },
-  "license": "MIT",
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
   "build": {
-    "appId": "com.photokiosk.desktop",
-    "productName": "Photo Kiosk Desktop",
+    "appId": "com.kiosk.photos",
+    "productName": "Kiosk de Fotos",
     "directories": {
-      "output": "dist"
+      "output": "build",
+      "buildResources": "build-resources"
     },
     "files": [
       "src/**/*",
-      "config/**/*",
-      "imagens/**/*",
-      "temp/**/*",
-      "node_modules/**/*"
+      "package.json"
     ],
+    "asar": true,
     "win": {
       "target": [
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
         }
       ],
-      "forceCodeSigning": false
+      "artifactName": "${productName} ${target}.${ext}",
+      "signAndEditExecutable": false
     },
-    "publish": {
-      "provider": "github",
-      "owner": "Sploit23",
-      "repo": "kiosk-updates",
-      "private": false
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Sploit23",
+        "repo": "kiosk-updates"
+      }
+    ],
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": false
     }
-  },
-  "dependencies": {
-    "electron-updater": "^6.1.7"
-  },
-  "devDependencies": {
-    "electron": "^28.1.0",
-    "electron-builder": "^26.0.12"
   }
 }

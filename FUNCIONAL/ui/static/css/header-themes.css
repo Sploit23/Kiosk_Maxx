@@ -1,0 +1,146 @@
+/* ===== TEMAS DE CABEÇALHO - FOTOS MÁGICAS ===== */
+
+/* Tema Natal (Padrão) */
+.sidebar-header.christmas-header h2 {
+    background: linear-gradient(135deg, #c41e3a 0%, #228b22 100%);
+    color: #ffffff;
+    padding: 15px;
+    margin: 0;
+    text-align: center;
+    font-family: 'Comic Sans MS', cursive, sans-serif;
+    font-size: 18px;
+    font-weight: bold;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(196, 30, 58, 0.3);
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    border: 2px solid var(--christmas-gold);
+    position: relative;
+    overflow: hidden;
+    animation: natalGlow 2s ease-in-out infinite alternate;
+}
+
+.sidebar-header.christmas-header h2::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    animation: shimmer 3s infinite;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+    100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+}
+
+/* Tema Câmera */
+.camera-header {
+    background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+    color: #ecf0f1;
+    font-family: 'Arial', sans-serif;
+    font-weight: bold;
+    border: 2px solid #3498db;
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(52, 152, 219, 0.4);
+    animation: cameraFlicker 3s ease-in-out infinite;
+}
+
+@keyframes cameraFlicker {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; box-shadow: 0 6px 25px rgba(52, 152, 219, 0.6); }
+}
+
+/* Tema Clássico */
+.classic-header {
+    background: linear-gradient(135deg, #8b4513 0%, #daa520 100%);
+    color: #ffffff;
+    font-family: 'Times New Roman', serif;
+    font-style: italic;
+    border: 3px solid #daa520;
+    border-radius: 5px;
+    box-shadow: 0 8px 25px rgba(139, 69, 19, 0.5);
+    animation: classicoElegance 4s ease-in-out infinite;
+}
+
+@keyframes classicoElegance {
+    0%, 100% { transform: scale(1); }
+    25% { transform: scale(1.01); }
+    75% { transform: scale(0.99); }
+}
+
+/* Tema Moderno */
+.modern-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #ffffff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-weight: 300;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border-radius: 15px;
+    box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+    animation: modernPulse 3s ease-in-out infinite;
+}
+
+@keyframes modernPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+}
+
+/* Tema Maxx Foto */
+.sidebar-header.maxx-foto-header h2 {
+    background: transparent;
+    color: #daa520;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-weight: 700;
+    letter-spacing: 1px;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    position: relative;
+    overflow: visible;
+    animation: goldGlow 2s ease-in-out infinite alternate;
+    padding: 15px;
+    margin: 0;
+    text-align: center;
+    font-size: 18px;
+    text-shadow: 2px 2px 4px rgba(218, 165, 32, 0.3);
+}
+
+@keyframes goldGlow {
+    0% { 
+        color: #daa520;
+        text-shadow: 2px 2px 4px rgba(218, 165, 32, 0.3);
+    }
+    100% { 
+        color: #ffd700;
+        text-shadow: 2px 2px 8px rgba(255, 215, 0, 0.6);
+    }
+}
+
+@keyframes shine {
+    0% { left: -100%; }
+    50% { left: 100%; }
+    100% { left: 100%; }
+}
+
+/* Transições suaves */
+.sidebar-header h2 {
+    transition: all 0.3s ease-in-out;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .sidebar-header h2 {
+        font-size: 16px;
+        padding: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    .sidebar-header h2 {
+        font-size: 14px;
+        padding: 10px;
+    }
+}

@@ -17,28 +17,25 @@
                 <p class="sidebar-subtitle">Painel de Controle</p>
             </div>
             
-            <div class="menu-item active" data-section="dashboard">
-                <span class="menu-icon">📊</span>
-                <span class="menu-text">Dashboard Financeiro</span>
-            </div>
-            
-            <div class="menu-item" data-section="images">
+            <div class="menu-item active" data-section="images">
                 <span class="menu-icon">📁</span>
                 <span class="menu-text">Configuração de Imagens</span>
-            </div>
-            
-            <div class="menu-item" data-section="pricing">
-                <span class="menu-icon">💰</span>
-                <span class="menu-text">Preços</span>
             </div>
             
             <div class="menu-item" data-section="printer-management">
                 <span class="menu-icon">🖨️</span>
                 <span class="menu-text">Configuração de Impressoras</span>
             </div>
+            <div class="menu-item" data-section="dashboard">
+                <span class="menu-icon">📊</span>
+                <span class="menu-text">Dashboard</span>
+            </div>
             
+            <div class="menu-item" data-section="thumbnails">
+                <span class="menu-icon">🎨</span>
+                <span class="menu-text">Personalização</span>
+            </div>
 
-            
             <div class="menu-item" data-section="system">
                 <span class="menu-icon">⚙️</span>
                 <span class="menu-text">Sistema</span>
@@ -56,78 +53,6 @@
             <div id="success-message" class="success-message"></div>
             <div id="error-message" class="error-message"></div>
             
-            <!-- Dashboard (Vendas e Impressões) -->
-            <div class="config-section" id="dashboard-section">
-                <h2>📊 Dashboard Financeiro Completo</h2>
-                
-                <!-- Estatísticas Principais -->
-                <div class="sales-stats">
-                    <div class="stat-card">
-                        <h4>💰 Total de Vendas</h4>
-                        <p class="stat-value" id="total-sales">R$ 0,00</p>
-                    </div>
-                    <div class="stat-card">
-                        <h4>📸 Fotos Vendidas</h4>
-                        <p class="stat-value" id="total-photos">0</p>
-                    </div>
-                    <div class="stat-card">
-                        <h4>📅 Vendas Hoje</h4>
-                        <p class="stat-value" id="today-sales">R$ 0,00</p>
-                    </div>
-                    <div class="stat-card">
-                        <h4>📊 Ticket Médio</h4>
-                        <p class="stat-value" id="average-ticket">R$ 0,00</p>
-                    </div>
-                </div>
-                
-                <!-- Vendas por Método de Pagamento -->
-                <h3>💳 Vendas por Método de Pagamento</h3>
-                <div class="sales-stats">
-                    <div class="stat-card">
-                        <h4>💵 Dinheiro</h4>
-                        <p class="stat-value" id="cash-sales">R$ 0,00</p>
-                        <small id="cash-count">0 vendas</small>
-                    </div>
-                    <div class="stat-card">
-                        <h4>💳 Cartão</h4>
-                        <p class="stat-value" id="card-sales">R$ 0,00</p>
-                        <small id="card-count">0 vendas</small>
-                    </div>
-                    <div class="stat-card">
-                        <h4>⏳ Pendente</h4>
-                        <p class="stat-value" id="pending-sales">R$ 0,00</p>
-                        <small id="pending-count">0 vendas</small>
-                    </div>
-                </div>
-                
-                <!-- Impressões por Formato -->
-                <h3>📏 Impressões por Formato</h3>
-                <div class="sales-stats">
-                    <div class="stat-card">
-                        <h4>📷 10x15</h4>
-                        <p class="stat-value" id="format-10x15">0 fotos</p>
-                        <small id="format-10x15-revenue">R$ 0,00</small>
-                    </div>
-                    <div class="stat-card">
-                        <h4>📷 15x21</h4>
-                        <p class="stat-value" id="format-15x21">0 fotos</p>
-                        <small id="format-15x21-revenue">R$ 0,00</small>
-                    </div>
-                    <div class="stat-card">
-                        <h4>📷 20x30</h4>
-                        <p class="stat-value" id="format-20x30">0 fotos</p>
-                        <small id="format-20x30-revenue">R$ 0,00</small>
-                    </div>
-                </div>
-                
-                <!-- Top Fotos -->
-                <h3>🏆 Top 5 Fotos Mais Vendidas</h3>
-                <div id="top-photos" class="top-photos-list">
-                    <p>Carregando dados...</p>
-                </div>
-                
-                <button id="refresh-sales-button" class="btn-primary">🔄 Atualizar Dashboard</button>
-            </div>
             
             <!-- Seção de Configuração de Imagens -->
             <div class="config-section" id="images-section">
@@ -150,6 +75,39 @@
                 </div>
                 
                 <div class="config-group">
+                    <label>📅 Formato de Pasta de Data:</label>
+                    <div class="date-format-options">
+                        <div class="radio-group">
+                            <input type="radio" id="format-ddmmyyyy" name="date-format" value="DDMMYYYY" checked>
+                            <label for="format-ddmmyyyy">
+                                <strong>DDMMYYYY</strong> - Exemplo: 15112025
+                            </label>
+                        </div>
+                        <div class="radio-group">
+                            <input type="radio" id="format-ddmmyy" name="date-format" value="DDMMYY">
+                            <label for="format-ddmmyy">
+                                <strong>DDMMYY</strong> - Exemplo: 151125
+                            </label>
+                        </div>
+                        <div class="radio-group">
+                            <input type="radio" id="format-yyyymmdd" name="date-format" value="YYYYMMDD">
+                            <label for="format-yyyymmdd">
+                                <strong>YYYYMMDD</strong> - Exemplo: 20251115
+                            </label>
+                        </div>
+                        <div class="radio-group">
+                            <input type="radio" id="format-yymmdd" name="date-format" value="YYMMDD">
+                            <label for="format-yymmdd">
+                                <strong>YYMMDD</strong> - Exemplo: 251115
+                            </label>
+                        </div>
+                    </div>
+                    <button onclick="saveDateFormat()" class="btn-primary" style="margin-top: 10px;">
+                        💾 Salvar Formato de Data
+                    </button>
+                </div>
+                
+                <div class="config-group">
                     <label>📅 Pastas de Data Disponíveis:</label>
                     <div id="available-folders" class="available-folders">
                         Carregando...
@@ -160,33 +118,18 @@
                     <h4>ℹ️ Como Organizar as Fotos:</h4>
                     <ul>
                         <li>Selecione a pasta principal onde estão suas fotos</li>
-                        <li>Dentro desta pasta, crie subpastas com o formato <strong>DDMMAAAA</strong></li>
-                        <li>Exemplo: <code>13082025</code> para 13 de Agosto de 2025</li>
-                        <li>O sistema automaticamente procurará pela pasta do dia atual</li>
-                        <li><strong>Importante:</strong> Após selecionar uma nova pasta, clique em "Salvar Configuração" para aplicar as mudanças</li>
+                        <li>Escolha o formato de pasta de data que você prefere usar:</li>
+                        <li><strong>DDMMYYYY:</strong> Exemplo: <code>15112025</code></li>
+                        <li><strong>DDMMYY:</strong> Exemplo: <code>151125</code></li>
+                        <li><strong>YYYYMMDD:</strong> Exemplo: <code>20251115</code></li>
+                        <li><strong>YYMMDD:</strong> Exemplo: <code>251115</code></li>
+                        <li>Dentro da pasta principal, crie subpastas seguindo o formato escolhido</li>
+                        <li>O sistema automaticamente procurará pela pasta do dia atual no formato selecionado</li>
+                        <li><strong>Importante:</strong> Após fazer alterações, clique em "Salvar" para aplicar as mudanças</li>
                     </ul>
                 </div>
             </div>
             
-            <!-- Seção de Gerenciamento de Preços -->
-            <div class="config-section" id="pricing-section">
-                <h2>💰 Gerenciamento de Preços</h2>
-                <div class="pricing-section">
-                    <div class="price-format">
-                        <label for="price-10x15">Preço 10x15 (R$):</label>
-                        <input type="number" id="price-10x15" step="0.01" min="0" placeholder="15.00">
-                    </div>
-                    <div class="price-format">
-                        <label for="price-15x21">Preço 15x21 (R$):</label>
-                        <input type="number" id="price-15x21" step="0.01" min="0" placeholder="25.00">
-                    </div>
-                    <div class="price-format">
-                        <label for="price-20x30">Preço 20x30 (R$):</label>
-                        <input type="number" id="price-20x30" step="0.01" min="0" placeholder="35.00">
-                    </div>
-                </div>
-                <button id="save-pricing-button" class="btn-success">💾 Salvar Preços</button>
-            </div>
             
             <!-- Seção de Gerenciamento de Impressoras -->
             <div class="config-section" id="printer-management-section">
@@ -211,6 +154,7 @@
                                             <option value="">Carregando impressoras...</option>
                                         </select>
                                     </div>
+                                    
 
                                     <div id="status-10x15" class="printer-status-indicator" style="display: flex; align-items: center; gap: 8px;">
                                         <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #6c757d;"></div>
@@ -232,6 +176,7 @@
                                             <option value="">Carregando impressoras...</option>
                                         </select>
                                     </div>
+                                    
 
                                     <div id="status-15x20" class="printer-status-indicator" style="display: flex; align-items: center; gap: 8px;">
                                         <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #6c757d;"></div>
@@ -253,6 +198,7 @@
                                             <option value="">Carregando impressoras...</option>
                                         </select>
                                     </div>
+                                    
 
                                     <div id="status-bolas" class="printer-status-indicator" style="display: flex; align-items: center; gap: 8px;">
                                         <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #6c757d;"></div>
@@ -279,11 +225,160 @@
                     </div>
                 </div>
             </div>
+
+            <div class="config-section" id="dashboard-section" style="display:none">
+                <h2>📊 Dashboard de Impressões</h2>
+                <div class="config-group">
+                    <label>Selecione o dia:</label>
+                    <select id="print-stats-date" style="width:100%;padding:8px;border:1px solid #ced4da;border-radius:6px"></select>
+                </div>
+                <div class="config-group" id="print-stats-result" style="background:#f8f9fa;padding:15px;border-radius:6px;border:1px solid #dee2e6"></div>
+            </div>
+
+            <!-- Seção de Miniaturas -->
+            <div class="config-section" id="thumbnails-section">
+                <h2>🎨 Personalização</h2>
+                <div class="config-group">
+                    <h3>👁️ Preview</h3>
+                    <div id="theme-preview" style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #dee2e6; text-align: center; font-size: 1.2rem; font-weight: bold;">
+                        Fotos Mágicas
+                    </div>
+                </div>
+                <div class="config-group">
+                    <label>Texto do cabeçalho:</label>
+                    <input id="personal-text" type="text" placeholder="Digite o texto" style="width:100%;padding:8px;border:1px solid #ced4da;border-radius:6px" />
+                </div>
+        <div class="config-group" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+            <div>
+                <label>Tamanho da fonte do cabeçalho:</label>
+                <input id="personal-font-size" type="number" min="12" max="48" value="20" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+            </div>
+            <div>
+                <label>Altura do cabeçalho (px):</label>
+                <input id="personal-header-height" type="number" min="40" max="160" value="80" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+            </div>
+            <div>
+                <label>Largura da sidebar (px):</label>
+                <input id="personal-sidebar-width" type="number" min="200" max="400" value="260" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+            </div>
+        </div>
+        <div class="config-group" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:10px">
+            <div>
+                <label>Altura das miniaturas da lista (px):</label>
+                <input id="personal-sidebar-thumb-height" type="number" min="80" max="240" value="120" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+            </div>
+        </div>
+        <div class="config-group" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:10px">
+            <div>
+                <label>Variação padrão da foto:</label>
+                <select id="personal-default-variant" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px">
+                    <option value="10x15">10x15</option>
+                    <option value="15x20">15x20</option>
+                    <option value="Bolas">Bolas</option>
+                </select>
+            </div>
+            <div>
+                <label>Largura máxima da foto principal (px):</label>
+                <input id="personal-main-width" type="number" min="400" max="1600" value="900" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+            </div>
+            <div>
+                <label>Altura máxima da foto principal (px):</label>
+                <input id="personal-main-height" type="number" min="300" max="1200" value="700" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+            </div>
+        </div>
+        <div class="config-group" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:10px">
+            <div>
+                <label>Fundo da sidebar (CSS background):</label>
+                <input id="personal-sidebar-bg" type="text" placeholder="#8b0000 ou linear-gradient(135deg, #c41e3a, #8b0000)" value="#8b0000" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+            </div>
+            <div>
+                <label>Fundo da página (CSS background):</label>
+                <input id="personal-body-bg" type="text" placeholder="#2c3e50 ou radial-gradient(ellipse at center, #1e3c72, #0f4c75)" value="#2c3e50" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+                <input id="personal-clear-bg" type="checkbox" />
+                <label for="personal-clear-bg">Fundo transparente (debug)</label>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+                <input id="personal-vignette" type="checkbox" />
+                <label for="personal-vignette">Ativar vinheta no fundo</label>
+            </div>
+            <div>
+                <label>Intensidade da vinheta (0–0.5):</label>
+                <input id="personal-vignette-intensity" type="number" min="0" max="0.5" step="0.05" value="0.12" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+                <input id="personal-disable-shadow" type="checkbox" />
+                <label for="personal-disable-shadow">Desativar sombra da foto principal</label>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+                <input id="personal-glow" type="checkbox" />
+                <label for="personal-glow">Brilho suave na foto principal</label>
+            </div>
+        </div>
+                <div class="config-group" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+                    <div>
+                        <label>Cor de fundo do cabeçalho:</label>
+                        <input id="personal-bg-color" type="color" value="#2c3e50" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                    <div>
+                        <label>Cor do texto do cabeçalho:</label>
+                        <input id="personal-text-color" type="color" value="#ffffff" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                    <div>
+                        <label>Cor de destaque:</label>
+                        <input id="personal-accent-color" type="color" value="#3498db" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                </div>
+                <div class="config-group" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+                    <div>
+                        <label>Raio da borda da miniatura (px):</label>
+                        <input id="personal-thumb-radius" type="number" min="0" max="20" value="5" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                    <div>
+                        <label>Espaçamento entre miniaturas (px):</label>
+                        <input id="personal-thumb-gap" type="number" min="0" max="24" value="8" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <input id="personal-snow" type="checkbox" />
+                        <label for="personal-snow">Ativar efeito de neve</label>
+                    </div>
+                </div>
+                <div class="config-group" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+                    <div>
+                        <label>Texto do logo:</label>
+                        <input id="personal-logo-text" type="text" placeholder="Logo opcional" style="width:100%;padding:8px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                    <div>
+                        <label>URL da imagem do logo:</label>
+                        <input id="personal-logo-url" type="text" placeholder="http://.../logo.png" style="width:100%;padding:8px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                </div>
+                <div class="config-group">
+                    <button id="save-personalization" class="btn-success">💾 Salvar Personalização</button>
+                </div>
+                <div class="config-group">
+                    <label>Tamanho das miniaturas:</label>
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <input type="range" id="thumb-size-input" min="60" max="240" step="10" value="100">
+                        <span id="thumb-size-label">100 px</span>
+                    </div>
+                    <div id="thumb-preview" style="margin-top:12px;display:flex;gap:8px">
+                        <div class="miniatura"><div style="width: var(--thumb-size); height: var(--thumb-size); border-radius: 5px; background: linear-gradient(135deg, #f8f9fa, #dee2e6);"></div></div>
+                        <div class="miniatura"><div style="width: var(--thumb-size); height: var(--thumb-size); border-radius: 5px; background: linear-gradient(135deg, #e9ecef, #ced4da);"></div></div>
+                        <div class="miniatura"><div style="width: var(--thumb-size); height: var(--thumb-size); border-radius: 5px; background: linear-gradient(135deg, #f1f3f5, #e9ecef);"></div></div>
+                    </div>
+                    <div class="button-group" style="margin-top:12px">
+            <button id="save-thumb-size" class="btn-success">💾 Salvar Tamanho</button>
+            <button id="reset-personalization" class="btn-warning" style="margin-left:10px">🔄 Restaurar Padrão</button>
+                    </div>
+                </div>
+            </div>
             
 
             
-
             
+
             <!-- Seção de Sistema -->
             <div class="config-section" id="system-section">
                 <h2>⚙️ Sistema</h2>
@@ -302,6 +397,28 @@
                     <h3>🔄 Atualizações</h3>
                     <p>Versão atual: <span id="current-version">Carregando...</span></p>
                     <button id="check-updates-button" class="btn-primary">🔍 Verificar Atualizações</button>
+                    <button id="move-today-button" class="btn-warning" style="margin-left:10px">🎄 Mover Fotos de Hoje</button>
+                    <div style="margin-top:15px; display:grid; grid-template-columns: 1fr 1fr; gap:10px">
+                        <div>
+                            <label>Origem:</label>
+                            <input id="move-src" type="text" placeholder="Selecione a pasta de origem" style="width:100%;padding:8px;border:1px solid #ced4da;border-radius:6px" />
+                            <button id="pick-move-src" class="btn-secondary" style="margin-top:6px">📂 Selecionar Origem</button>
+                        </div>
+                        <div>
+                            <label>Destino:</label>
+                            <input id="move-dst" type="text" placeholder="Selecione a pasta de destino" style="width:100%;padding:8px;border:1px solid #ced4da;border-radius:6px" />
+                            <button id="pick-move-dst" class="btn-secondary" style="margin-top:6px">📂 Selecionar Destino</button>
+                        </div>
+                    </div>
+                    <div style="margin-top:10px">
+                        <button id="save-mover-config" class="btn-success">💾 Salvar Configuração de Movimento</button>
+                    </div>
+                    <div style="margin-top:15px">
+                        <div style="width:100%; height:20px; background:#e9ecef; border-radius:10px; overflow:hidden">
+                            <div id="move-progress-bar" style="width:0%; height:100%; background:#28a745; transition:width 0.3s ease"></div>
+                        </div>
+                        <p id="move-progress-text" style="margin-top:5px; font-size:0.9rem; color:#6c757d"></p>
+                    </div>
                 </div>
             </div>
         </div>

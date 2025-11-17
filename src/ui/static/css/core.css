@@ -12,6 +12,8 @@
     --ice-blue: #87ceeb;
     --dark-red: #8b0000;
     --pine-green: #355e3b;
+    --thumb-size: 100px;
+    --sidebar-thumb-height: 120px;
 }
 
 /* -------------------------------------------
@@ -327,6 +329,7 @@ body {
     position: relative;
     animation: slideInLeft 0.6s ease-out;
     backdrop-filter: blur(10px);
+    contain: layout paint size;
 }
 
 @media (max-width: 768px) {
@@ -348,6 +351,7 @@ body {
     position: relative;
     animation: scaleIn 0.8s ease-out 0.2s both;
     transform-origin: center;
+    
 }
 
 @media (max-width: 768px) {
@@ -416,6 +420,79 @@ body {
     backdrop-filter: blur(10px);
 }
 
+#quick-actions-button {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid var(--christmas-gold);
+    color: var(--christmas-gold);
+    font-size: 20px;
+    cursor: pointer;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+}
+
+#quick-actions-button:hover {
+    transform: scale(1.1);
+    background-color: rgba(255, 215, 0, 0.2);
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
+}
+
+@media (max-width: 768px) {
+    #quick-actions-button {
+        top: 10px;
+        right: 10px;
+        width: 45px;
+        height: 45px;
+        font-size: 18px;
+    }
+}
+
+#quick-actions-menu {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    background: linear-gradient(135deg, rgba(255,215,0,0.15), rgba(34,139,34,0.15));
+    border: 2px solid var(--christmas-gold);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+    z-index: 1200;
+    min-width: 260px;
+}
+
+.quick-action-item {
+    padding: 14px 16px;
+    color: var(--snow-white);
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+}
+
+.quick-action-item:hover {
+    background: linear-gradient(135deg, rgba(255,215,0,0.25), rgba(34,139,34,0.25));
+}
+
+.quick-actions-tip {
+    padding: 10px 16px;
+    color: var(--christmas-gold);
+    font-size: 12px;
+    text-align: right;
+}
+
+.quick-actions-accent {
+    height: 6px;
+    background: linear-gradient(90deg, var(--christmas-gold), var(--warm-gold), var(--christmas-green));
+}
+
 #fullscreen-button:hover {
     transform: scale(1.1);
     background-color: rgba(255, 215, 0, 0.2);
@@ -436,7 +513,7 @@ body {
 #close-fullscreen-button {
     position: fixed;
     top: 20px;
-    right: 150px;
+    right: 215px;
     background: rgba(139, 0, 0, 0.8);
     border: 2px solid var(--christmas-red);
     color: var(--snow-white);
@@ -550,10 +627,12 @@ body {
 
 .foto-sidebar img {
     width: 100%;
+    height: var(--sidebar-thumb-height, 120px);
     border-radius: 8px;
     border: 2px solid transparent;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    content-visibility: auto;
 }
 
 .foto-sidebar:hover img {
@@ -562,7 +641,7 @@ body {
 }
 
 .foto-sidebar.selected img {
-    border: 2px solid var(--christmas-gold);
+    border: 2px solid var(--accent-color, var(--christmas-gold));
     box-shadow: 0 6px 20px rgba(255, 215, 0, 0.4);
 }
 
@@ -582,11 +661,12 @@ body {
     align-items: center;
     justify-content: flex-start;
     padding: 20px;
-    background: rgba(255, 255, 255, 0.05);
+    background: transparent;
     height: 100vh;
     overflow-y: auto;
     animation: slideInRight 0.6s ease-out 0.2s both;
     gap: 20px;
+    contain: layout paint size;
 }
 
 @media (max-width: 768px) {
@@ -611,6 +691,7 @@ body {
     min-height: 0;
     gap: 15px;
     padding: 10px;
+    position: relative;
 }
 
 #foto-grande h2 {
@@ -627,16 +708,17 @@ body {
     max-height: calc(100vh - 280px);
     object-fit: contain;
     border-radius: 15px;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    box-shadow: 0 28px 36px -18px rgba(0,0,0,0.32);
     border: 5px solid var(--snow-white);
     transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
     animation: scaleIn 0.6s ease-out;
-    backdrop-filter: blur(2px);
+    will-change: transform, opacity;
+    transform: translateZ(0);
 }
 
 #foto-grande-img:hover {
     transform: scale(1.02);
-    box-shadow: 0 25px 50px rgba(0,0,0,0.4);
+    box-shadow: 0 38px 48px -20px rgba(0,0,0,0.38);
     border-color: var(--christmas-gold);
 }
 
@@ -665,6 +747,7 @@ body {
     flex-wrap: wrap;
     width: 100%;
     max-width: 100%;
+    contain: layout paint;
 }
 
 @keyframes slideInUp {
@@ -687,8 +770,8 @@ body {
     }
     
     .miniatura img {
-        width: 80px;
-        height: 80px;
+        width: var(--thumb-size);
+        height: var(--thumb-size);
     }
     
     .miniatura-nome {
@@ -704,8 +787,8 @@ body {
     }
     
     .miniatura img {
-        width: 70px;
-        height: 70px;
+        width: var(--thumb-size);
+        height: var(--thumb-size);
     }
     
     .miniatura-nome {
@@ -746,6 +829,28 @@ body {
     background: rgba(255, 255, 255, 0.2);
 }
 
+/* Scrollbar premium (apenas visual) */
+body.premium-theme #sidebar::-webkit-scrollbar,
+body.premium-theme #main::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+body.premium-theme #sidebar::-webkit-scrollbar-track,
+body.premium-theme #main::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+}
+body.premium-theme #sidebar::-webkit-scrollbar-thumb,
+body.premium-theme #main::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, var(--christmas-gold, #ffd700), #ffd700);
+    border-radius: 10px;
+    border: 2px solid rgba(0,0,0,0.2);
+}
+body.premium-theme #sidebar::-webkit-scrollbar-thumb:hover,
+body.premium-theme #main::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #ffd700, var(--christmas-gold, #ffd700));
+}
+
 .miniatura:active {
     transform: translateY(-4px) scale(1.05);
 }
@@ -756,8 +861,8 @@ body {
     }
 }
 .miniatura img {
-    width: 100px;
-    height: 100px;
+    width: var(--thumb-size);
+    height: var(--thumb-size);
     object-fit: cover;
     border-radius: 5px;
     border: 2px solid transparent;
@@ -1007,6 +1112,39 @@ body:has(.welcome-container) #miniaturas {
     to { transform: translateX(0); opacity: 1; }
 }
 
+@keyframes slideInRight {
+    from { 
+        transform: translateX(100%); 
+        opacity: 0; 
+    }
+    to { 
+        transform: translateX(0); 
+        opacity: 1; 
+    }
+}
+
+@keyframes slideOutRight {
+    from { 
+        transform: translateX(0); 
+        opacity: 1; 
+    }
+    to { 
+        transform: translateX(100%); 
+        opacity: 0; 
+    }
+}
+
+@keyframes slideInLeft {
+    from { 
+        transform: translateX(-100%); 
+        opacity: 0; 
+    }
+    to { 
+        transform: translateX(0); 
+        opacity: 1; 
+    }
+}
+
 .update-notification h3 {
     color: var(--christmas-gold);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -1141,6 +1279,31 @@ body:has(.welcome-container) #miniaturas {
     }
 }
 
+/* Estilo para mensagens de erro */
+.error-message {
+    color: #ff6b6b;
+    background: rgba(255, 107, 107, 0.1);
+    border: 2px solid rgba(255, 107, 107, 0.3);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    font-size: 16px;
+    font-weight: 500;
+    margin: 20px;
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 /* -------------------------------------------
     --- ESTILOS PARA NOVAS FOTOS ---
     -------------------------------------------
@@ -1152,6 +1315,18 @@ body:has(.welcome-container) #miniaturas {
     box-shadow: 0 0 15px rgba(196, 30, 58, 0.6);
     animation: pulseNew 2s ease-in-out infinite;
     position: relative;
+}
+
+.foto-sidebar.unseen::after {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #28a745; /* verde discreto */
+    box-shadow: 0 0 6px rgba(40, 167, 69, 0.6);
 }
 
 @keyframes pulseNew {
@@ -1433,7 +1608,7 @@ body:has(.welcome-container) #miniaturas {
 
 
 /* Botões de Adicionar ao Carrinho - Cor combinando com "Fotos Mágicas" */
-.add-to-cart-btn {
+.print-btn {
     background: linear-gradient(135deg, var(--christmas-gold) 0%, #ffd700 100%);
     color: #333;
     border: none;
@@ -1453,13 +1628,25 @@ body:has(.welcome-container) #miniaturas {
     gap: 4px;
 }
 
-.add-to-cart-btn:hover {
+.print-btn:hover {
     transform: translateY(-1px) scale(1.05);
     box-shadow: 0 4px 12px rgba(255, 215, 0, 0.4);
     background: linear-gradient(135deg, #ffd700 0%, var(--christmas-gold) 100%);
 }
 
-.add-to-cart-btn:active {
+.premium-theme .print-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+    transition: left 0.5s;
+}
+.premium-theme .print-btn:hover::before { left: 100%; }
+
+.print-btn:active {
     transform: translateY(0) scale(0.98);
 }
 
@@ -1518,8 +1705,8 @@ body:has(.welcome-container) #miniaturas {
     }
 }
 .miniatura img {
-    width: 100px;
-    height: 100px;
+    width: var(--thumb-size);
+    height: var(--thumb-size);
     object-fit: cover;
     border-radius: 5px;
     border: 2px solid transparent;
@@ -1558,7 +1745,7 @@ body:has(.welcome-container) #miniaturas {
     z-index: 1001;
 }
 
-#botao-imprimir::before {
+.premium-theme #botao-imprimir::before {
     content: '';
     position: absolute;
     top: 0;
@@ -1569,7 +1756,7 @@ body:has(.welcome-container) #miniaturas {
     transition: left 0.5s;
 }
 
-#botao-imprimir:hover::before {
+.premium-theme #botao-imprimir:hover::before {
     left: 100%;
 }
 
@@ -1744,8 +1931,8 @@ body:has(.welcome-container) #miniaturas {
     }
     
     .miniatura img {
-        width: 80px;
-        height: 80px;
+        width: var(--thumb-size);
+        height: var(--thumb-size);
     }
     
     #miniaturas {
@@ -1808,8 +1995,81 @@ body:has(.welcome-container) #miniaturas {
     }
     
     .miniatura img {
-        width: 60px;
-        height: 60px;
+        width: var(--thumb-size);
+        height: var(--thumb-size);
     }
+}
+
+#foto-grande.vignette-enabled::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 60%, rgba(0,0,0, var(--vignette-alpha, 0.12)) 100%);
+}
+
+/* Modo Depuração: fundo realmente transparente e sem sombras */
+body.clear-bg #main,
+body.clear-bg #foto-grande,
+body.clear-bg #miniaturas,
+body.clear-bg #sidebar {
+    background: transparent !important;
+    box-shadow: none !important;
+}
+body.clear-bg #foto-grande.vignette-enabled::before { display: none !important; }
+body.clear-bg #foto-grande-img {
+    box-shadow: none !important;
+    border: 0 !important;
+}
+body.clear-bg .foto-sidebar {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    border: 0 !important;
+}
+
+#print-summary-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.6);
+    z-index: 2000;
+}
+
+.print-summary-content {
+    background: rgba(255, 255, 255, 0.1);
+    border: 2px solid var(--christmas-gold);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    backdrop-filter: blur(12px);
+    padding: 20px;
+    max-width: 500px;
+    width: 90%;
+    color: var(--snow-white);
+    text-align: center;
+}
+
+.print-summary-content h3 {
+    margin: 0 0 10px 0;
+    color: var(--christmas-gold);
+}
+
+.print-summary-close {
+    margin-top: 12px;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--christmas-green);
+    color: var(--snow-white);
+    cursor: pointer;
+}
+
+.print-summary-close:hover {
+    background: var(--dark-green);
 }
 

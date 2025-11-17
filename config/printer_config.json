@@ -4,31 +4,32 @@
     "default_printer": "FUJIFILM ASK-400",
     "default_format": "10x15",
     "auto_print_copies": 1,
-    "last_session_date": "2025-08-19T19:31:03.646Z"
+    "last_session_date": "2025-11-15T21:34:51.152Z"
   },
+  "paper_override_enabled": false,
   "format_mappings": {
     "10x15": {
       "printer": "FUJIFILM ASK-400",
-      "java_class": "ImprimirFoto10x15ASK400"
+      "java_class": "ImprimirFoto10x15ASK300",
+      "enable_paper_override": false,
+      "force_paper_size": "4x6"
     },
     "15x20": {
-      "printer": "FUJIFILM ASK-400 (15x20)",
-      "java_class": "ImprimirFoto15x20ASK400"
+      "printer": "FUJIFILM ASK-400",
+      "java_class": "ImprimirFoto15x20ASK300",
+      "enable_paper_override": false,
+      "force_paper_size": "6x8"
     },
     "bolas": {
       "printer": "FUJIFILM ASK-400",
-      "java_class": "ImprimirFotoBolasASK400"
+      "java_class": "ImprimirFotoBolasASK300",
+      "enable_paper_override": false
     }
   },
   "available_printers": {
     "FUJIFILM ASK-400": {
       "name": "FUJIFILM ASK-400",
       "devmode_path": "spool_devmodes/FUJIFILM_ASK_400_devmode.bin",
-      "status": "online"
-    },
-    "FUJIFILM ASK-400 (15x20)": {
-      "name": "FUJIFILM ASK-400 (15x20)",
-      "devmode_path": "spool_devmodes/FUJIFILM_ASK_400__15x20__devmode.bin",
       "status": "online"
     }
   },

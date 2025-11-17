@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Financeiro - Kiosk de Fotos</title>
+    <link rel="stylesheet" href="/static/css/core.css">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:*; img-src 'self' data: http://127.0.0.1:* http://localhost:*; font-src 'self' data:;">
+    <style>
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, var(--christmas-red), var(--christmas-green));
+            min-height: 100vh;
+        }
+        
+        .dashboard-header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: white;
+        }
+        
+        .dashboard-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .dashboard-nav {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .nav-btn {
+            padding: 12px 24px;
+            background: rgba(255,255,255,0.9);
+            border: none;
+            border-radius: 25px;
+            color: var(--christmas-red);
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .nav-btn:hover {
+            background: white;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-card h3 {
+            color: var(--christmas-red);
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: var(--christmas-green);
+            margin-bottom: 10px;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .electron-info {
+            background: rgba(255,255,255,0.95);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .electron-info h3 {
+            color: var(--christmas-red);
+            margin-bottom: 10px;
+        }
+        
+        .version-info {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 15px;
+        }
+        
+        .version-item {
+            text-align: center;
+        }
+        
+        .version-item strong {
+            color: var(--christmas-green);
+            display: block;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body class="electron-app">
+    <div class="dashboard-container">
+        <div class="dashboard-header">
+            <h1>🎄 Dashboard Administrativo 🎅</h1>
+            <p>Painel de controle do Kiosk de Fotos</p>
+        </div>
+        
+        <div class="dashboard-nav">
+            <a href="/" class="nav-btn">🏠 Voltar ao Kiosk</a>
+            <a href="/config" class="nav-btn">⚙️ Configurações</a>
+            <button class="nav-btn" onclick="logout()">🚪 Sair</button>
+        </div>
+        
+        <div class="electron-info" id="electron-info">
+            <h3>🖥️ Informações do Sistema</h3>
+            <p>Aplicação Electron em execução</p>
+            <div class="version-info">
+                <div class="version-item">
+                    <strong id="app-version">-</strong>
+                    <span>Versão do App</span>
+                </div>
+                <div class="version-item">
+                    <strong id="user-data-path">-</strong>
+                    <span>Dados do Usuário</span>
+                </div>
+                <div class="version-item">
+                    <strong id="platform">-</strong>
+                    <span>Plataforma</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>💰 Vendas Hoje</h3>
+                <div class="stat-value" id="vendas-hoje">R$ 0,00</div>
+                <div class="stat-label">Total de vendas do dia</div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>📸 Fotos Impressas</h3>
+                <div class="stat-value" id="fotos-impressas">0</div>
+                <div class="stat-label">Fotos impressas hoje</div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>🖨️ Status da Impressora</h3>
+                <div class="stat-value" id="status-impressora">-</div>
+                <div class="stat-label">ASK-300 Status</div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>📊 Formato Mais Vendido</h3>
+                <div class="stat-value" id="formato-popular">-</div>
+                <div class="stat-label">Formato preferido</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Carregar informações do Electron
+        if (window.electronAPI) {
+            window.electronAPI.getAppVersion().then(version => {
+                document.getElementById('app-version').textContent = version;
+            });
+            
+            window.electronAPI.getUserDataPath().then(path => {
+                document.getElementById('user-data-path').textContent = path.substring(0, 30) + '...';
+                document.getElementById('user-data-path').title = path;
+            });
+            
+            document.getElementById('platform').textContent = window.electronAPI.platform;
+        }
+        
+        // Carregar dados do dashboard
+        async function loadDashboardData() {
+            try {
+                const response = await fetch('/api/sales-data');
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    document.getElementById('vendas-hoje').textContent = 
+                        `R$ ${(data.vendas_hoje || 0).toFixed(2).replace('.', ',')}`;
+                    document.getElementById('fotos-impressas').textContent = data.fotos_hoje || 0;
+                    document.getElementById('formato-popular').textContent = data.formato_popular || '-';
+                }
+            } catch (error) {
+                console.error('Erro ao carregar dados:', error);
+            }
+        }
+        
+        // Verificar status da impressora
+        async function checkPrinterStatus() {
+            try {
+                const response = await fetch('/api/printer-status');
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('status-impressora').textContent = 
+                        data.status === 'online' ? '✅ Online' : '❌ Offline';
+                }
+            } catch (error) {
+                document.getElementById('status-impressora').textContent = '❓ Desconhecido';
+            }
+        }
+        
+        // Logout
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+                window.location.href = '/login';
+            } catch (error) {
+                console.error('Erro no logout:', error);
+                window.location.href = '/login';
+            }
+        }
+        
+        // Carregar dados na inicialização
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDashboardData();
+            checkPrinterStatus();
+            
+            // Atualizar dados a cada 30 segundos
+            setInterval(() => {
+                loadDashboardData();
+                checkPrinterStatus();
+            }, 30000);
+        });
+    </script>
+</body>
+</html>

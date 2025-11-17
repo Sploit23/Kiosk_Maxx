@@ -88,7 +88,7 @@
             const copies = parseInt(document.getElementById('copies-input').value) || 1;
             
             // Determinar a impressora correta baseada no formato
-            const formatConfig = printerConfig.formats && printerConfig.formats[paperSize];
+            const formatConfig = (printerConfig.formats && printerConfig.formats[paperSize]) || (printerConfig.format_mappings && printerConfig.format_mappings[paperSize]);
             let selectedPrinter = null;
             let selectedPaperSize = paperSize;
             
@@ -111,9 +111,9 @@
             if (selectedPrinter && selectedPrinter !== 'default') {
                 await printWithConfiguredPrinter(file, selectedPrinter, selectedPaperSize, copies);
             } else {
-                // Usar o sistema ASK-300 padrão
                 await window.ask300.printSingle(file, paperSize, copies);
             }
+            try { window.incrementDailyPrintCount && window.incrementDailyPrintCount(selectedPaperSize || paperSize, copies); } catch (_) {}
             
             // Registrar no sistema de vendas (se disponível)
             if (typeof registerSale === 'function') {
@@ -216,7 +216,7 @@
             const printerConfig = await loadPrinterConfiguration();
             
             // Determinar a impressora correta baseada no formato
-            const formatConfig = printerConfig.formats && printerConfig.formats[format];
+            const formatConfig = (printerConfig.formats && printerConfig.formats[format]) || (printerConfig.format_mappings && printerConfig.format_mappings[format]);
             let selectedPrinter = null;
             let selectedPaperSize = format;
             
@@ -237,9 +237,9 @@
             if (selectedPrinter && selectedPrinter !== 'default') {
                 await printWithConfiguredPrinter(file, selectedPrinter, selectedPaperSize, copies);
             } else {
-                // Usar o sistema ASK-300 padrão
                 await window.ask300.printSingle(file, format, copies);
             }
+            try { window.incrementDailyPrintCount && window.incrementDailyPrintCount(selectedPaperSize || format, copies); } catch (_) {}
             
         } catch (error) {
             console.error('Erro na impressão ASK-300:', error);

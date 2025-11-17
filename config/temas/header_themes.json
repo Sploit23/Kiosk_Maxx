@@ -1,0 +1,21 @@
+{
+  "current_theme": "christmas",
+  "available_themes": [
+    {
+      "id": "natal",
+      "name": "Natal",
+      "text": "🎄 Fotos Mágicas 🎅",
+      "cssClass": "christmas-header",
+      "description": "Tema festivo de Natal com efeitos especiais",
+      "lastUpdate": "2024-05-26T14:31:44.487Z"
+    },
+    {
+      "id": "maxx-foto",
+      "name": "Maxx Foto",
+      "text": "📷 MAXX FOTO",
+      "cssClass": "maxx-foto-header",
+      "description": "Tema moderno e profissional para estúdio fotográfico",
+      "lastUpdate": "2024-05-26T14:31:44.487Z"
+    }
+  ]
+}

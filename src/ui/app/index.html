@@ -5,23 +5,36 @@
     <title>Kiosk de Fotos</title>
     <link rel="stylesheet" href="/static/css/core.css">
     <link rel="stylesheet" href="/static/css/carrinho.css">
+    <link rel="stylesheet" href="/static/css/header-themes.css">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:*; img-src 'self' data: http://127.0.0.1:* http://localhost:*; font-src 'self' data:;">
 </head>
 <body class="electron-app">
 
 <div id="sidebar">
     <div class="sidebar-header">
-        <h2>🎄 Fotos Mágicas 🎅</h2>
+        <h2 contenteditable="true" title="Clique para editar o título">🎄 Fotos Mágicas 🎅</h2>
     </div>
     <div id="lista-fotos"></div>
 </div>
 
-<button id="config-button" title="Configurações" onclick="window.location.href='/login'">⚙️</button>
-<button id="fullscreen-button" title="Tela Cheia" onclick="toggleFullscreen()">⛶</button>
+<!-- botões individuais removidos: ações agora estão no menu rápido -->
+<button id="quick-actions-button" title="Ações Rápidas">☰</button>
+        <div id="quick-actions-menu" style="display:none">
+            <div class="quick-action-item" data-action="fullscreen">⛶ Tela Cheia</div>
+            <div class="quick-action-item" data-action="config">⚙️ Configurações</div>
+            <div class="quick-action-item" data-action="clean">🧹 Limpar Fotos de Hoje</div>
+            <div class="quick-action-item" data-action="summary">📊 Resumo de Impressões</div>
+            <div class="quick-action-item" data-action="close">❌ Fechar App</div>
+            <div class="quick-actions-tip">Use com cuidado</div>
+            <div class="quick-actions-accent"></div>
+        </div>
 
 <div id="main">
     <div id="foto-grande">
         <h2>Selecione uma foto</h2>
+        <div id="folder-indicator" style="position: fixed; top: 12px; left: 12px; background: rgba(0,0,0,0.6); color: #fff; padding: 8px 12px; border-radius: 8px; font-size: 12px; z-index: 9999; box-shadow: 0 2px 6px rgba(0,0,0,0.2);">
+            📁 Pasta: carregando...
+        </div>
         
         <!-- Resumo da Impressora -->
         <div id="printer-summary" class="printer-summary">
@@ -95,9 +108,7 @@
 </div>
 
 <!-- Notificação do Carrinho -->
-<div id="cart-notification" class="cart-notification">
-    <div class="notification-content"></div>
-</div>
+<!-- Carrinho removido -->
 
 <!-- Rodapé removido - versão disponível apenas na área administrativa -->
 
@@ -107,7 +118,7 @@
 
 <script src="/app/js/ask300-kiosk-integration.js"></script>
 <script src="/app/js/printer.js"></script>
-<script src="/static/js/cart.js"></script>
+<!-- cart.js removido -->
 <script src="/static/js/app.js"></script>
 <script src="/static/js/updater.js"></script>
 

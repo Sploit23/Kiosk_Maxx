@@ -1,0 +1,1960 @@
+/* Fontes do sistema para melhor performance */
+
+/* Variáveis de cor para o tema de Natal */
+:root {
+    --christmas-red: #c41e3a;
+    --christmas-green: #228b22;
+    --christmas-gold: #ffd700;
+    --snow-white: #ffffff;
+    --dark-green: #0f5132;
+    --light-red: #dc3545;
+    --warm-gold: #ffb700;
+    --ice-blue: #87ceeb;
+    --dark-red: #8b0000;
+    --pine-green: #355e3b;
+    --thumb-size: 100px;
+}
+
+/* -------------------------------------------
+    --- ESTILOS DO PROJETO E DO TEMA DE NATAL ---
+    --- OTIMIZADO PARA TOUCH SCREEN ---
+    -------------------------------------------
+*/
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    /* Otimizações globais para touch */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+/* Elementos interativos otimizados para touch (mínimo 48px) */
+button, .btn, .foto-sidebar, .miniatura {
+    min-width: 48px;
+    min-height: 48px;
+    touch-action: manipulation;
+    padding: 12px;
+}
+
+/* Botões principais ainda maiores para melhor acessibilidade */
+.format-btn, .quantity-btn, .config-button {
+    min-width: 60px;
+    min-height: 60px;
+    padding: 16px 24px;
+    font-size: 18px;
+}
+
+/* Miniaturas maiores para touch */
+.miniatura {
+    min-width: 80px;
+    min-height: 80px;
+    padding: 12px;
+}
+
+.miniatura img {
+    min-width: 60px;
+    min-height: 60px;
+}
+
+/* Feedback visual aprimorado para touch */
+button:active, .btn:active, .foto-sidebar:active, .miniatura:active {
+    transform: scale(0.95);
+    transition: transform 0.1s ease;
+    background-color: rgba(255, 215, 0, 0.2);
+    box-shadow: 0 2px 8px rgba(255, 215, 0, 0.4);
+}
+
+/* Estados hover para dispositivos com mouse */
+@media (hover: hover) {
+    button:hover, .btn:hover, .foto-sidebar:hover, .miniatura:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(255, 215, 0, 0.3);
+    }
+}
+
+/* Melhor espaçamento para touch em dispositivos móveis */
+@media (max-width: 768px) {
+    .format-buttons {
+        gap: 20px;
+        padding: 20px;
+    }
+    
+    .format-btn, .quantity-btn {
+        min-width: 80px;
+        min-height: 80px;
+        padding: 20px;
+        font-size: 20px;
+    }
+    
+    .foto-sidebar {
+        margin-bottom: 15px;
+        padding: 15px;
+    }
+    
+    .miniatura {
+        min-width: 100px;
+        min-height: 100px;
+        margin: 8px;
+    }
+}
+
+/* Scrollbars otimizadas para touch */
+::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, var(--christmas-gold) 0%, var(--warm-gold) 100%);
+    border-radius: 10px;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, var(--warm-gold) 0%, var(--christmas-gold) 100%);
+}
+
+/* Smooth scrolling para toda a página */
+html {
+    scroll-behavior: smooth;
+}
+
+/* Animações globais */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInLeft {
+    from { opacity: 0; transform: translateX(-30px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInRight {
+    from { opacity: 0; transform: translateX(30px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes bounce {
+    0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+    40% { transform: translateY(-10px); }
+    60% { transform: translateY(-5px); }
+}
+
+/* Lazy Loading Styles */
+.lazy-image {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    background: linear-gradient(45deg, rgba(255, 255, 255, 0.1), rgba(255, 215, 0, 0.1));
+    border-radius: 4px;
+}
+
+.lazy-image.loading {
+    opacity: 0.6;
+    background: linear-gradient(45deg, rgba(255, 255, 255, 0.2), rgba(255, 215, 0, 0.2));
+    animation: shimmer 1.5s infinite;
+}
+
+.lazy-image.loaded {
+    opacity: 1;
+    transform: scale(1);
+    background: none;
+}
+
+.lazy-image.error {
+    opacity: 0.5;
+    background: linear-gradient(45deg, rgba(196, 30, 58, 0.2), rgba(139, 0, 0, 0.2));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--christmas-red);
+    font-size: 12px;
+}
+
+@keyframes shimmer {
+    0% { background-position: -200px 0; }
+    100% { background-position: 200px 0; }
+}
+
+.lazy-image.loading::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    animation: loading-shimmer 1.5s infinite;
+}
+
+@keyframes loading-shimmer {
+    0% { left: -100%; }
+    100% { left: 100%; }
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: 
+        /* Fundo com gradiente e flocos de neve em SVG */
+        radial-gradient(ellipse at top, #1e3c72 0%, #2a5298 50%, #0f4c75 100%),
+        url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="10" cy="10" r="1" fill="white" opacity="0.3"/><circle cx="30" cy="20" r="0.5" fill="white" opacity="0.4"/><circle cx="50" cy="5" r="1.5" fill="white" opacity="0.2"/><circle cx="70" cy="15" r="0.8" fill="white" opacity="0.5"/><circle cx="90" cy="25" r="1.2" fill="white" opacity="0.3"/><circle cx="20" cy="40" r="0.7" fill="white" opacity="0.4"/><circle cx="40" cy="60" r="1" fill="white" opacity="0.2"/><circle cx="60" cy="45" r="0.6" fill="white" opacity="0.5"/><circle cx="80" cy="55" r="1.1" fill="white" opacity="0.3"/><circle cx="15" cy="80" r="0.9" fill="white" opacity="0.4"/><circle cx="35" cy="90" r="0.8" fill="white" opacity="0.2"/><circle cx="55" cy="75" r="1.3" fill="white" opacity="0.5"/><circle cx="75" cy="85" r="0.5" fill="white" opacity="0.3"/><circle cx="95" cy="70" r="1" fill="white" opacity="0.4"/></svg>');
+    background-attachment: fixed;
+    color: var(--snow-white);
+    height: 100vh;
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    overflow: hidden;
+    position: relative;
+    animation: fadeIn 0.8s ease-out;
+}
+
+/* Responsividade para tablets */
+@media (max-width: 1024px) {
+    body {
+        grid-template-columns: 280px 1fr;
+    }
+}
+
+/* Responsividade para dispositivos móveis */
+@media (max-width: 768px) {
+    body {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+        overflow-y: auto;
+    }
+    
+    #sidebar {
+        position: relative;
+        height: auto;
+        max-height: 40vh;
+    }
+    
+    #main {
+        height: auto;
+        min-height: 60vh;
+    }
+}
+
+@media (max-width: 480px) {
+    body {
+        font-size: 14px;
+    }
+}
+
+/* Loading Spinner */
+.loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 50vh;
+    animation: fadeIn 0.5s ease-out;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid rgba(255, 215, 0, 0.3);
+    border-top: 4px solid var(--christmas-gold);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading-spinner p {
+    color: var(--snow-white);
+    font-size: 18px;
+    font-weight: 500;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Error Container */
+.error-container {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    text-align: center;
+    padding: 40px;
+}
+
+/* Button Loading State */
+.btn.loading {
+    position: relative;
+    pointer-events: none;
+}
+
+.btn.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 2px solid transparent;
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+/* Sidebar */
+#sidebar {
+    background: linear-gradient(135deg, var(--christmas-red) 0%, var(--dark-red) 100%);
+    overflow-y: auto;
+    padding: 1.5rem;
+    border-right: 3px solid var(--christmas-gold);
+    box-shadow: 5px 0 20px rgba(0, 0, 0, 0.3);
+    position: relative;
+    animation: slideInLeft 0.6s ease-out;
+    backdrop-filter: blur(10px);
+}
+
+@media (max-width: 768px) {
+    #sidebar {
+        padding: 1rem;
+        border-right: none;
+        border-bottom: 3px solid var(--christmas-gold);
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+    }
+}
+
+.sidebar-header {
+    text-align: center;
+    padding: 1.5rem 0;
+    margin-bottom: 2rem;
+    border-bottom: 3px solid var(--christmas-gold);
+    background: rgba(255, 215, 0, 0.1);
+    border-radius: 15px;
+    position: relative;
+    animation: scaleIn 0.8s ease-out 0.2s both;
+    transform-origin: center;
+}
+
+@media (max-width: 768px) {
+    .sidebar-header {
+        padding: 1rem 0;
+        margin-bottom: 1rem;
+    }
+}
+
+#config-button {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid var(--christmas-gold);
+    color: var(--christmas-gold);
+    font-size: 24px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+
+}
+
+#config-button:hover {
+    background-color: rgba(255, 215, 0, 0.2);
+}
+
+#config-button:active {
+    transform: rotate(45deg) scale(0.95);
+}
+
+@media (max-width: 768px) {
+    #config-button {
+        top: 10px;
+        right: 10px;
+        width: 45px;
+        height: 45px;
+        font-size: 20px;
+    }
+}
+
+#fullscreen-button {
+    position: fixed;
+    top: 20px;
+    right: 85px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid var(--christmas-gold);
+    color: var(--christmas-gold);
+    font-size: 20px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+}
+
+#quick-actions-button {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid var(--christmas-gold);
+    color: var(--christmas-gold);
+    font-size: 20px;
+    cursor: pointer;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+}
+
+#quick-actions-button:hover {
+    transform: scale(1.1);
+    background-color: rgba(255, 215, 0, 0.2);
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
+}
+
+@media (max-width: 768px) {
+    #quick-actions-button {
+        top: 10px;
+        right: 10px;
+        width: 45px;
+        height: 45px;
+        font-size: 18px;
+    }
+}
+
+#quick-actions-menu {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    background: linear-gradient(135deg, rgba(255,215,0,0.15), rgba(34,139,34,0.15));
+    border: 2px solid var(--christmas-gold);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+    z-index: 1200;
+    min-width: 260px;
+}
+
+.quick-action-item {
+    padding: 14px 16px;
+    color: var(--snow-white);
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+}
+
+.quick-action-item:hover {
+    background: linear-gradient(135deg, rgba(255,215,0,0.25), rgba(34,139,34,0.25));
+}
+
+.quick-actions-tip {
+    padding: 10px 16px;
+    color: var(--christmas-gold);
+    font-size: 12px;
+    text-align: right;
+}
+
+.quick-actions-accent {
+    height: 6px;
+    background: linear-gradient(90deg, var(--christmas-gold), var(--warm-gold), var(--christmas-green));
+}
+
+#fullscreen-button:hover {
+    transform: scale(1.1);
+    background-color: rgba(255, 215, 0, 0.2);
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
+}
+
+@media (max-width: 768px) {
+    #fullscreen-button {
+        top: 10px;
+        right: 65px;
+        width: 45px;
+        height: 45px;
+        font-size: 18px;
+    }
+}
+
+/* Botão para sair do fullscreen - só aparece em fullscreen */
+#close-fullscreen-button {
+    position: fixed;
+    top: 20px;
+    right: 215px;
+    background: rgba(139, 0, 0, 0.8);
+    border: 2px solid var(--christmas-red);
+    color: var(--snow-white);
+    font-size: 20px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+}
+
+#close-fullscreen-button:hover {
+    transform: scale(1.1);
+    background-color: rgba(196, 30, 58, 0.9);
+    box-shadow: 0 0 20px rgba(196, 30, 58, 0.4);
+}
+
+/* Mostra o botão de fechar apenas em fullscreen */
+:fullscreen #close-fullscreen-button,
+:-webkit-full-screen #close-fullscreen-button,
+:-moz-full-screen #close-fullscreen-button {
+    display: flex;
+}
+
+@media (max-width: 768px) {
+    #close-fullscreen-button {
+        top: 10px;
+        right: 120px;
+        width: 45px;
+        height: 45px;
+        font-size: 18px;
+    }
+}
+
+.sidebar-header h2 {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    color: var(--christmas-gold);
+    font-size: 1.8rem;
+    font-weight: 700;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 0 10px var(--warm-gold);
+    margin-bottom: 0.5rem;
+    animation: glow 2s ease-in-out infinite alternate;
+}
+
+@keyframes glow {
+    from { text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 0 5px var(--warm-gold); }
+    to { text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 0 15px var(--warm-gold); }
+}
+
+/* Container da lista de fotos para scroll */
+#lista-fotos {
+    padding: 10px;
+}
+
+.foto-sidebar {
+    text-align: center;
+    margin-bottom: 15px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    background: rgba(255, 255, 255, var(--sidebar-bg-opacity, 0.1));
+    border-radius: var(--sidebar-border-radius, 15px);
+    padding: 12px;
+    backdrop-filter: blur(10px);
+    border: 3px solid transparent;
+    animation: slideInLeft 0.6s ease-out;
+    animation-fill-mode: both;
+    min-height: var(--sidebar-thumb-height, 120px);
+    touch-action: manipulation;
+    overflow: hidden;
+    position: relative;
+}
+
+.foto-sidebar:nth-child(1) { animation-delay: 0.1s; }
+.foto-sidebar:nth-child(2) { animation-delay: 0.2s; }
+.foto-sidebar:nth-child(3) { animation-delay: 0.3s; }
+.foto-sidebar:nth-child(4) { animation-delay: 0.4s; }
+.foto-sidebar:nth-child(5) { animation-delay: 0.5s; }
+
+.foto-sidebar:hover {
+    transform: scale(1.05) translateY(-5px);
+    border-color: var(--christmas-gold);
+    box-shadow: 0 10px 30px rgba(255, 215, 0, 0.3);
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.foto-sidebar:active {
+    transform: scale(0.95) translateY(-2px);
+    transition: transform 0.1s ease;
+}
+
+.foto-sidebar.selected {
+    border-color: var(--christmas-gold);
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.2) 0%, rgba(255, 183, 0, 0.3) 100%);
+    box-shadow: 0 8px 25px rgba(255, 215, 0, 0.4);
+    transform: translateY(-3px) scale(1.02);
+}
+
+@media (max-width: 768px) {
+    .foto-sidebar {
+        margin-bottom: 10px;
+        padding: 10px;
+        min-height: 100px;
+    }
+}
+
+.foto-sidebar img {
+    width: 100%;
+    height: var(--sidebar-thumb-height, 120px);
+    object-fit: cover;
+    border-radius: 8px;
+    border: 2px solid transparent;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.foto-sidebar:hover img {
+    transform: scale(1.02);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+.foto-sidebar.selected img {
+    border: 2px solid var(--christmas-gold);
+    box-shadow: 0 6px 20px rgba(255, 215, 0, 0.4);
+}
+
+.foto-numero {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-size: 16px;
+    margin-top: 4px;
+    font-weight: bold;
+    color: var(--sidebar-text-color, var(--snow-white));
+}
+
+/* Área principal */
+#main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.05);
+    height: 100vh;
+    overflow-y: auto;
+    animation: slideInRight 0.6s ease-out 0.2s both;
+    gap: 20px;
+}
+
+@media (max-width: 768px) {
+    #main {
+        padding: 1rem;
+    }
+}
+
+@media (max-width: 480px) {
+    #main {
+        padding: 0.5rem;
+    }
+}
+
+#foto-grande {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    gap: 15px;
+    padding: 10px;
+}
+
+#foto-grande h2 {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    color: var(--snow-white);
+    text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+    padding-top: 10px;
+}
+
+#foto-grande-img {
+    max-width: 90%;
+    max-height: calc(100vh - 280px);
+    object-fit: contain;
+    border-radius: 15px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    border: 5px solid var(--snow-white);
+    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: scaleIn 0.6s ease-out;
+    backdrop-filter: blur(2px);
+}
+
+#foto-grande-img:hover {
+    transform: scale(1.02);
+    box-shadow: 0 25px 50px rgba(0,0,0,0.4);
+    border-color: var(--christmas-gold);
+}
+
+@media (max-width: 768px) {
+    #foto-grande-img {
+        max-width: 95%;
+        max-height: calc(60vh - 200px);
+        border-width: 3px;
+    }
+}
+
+@media (max-width: 480px) {
+    #foto-grande-img {
+        max-width: 100%;
+        max-height: calc(50vh - 150px);
+        border-width: 2px;
+    }
+}
+#miniaturas {
+    display: flex;
+    gap: 10px;
+    flex-shrink: 0;
+    justify-content: center;
+    padding: 15px;
+    animation: slideInUp 0.6s ease-out 0.3s both;
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: 100%;
+}
+
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 768px) {
+    #miniaturas {
+        padding: 10px;
+        gap: 8px;
+        flex-direction: row;
+        justify-content: space-around;
+    }
+    
+    .miniatura img {
+        width: var(--thumb-size);
+        height: var(--thumb-size);
+    }
+    
+    .miniatura-nome {
+        font-size: 12px;
+        padding: 2px 6px;
+    }
+}
+
+@media (max-width: 480px) {
+    #miniaturas {
+        padding: 8px;
+        gap: 5px;
+    }
+    
+    .miniatura img {
+        width: var(--thumb-size);
+        height: var(--thumb-size);
+    }
+    
+    .miniatura-nome {
+        font-size: 11px;
+        padding: 2px 4px;
+    }
+}
+.miniatura {
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 8px;
+    backdrop-filter: blur(5px);
+    position: relative;
+    overflow: hidden;
+}
+
+.miniatura::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+    transition: left 0.5s;
+}
+
+.miniatura:hover::before {
+    left: 100%;
+}
+
+.miniatura:hover {
+    transform: translateY(-8px) scale(1.1);
+    box-shadow: 0 15px 30px rgba(255, 215, 0, 0.3);
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.miniatura:active {
+    transform: translateY(-4px) scale(1.05);
+}
+
+@media (max-width: 768px) {
+    .miniatura {
+        padding: 6px;
+    }
+}
+.miniatura img {
+    width: var(--thumb-size);
+    height: var(--thumb-size);
+    object-fit: cover;
+    border-radius: 5px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: border 0.2s;
+}
+.miniatura img:hover {
+    border: 2px solid var(--christmas-gold);
+}
+#botao-imprimir {
+    color: var(--snow-white);
+    border: none;
+    padding: 12px 24px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 15px rgba(34, 139, 34, 0.3);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    position: fixed !important;
+    bottom: 30px !important;
+    right: 30px !important;
+    overflow: hidden;
+    backdrop-filter: blur(5px);
+    min-width: 180px;
+    z-index: 1001;
+}
+
+#botao-imprimir:before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+    transition: left 0.5s;
+}
+
+#botao-imprimir:hover::before {
+    left: 100%;
+}
+
+@media (max-width: 768px) {
+    #botao-imprimir {
+        padding: 10px 20px;
+        font-size: 15px;
+        min-width: 160px;
+        bottom: 25px !important;
+        right: 25px !important;
+    }
+}
+
+@media (max-width: 480px) {
+    #botao-imprimir {
+        padding: 8px 16px;
+        font-size: 14px;
+        min-width: 140px;
+        bottom: 20px !important;
+        right: 20px !important;
+    }
+}
+#botao-imprimir:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 30px rgba(34, 139, 34, 0.5);
+    background: linear-gradient(135deg, var(--dark-green) 0%, var(--christmas-green) 100%);
+}
+
+#botao-imprimir:active {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(34, 139, 34, 0.4);
+}
+#botao-imprimir:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.7;
+    transform: none;
+    box-shadow: 0 2px 8px rgba(34, 139, 34, 0.2);
+}
+
+.loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 24px;
+    color: var(--snow-white);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+.error-message {
+    text-align: center;
+    margin: 20px auto;
+    color: var(--light-red);
+    font-size: 18px;
+    max-width: 80%;
+    background-color: rgba(0, 0, 0, 0.5);
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.solution-message, .info-message {
+    text-align: center;
+    margin: 20px auto;
+    color: var(--christmas-gold);
+    font-size: 16px;
+    max-width: 80%;
+    background-color: rgba(0, 0, 0, 0.5);
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.config-button {
+    display: block;
+    margin: 20px auto;
+    padding: 10px 20px;
+    background-color: var(--christmas-green);
+    color: var(--snow-white);
+    border: none;
+    border-radius: 5px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.config-button:hover {
+    background-color: var(--dark-green);
+}
+
+/* Estilos para tela de boas-vindas */
+.welcome-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at center, #1e3c72, #0f4c75);
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.5s ease;
+    z-index: 9999;
+}
+
+/* Oculta elementos quando a tela de boas-vindas está ativa */
+body:has(.welcome-container) #sidebar,
+body:has(.welcome-container) #config-button,
+body:has(.welcome-container) #fullscreen-button,
+body:has(.welcome-container) #foto-grande h2,
+body:has(.welcome-container) #ask300-panel,
+body:has(.welcome-container) #miniaturas {
+    display: none !important;
+}
+
+.welcome-content {
+    text-align: center;
+    max-width: 600px;
+    padding: 40px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.welcome-title {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-size: 3rem;
+    color: var(--christmas-gold);
+    margin-bottom: 20px;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    animation: glow 2s ease-in-out infinite alternate;
+}
+
+@keyframes glow {
+    from { text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 0 10px var(--christmas-gold); }
+    to { text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 0 20px var(--christmas-gold), 0 0 30px var(--christmas-gold); }
+}
+
+.welcome-icon {
+    font-size: 4rem;
+    margin: 20px 0;
+    animation: bounce 2s infinite;
+}
+
+@keyframes bounce {
+    0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+    40% { transform: translateY(-10px); }
+    60% { transform: translateY(-5px); }
+}
+
+.welcome-message {
+    font-size: 1.5rem;
+    color: var(--snow-white);
+    margin-bottom: 15px;
+    font-weight: 600;
+}
+
+.welcome-instructions {
+    font-size: 1.1rem;
+    color: var(--christmas-gold);
+    margin-bottom: 30px;
+    opacity: 0.9;
+}
+
+.welcome-button {
+    font-size: 1.2rem;
+    padding: 15px 30px;
+    background: linear-gradient(135deg, var(--christmas-green), var(--dark-green));
+    border: 2px solid var(--christmas-gold);
+    border-radius: 50px;
+    color: var(--snow-white);
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.welcome-button:hover {
+    background: linear-gradient(135deg, var(--dark-green), var(--christmas-green));
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+    border-color: var(--snow-white);
+}
+
+/* Estilos para notificação de atualização */
+.update-notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: linear-gradient(135deg, var(--christmas-green) 0%, var(--pine-green) 100%);
+    border: 2px solid var(--christmas-gold);
+    border-radius: 10px;
+    padding: 15px;
+    width: 300px;
+    z-index: 1000;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    animation: slideIn 0.5s ease-out;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInRight {
+    from { 
+        transform: translateX(100%); 
+        opacity: 0; 
+    }
+    to { 
+        transform: translateX(0); 
+        opacity: 1; 
+    }
+}
+
+@keyframes slideOutRight {
+    from { 
+        transform: translateX(0); 
+        opacity: 1; 
+    }
+    to { 
+        transform: translateX(100%); 
+        opacity: 0; 
+    }
+}
+
+@keyframes slideInLeft {
+    from { 
+        transform: translateX(-100%); 
+        opacity: 0; 
+    }
+    to { 
+        transform: translateX(0); 
+        opacity: 1; 
+    }
+}
+
+.update-notification h3 {
+    color: var(--christmas-gold);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+.update-notification p {
+    color: var(--snow-white);
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+.update-notification ul {
+    color: var(--snow-white);
+    margin-left: 20px;
+    margin-bottom: 15px;
+    font-size: 13px;
+}
+
+.update-close {
+    background-color: var(--christmas-red);
+    color: var(--snow-white);
+    border: none;
+    border-radius: 5px;
+    padding: 5px 10px;
+    cursor: pointer;
+    display: block;
+    margin: 0 auto;
+    transition: background-color 0.2s;
+}
+
+.update-close:hover {
+    background-color: var(--dark-red);
+}
+
+/* Estilos para o rodapé com informações de versão */
+.app-footer {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    color: var(--snow-white);
+    z-index: 100;
+}
+
+#app-version {
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+#app-version:hover {
+    opacity: 1;
+}
+
+/* Media queries para responsividade em tela cheia */
+@media screen and (max-height: 600px) {
+    #foto-grande-img {
+        max-height: calc(100vh - 200px);
+    }
+    
+    .miniatura img {
+        width: 80px;
+        height: 80px;
+    }
+    
+    #miniaturas {
+        gap: 8px;
+        margin-top: 15px;
+    }
+}
+
+@media screen and (min-height: 900px) {
+    #foto-grande-img {
+        max-height: calc(100vh - 320px);
+    }
+}
+
+/* Ajustes para modo fullscreen */
+@media screen and (min-width: 1200px) {
+    body {
+        grid-template-columns: 350px 1fr;
+    }
+    
+    #sidebar {
+        padding: 2rem;
+    }
+}
+
+/* Layout otimizado para diferentes tamanhos de tela */
+@media screen {
+    #main {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 100vh;
+    }
+    
+    #foto-grande {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        min-height: 0;
+        max-height: calc(100vh - 200px);
+    }
+    
+    #miniaturas {
+        flex-shrink: 0;
+        position: relative;
+        z-index: 5;
+    }
+}
+
+/* Ajustes específicos para telas muito pequenas */
+@media screen and (max-height: 500px) {
+    #foto-grande {
+        max-height: calc(100vh - 150px);
+    }
+    
+    #foto-grande-img {
+        max-height: calc(100vh - 180px);
+    }
+    
+    .miniatura img {
+        width: 60px;
+        height: 60px;
+    }
+}
+
+/* Estilo para mensagens de erro */
+.error-message {
+    color: #ff6b6b;
+    background: rgba(255, 107, 107, 0.1);
+    border: 2px solid rgba(255, 107, 107, 0.3);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    font-size: 16px;
+    font-weight: 500;
+    margin: 20px;
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* -------------------------------------------
+    --- ESTILOS PARA NOVAS FOTOS ---
+    -------------------------------------------
+*/
+
+/* Estilos para novas fotos */
+.foto-sidebar.nova-foto {
+    border: 2px solid var(--christmas-red);
+    box-shadow: 0 0 15px rgba(196, 30, 58, 0.6);
+    animation: pulseNew 2s ease-in-out infinite;
+    position: relative;
+}
+
+.foto-sidebar.unseen::after {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #28a745; /* verde discreto */
+    box-shadow: 0 0 6px rgba(40, 167, 69, 0.6);
+}
+
+@keyframes pulseNew {
+    0%, 100% { 
+        box-shadow: 0 0 15px rgba(196, 30, 58, 0.6);
+        border-color: var(--christmas-red);
+    }
+    50% { 
+        box-shadow: 0 0 25px rgba(196, 30, 58, 0.9);
+        border-color: var(--light-red);
+    }
+}
+
+/* Badge para nova foto */
+.nova-badge {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: linear-gradient(45deg, var(--christmas-red), var(--light-red));
+    color: var(--snow-white);
+    font-size: 10px;
+    font-weight: bold;
+    padding: 3px 8px;
+    border-radius: 12px;
+    z-index: 15;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    animation: bounceIn 0.6s ease-out;
+    transition: opacity 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+@keyframes bounceIn {
+    0% { 
+        transform: scale(0) rotate(-180deg); 
+        opacity: 0; 
+    }
+    50% { 
+        transform: scale(1.3) rotate(-90deg); 
+        opacity: 1; 
+    }
+    100% { 
+        transform: scale(1) rotate(0deg); 
+        opacity: 1; 
+    }
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+@keyframes pulseGreen {
+    0% { 
+        transform: scale(1);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    50% { 
+        transform: scale(1.1);
+        box-shadow: 0 2px 8px rgba(76, 175, 80, 0.6);
+    }
+    100% { 
+        transform: scale(1);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+}
+
+/* Animação suave para scroll automático */
+.foto-sidebar {
+    scroll-margin: 20px;
+}
+
+/* Melhorar visibilidade da foto selecionada */
+.foto-sidebar.selecionada {
+    border: 3px solid var(--christmas-gold);
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.8);
+    transform: scale(1.02);
+}
+
+/* Transição suave para novas fotos */
+.foto-sidebar {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Efeito hover melhorado */
+.foto-sidebar:hover:not(.nova-foto) {
+    transform: scale(1.05);
+    box-shadow: 0 4px 20px rgba(255, 255, 255, 0.4);
+}
+
+.foto-sidebar.nova-foto:hover {
+    transform: scale(1.08);
+    box-shadow: 0 0 30px rgba(196, 30, 58, 0.8);
+}
+
+/* Estilos para o Resumo da Impressora */
+.printer-summary {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 2px solid var(--christmas-gold);
+    border-radius: 12px;
+    padding: 15px;
+    margin: 15px 0;
+    box-shadow: 0 4px 12px rgba(255, 215, 0, 0.2);
+    max-width: 500px;
+    width: 100%;
+}
+
+.summary-header {
+    text-align: center;
+    margin-bottom: 12px;
+    border-bottom: 2px solid var(--christmas-gold);
+    padding-bottom: 8px;
+}
+
+.summary-header h3 {
+    color: var(--christmas-red);
+    font-size: 18px;
+    font-weight: bold;
+    margin: 0;
+}
+
+.summary-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.printer-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: white;
+    padding: 10px 15px;
+    border-radius: 8px;
+    border-left: 4px solid var(--christmas-green);
+}
+
+.info-label {
+    font-weight: bold;
+    color: var(--dark-green);
+    font-size: 14px;
+}
+
+.info-value {
+    color: var(--christmas-red);
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.format-mappings {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+
+.format-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border-left: 3px solid var(--christmas-gold);
+}
+
+.format-label {
+    font-weight: bold;
+    color: var(--dark-green);
+    font-size: 13px;
+    min-width: 50px;
+}
+
+.printer-name {
+    color: var(--christmas-red);
+    font-size: 12px;
+    font-weight: 500;
+    text-align: right;
+    flex: 1;
+    margin-left: 10px;
+}
+
+/* Últimas Preferências */
+.last-preferences {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 2px solid var(--christmas-gold);
+}
+
+.last-preferences h4 {
+    color: var(--christmas-green);
+    margin: 0 0 15px 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.preference-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    border-left: 3px solid var(--christmas-gold);
+}
+
+.preference-label {
+    font-weight: 500;
+    color: var(--christmas-green);
+    font-size: 14px;
+}
+
+.preference-value {
+    font-weight: 600;
+    color: var(--christmas-red);
+    font-size: 14px;
+    text-align: right;
+    max-width: 60%;
+    word-wrap: break-word;
+}
+
+/* Responsividade para o resumo da impressora */
+@media (max-width: 768px) {
+    .printer-summary {
+        margin: 10px;
+        padding: 12px;
+    }
+    
+    .summary-header h3 {
+        font-size: 16px;
+    }
+    
+    .format-mappings {
+        gap: 6px;
+    }
+    
+    .format-item, .preference-item {
+        padding: 6px 10px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .info-label, .info-value {
+        font-size: 13px;
+    }
+    
+    .format-label, .printer-name, .preference-label, .preference-value {
+        font-size: 12px;
+    }
+    
+    .preference-value {
+        max-width: 100%;
+        text-align: left;
+    }
+}
+
+#botao-imprimir {
+    color: var(--snow-white);
+    border: none;
+    padding: 12px 24px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 15px rgba(34, 139, 34, 0.3);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    position: fixed !important;
+    bottom: 30px !important;
+    right: 30px !important;
+    overflow: hidden;
+    backdrop-filter: blur(5px);
+    min-width: 180px;
+    z-index: 1001;
+}
+
+
+
+/* Botões de Adicionar ao Carrinho - Cor combinando com "Fotos Mágicas" */
+.print-btn {
+    background: linear-gradient(135deg, var(--christmas-gold) 0%, #ffd700 100%);
+    color: #333;
+    border: none;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: 15px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(255, 215, 0, 0.3);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    margin-top: 5px;
+    min-width: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.print-btn:hover {
+    transform: translateY(-1px) scale(1.05);
+    box-shadow: 0 4px 12px rgba(255, 215, 0, 0.4);
+    background: linear-gradient(135deg, #ffd700 0%, var(--christmas-gold) 100%);
+}
+
+.print-btn:active {
+    transform: translateY(0) scale(0.98);
+}
+
+/* Melhorar o nome das miniaturas */
+.miniatura-nome {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-size: 13px;
+    color: var(--snow-white);
+    margin-top: 5px;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 4px 8px;
+    border-radius: 10px;
+    backdrop-filter: blur(5px);
+    font-weight: 500;
+}
+.miniatura {
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 8px;
+    backdrop-filter: blur(5px);
+    position: relative;
+    overflow: hidden;
+}
+
+.miniatura::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+    transition: left 0.5s;
+}
+
+.miniatura:hover::before {
+    left: 100%;
+}
+
+.miniatura:hover {
+    transform: translateY(-8px) scale(1.1);
+    box-shadow: 0 15px 30px rgba(255, 215, 0, 0.3);
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.miniatura:active {
+    transform: translateY(-4px) scale(1.05);
+}
+
+@media (max-width: 768px) {
+    .miniatura {
+        padding: 6px;
+    }
+}
+.miniatura img {
+    width: var(--thumb-size);
+    height: var(--thumb-size);
+    object-fit: cover;
+    border-radius: 5px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: border 0.2s;
+}
+.miniatura img:hover {
+    border: 2px solid var(--christmas-gold);
+}
+.miniatura-nome {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-size: 14px;
+    color: var(--snow-white);
+    margin-top: 5px;
+    background: var(--christmas-red);
+    padding: 3px 8px;
+    border-radius: 15px;
+}
+#botao-imprimir {
+    color: var(--snow-white);
+    border: none;
+    padding: 12px 24px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 15px rgba(34, 139, 34, 0.3);
+    font-family: 'Comfortaa', cursive;
+    position: fixed !important;
+    bottom: 30px !important;
+    right: 30px !important;
+    overflow: hidden;
+    backdrop-filter: blur(5px);
+    min-width: 180px;
+    z-index: 1001;
+}
+
+#botao-imprimir::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+    transition: left 0.5s;
+}
+
+#botao-imprimir:hover::before {
+    left: 100%;
+}
+
+@media (max-width: 768px) {
+    #botao-imprimir {
+        padding: 10px 20px;
+        font-size: 15px;
+        min-width: 160px;
+        bottom: 25px !important;
+        right: 25px !important;
+    }
+}
+
+@media (max-width: 480px) {
+    #botao-imprimir {
+        padding: 8px 16px;
+        font-size: 14px;
+        min-width: 140px;
+        bottom: 20px !important;
+        right: 20px !important;
+    }
+}
+#botao-imprimir:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 30px rgba(34, 139, 34, 0.5);
+    background: linear-gradient(135deg, var(--dark-green) 0%, var(--christmas-green) 100%);
+}
+
+#botao-imprimir:active {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(34, 139, 34, 0.4);
+}
+#botao-imprimir:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.7;
+    transform: none;
+    box-shadow: 0 2px 8px rgba(34, 139, 34, 0.2);
+}
+
+.loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 24px;
+    color: var(--snow-white);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+.error-message {
+    text-align: center;
+    margin: 20px auto;
+    color: var(--light-red);
+    font-size: 18px;
+    max-width: 80%;
+    background-color: rgba(0, 0, 0, 0.5);
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.solution-message, .info-message {
+    text-align: center;
+    margin: 20px auto;
+    color: var(--christmas-gold);
+    font-size: 16px;
+    max-width: 80%;
+    background-color: rgba(0, 0, 0, 0.5);
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.config-button {
+    display: block;
+    margin: 20px auto;
+    padding: 10px 20px;
+    background-color: var(--christmas-green);
+    color: var(--snow-white);
+    border: none;
+    border-radius: 5px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.config-button:hover {
+    background-color: var(--dark-green);
+}
+
+/* Estilos para notificação de atualização */
+.update-notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: linear-gradient(135deg, var(--christmas-green) 0%, var(--pine-green) 100%);
+    border: 2px solid var(--christmas-gold);
+    border-radius: 10px;
+    padding: 15px;
+    width: 300px;
+    z-index: 1000;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    animation: slideIn 0.5s ease-out;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+.update-notification h3 {
+    color: var(--christmas-gold);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+.update-notification p {
+    color: var(--snow-white);
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+.update-notification ul {
+    color: var(--snow-white);
+    margin-left: 20px;
+    margin-bottom: 15px;
+    font-size: 13px;
+}
+
+.update-close {
+    background-color: var(--christmas-red);
+    color: var(--snow-white);
+    border: none;
+    border-radius: 5px;
+    padding: 5px 10px;
+    cursor: pointer;
+    display: block;
+    margin: 0 auto;
+    transition: background-color 0.2s;
+}
+
+.update-close:hover {
+    background-color: var(--dark-red);
+}
+
+/* Estilos para o rodapé com informações de versão */
+.app-footer {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    color: var(--snow-white);
+    z-index: 100;
+}
+
+#app-version {
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+#app-version:hover {
+    opacity: 1;
+}
+
+/* Media queries para responsividade em tela cheia */
+@media screen and (max-height: 600px) {
+    #foto-grande-img {
+        max-height: calc(100vh - 200px);
+    }
+    
+    .miniatura img {
+        width: var(--thumb-size);
+        height: var(--thumb-size);
+    }
+    
+    #miniaturas {
+        gap: 8px;
+        margin-top: 15px;
+    }
+}
+
+@media screen and (min-height: 900px) {
+    #foto-grande-img {
+        max-height: calc(100vh - 320px);
+    }
+}
+
+/* Ajustes para modo fullscreen */
+@media screen and (min-width: 1200px) {
+    body {
+        grid-template-columns: 350px 1fr;
+    }
+    
+    #sidebar {
+        padding: 2rem;
+    }
+}
+
+/* Layout otimizado para diferentes tamanhos de tela */
+@media screen {
+    #main {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 100vh;
+    }
+    
+    #foto-grande {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        min-height: 0;
+        max-height: calc(100vh - 200px);
+    }
+    
+    #miniaturas {
+        flex-shrink: 0;
+        position: relative;
+        z-index: 5;
+    }
+}
+
+/* Ajustes específicos para telas muito pequenas */
+@media screen and (max-height: 500px) {
+    #foto-grande {
+        max-height: calc(100vh - 150px);
+    }
+    
+    #foto-grande-img {
+        max-height: calc(100vh - 180px);
+    }
+    
+    .miniatura img {
+        width: var(--thumb-size);
+        height: var(--thumb-size);
+    }
+}
+

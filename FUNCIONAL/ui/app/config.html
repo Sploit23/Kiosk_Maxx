@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configurações - Kiosk de Fotos</title>
+    <link rel="stylesheet" href="/static/css/core.css">
+    <link rel="stylesheet" href="/static/css/config.css">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:*; img-src 'self' data: http://127.0.0.1:* http://localhost:*; font-src 'self' data:;">
+</head>
+<body class="electron-app">
+    <div class="config-container">
+        <!-- Menu Lateral -->
+        <div class="admin-sidebar">
+            <div class="sidebar-header">
+                <h1 class="sidebar-title">⚙️ Admin</h1>
+                <p class="sidebar-subtitle">Painel de Controle</p>
+            </div>
+            
+            <div class="menu-item active" data-section="images">
+                <span class="menu-icon">📁</span>
+                <span class="menu-text">Configuração de Imagens</span>
+            </div>
+            
+            <div class="menu-item" data-section="printer-management">
+                <span class="menu-icon">🖨️</span>
+                <span class="menu-text">Configuração de Impressoras</span>
+            </div>
+            
+            <div class="menu-item" data-section="thumbnails">
+                <span class="menu-icon">🎨</span>
+                <span class="menu-text">Personalização</span>
+            </div>
+
+            <div class="menu-item" data-section="system">
+                <span class="menu-icon">⚙️</span>
+                <span class="menu-text">Sistema</span>
+            </div>
+            
+            <div style="margin-top: 30px; padding: 0 20px;">
+                <a href="/" class="btn-secondary" style="width: 100%; margin-bottom: 10px; display: block; text-align: center; text-decoration: none; box-sizing: border-box;">🏠 Voltar ao Kiosk</a>
+                <button id="logout-button" class="btn-danger" style="width: 100%;">🔓 Sair</button>
+            </div>
+        </div>
+        
+        <!-- Conteúdo Principal -->
+        <div class="admin-content">
+            <!-- Mensagens -->
+            <div id="success-message" class="success-message"></div>
+            <div id="error-message" class="error-message"></div>
+            
+            
+            <!-- Seção de Configuração de Imagens -->
+            <div class="config-section" id="images-section">
+                <h2>📁 Configuração de Pasta de Imagens</h2>
+                
+                <div class="config-group">
+                    <label>📂 Pasta Atual de Imagens:</label>
+                    <div class="folder-info">
+                        <p id="current-image-path" class="folder-path">Carregando...</p>
+                        <p id="folder-status" class="folder-status">Verificando...</p>
+                    </div>
+                    <div class="button-group">
+                        <button onclick="selectImageFolder()" class="btn-primary">
+                            📁 Selecionar Nova Pasta
+                        </button>
+                        <button id="save-image-config-button" onclick="saveImageConfiguration()" class="btn-success" style="display: none;">
+                            💾 Salvar Configuração
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="config-group">
+                    <label>📅 Formato de Pasta de Data:</label>
+                    <div class="date-format-options">
+                        <div class="radio-group">
+                            <input type="radio" id="format-ddmmyyyy" name="date-format" value="DDMMYYYY" checked>
+                            <label for="format-ddmmyyyy">
+                                <strong>DDMMYYYY</strong> - Exemplo: 15112025
+                            </label>
+                        </div>
+                        <div class="radio-group">
+                            <input type="radio" id="format-ddmmyy" name="date-format" value="DDMMYY">
+                            <label for="format-ddmmyy">
+                                <strong>DDMMYY</strong> - Exemplo: 151125
+                            </label>
+                        </div>
+                        <div class="radio-group">
+                            <input type="radio" id="format-yyyymmdd" name="date-format" value="YYYYMMDD">
+                            <label for="format-yyyymmdd">
+                                <strong>YYYYMMDD</strong> - Exemplo: 20251115
+                            </label>
+                        </div>
+                        <div class="radio-group">
+                            <input type="radio" id="format-yymmdd" name="date-format" value="YYMMDD">
+                            <label for="format-yymmdd">
+                                <strong>YYMMDD</strong> - Exemplo: 251115
+                            </label>
+                        </div>
+                    </div>
+                    <button onclick="saveDateFormat()" class="btn-primary" style="margin-top: 10px;">
+                        💾 Salvar Formato de Data
+                    </button>
+                </div>
+                
+                <div class="config-group">
+                    <label>📅 Pastas de Data Disponíveis:</label>
+                    <div id="available-folders" class="available-folders">
+                        Carregando...
+                    </div>
+                </div>
+                
+                <div class="config-help">
+                    <h4>ℹ️ Como Organizar as Fotos:</h4>
+                    <ul>
+                        <li>Selecione a pasta principal onde estão suas fotos</li>
+                        <li>Escolha o formato de pasta de data que você prefere usar:</li>
+                        <li><strong>DDMMYYYY:</strong> Exemplo: <code>15112025</code></li>
+                        <li><strong>DDMMYY:</strong> Exemplo: <code>151125</code></li>
+                        <li><strong>YYYYMMDD:</strong> Exemplo: <code>20251115</code></li>
+                        <li><strong>YYMMDD:</strong> Exemplo: <code>251115</code></li>
+                        <li>Dentro da pasta principal, crie subpastas seguindo o formato escolhido</li>
+                        <li>O sistema automaticamente procurará pela pasta do dia atual no formato selecionado</li>
+                        <li><strong>Importante:</strong> Após fazer alterações, clique em "Salvar" para aplicar as mudanças</li>
+                    </ul>
+                </div>
+            </div>
+            
+            
+            <!-- Seção de Gerenciamento de Impressoras -->
+            <div class="config-section" id="printer-management-section">
+                <h2 style="margin-top: 0; color: #2c3e50;">🖨️ Configuração de Impressoras</h2>
+                <div class="form-group">
+                    <!-- Configuração Avançada por Formato -->
+                    <div class="printer-section" style="margin-bottom: 30px;">
+                        <div class="advanced-printer-config" style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
+                            <h3 style="margin-top: 0; color: #495057;">🎯 Configuração Simplificada por Formato</h3>
+                            <p style="color: #6c757d; margin-bottom: 25px;">Configure qual impressora será usada para cada formato de foto. O Windows gerenciará automaticamente o tamanho do papel, qualidade e outras configurações.</p>
+                            
+                            <!-- Formato 10x15 -->
+                            <div class="format-config" style="background: white; padding: 15px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #dee2e6;">
+                                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
+                                    <div style="background: #e3f2fd; padding: 8px 12px; border-radius: 4px; font-weight: 600; color: #1976d2; min-width: 80px; text-align: center;">10x15</div>
+                                    <h4 style="margin: 0; color: #495057;">Fotos 10x15 cm (Padrão)</h4>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                                    <div style="flex: 1; min-width: 250px;">
+                                        <label for="printer-10x15" style="font-weight: 500; display: block; margin-bottom: 5px;">Impressora:</label>
+                                        <select id="printer-10x15" class="printer-select" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                            <option value="">Carregando impressoras...</option>
+                                        </select>
+                                    </div>
+                                    
+
+                                    <div id="status-10x15" class="printer-status-indicator" style="display: flex; align-items: center; gap: 8px;">
+                                        <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #6c757d;"></div>
+                                        <span style="font-size: 0.9em; color: #6c757d;">Não configurado</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Formato 15x20 -->
+                            <div class="format-config" style="background: white; padding: 15px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #dee2e6;">
+                                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
+                                    <div style="background: #f3e5f5; padding: 8px 12px; border-radius: 4px; font-weight: 600; color: #7b1fa2; min-width: 80px; text-align: center;">15x20</div>
+                                    <h4 style="margin: 0; color: #495057;">Fotos 15x20 cm (Médio)</h4>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                                    <div style="flex: 1; min-width: 250px;">
+                                        <label for="printer-15x20" style="font-weight: 500; display: block; margin-bottom: 5px;">Impressora:</label>
+                                        <select id="printer-15x20" class="printer-select" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                            <option value="">Carregando impressoras...</option>
+                                        </select>
+                                    </div>
+                                    
+
+                                    <div id="status-15x20" class="printer-status-indicator" style="display: flex; align-items: center; gap: 8px;">
+                                        <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #6c757d;"></div>
+                                        <span style="font-size: 0.9em; color: #6c757d;">Não configurado</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Formato Bolas -->
+                            <div class="format-config" style="background: white; padding: 15px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #dee2e6;">
+                                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
+                                    <div style="background: #fff3e0; padding: 8px 12px; border-radius: 4px; font-weight: 600; color: #f57c00; min-width: 80px; text-align: center;">Bolas</div>
+                                    <h4 style="margin: 0; color: #495057;">Fotos Bolas (Especial)</h4>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                                    <div style="flex: 1; min-width: 250px;">
+                                        <label for="printer-bolas" style="font-weight: 500; display: block; margin-bottom: 5px;">Impressora:</label>
+                                        <select id="printer-bolas" class="printer-select" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                            <option value="">Carregando impressoras...</option>
+                                        </select>
+                                    </div>
+                                    
+
+                                    <div id="status-bolas" class="printer-status-indicator" style="display: flex; align-items: center; gap: 8px;">
+                                        <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #6c757d;"></div>
+                                        <span style="font-size: 0.9em; color: #6c757d;">Não configurado</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Botões de Ação -->
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; padding-top: 15px; border-top: 1px solid #dee2e6;">
+                                <button id="save-printer-config-button" class="btn-success btn-icon" style="font-size: 0.9rem; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; background: #28a745; color: white;">💾 Salvar Configuração</button>
+                                <button id="test-print-button" class="btn-warning btn-icon" style="font-size: 0.9rem; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; background: #ffc107; color: #212529;">🖨️ Teste de Impressão</button>
+                                <button id="refresh-printers-button" class="btn-info btn-icon" style="font-size: 0.9rem; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; background: #17a2b8; color: white;">🔄 Atualizar Lista</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Resumo da Configuração -->
+                        <div class="config-summary" style="background: #e9ecef; padding: 20px; border-radius: 8px; margin-top: 20px;">
+                            <h4 style="margin-top: 0; color: #495057; display: flex; align-items: center; gap: 10px;">📋 Resumo da Configuração</h4>
+                            <div id="config-summary-content" style="color: #6c757d;">
+                                <p>Configure as impressoras para cada formato para ver o resumo aqui.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="printer-section" style="margin-top: 20px;">
+                        <div style="background:#f8f9fa;padding:20px;border-radius:8px;border-left:4px solid #28a745;">
+                            <h3 style="margin:0;color:#495057;">⚙️ Automação do Diálogo e Padrões</h3>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px">
+                                <div>
+                                    <label>Formato padrão:</label>
+                                    <input id="printer-default-format" type="text" placeholder="ex: 10x15" style="width:100%" />
+                                </div>
+                                <div>
+                                    <label>Impressora padrão:</label>
+                                    <input id="printer-default-name" type="text" placeholder="nome da impressora" style="width:100%" />
+                                </div>
+                                <div>
+                                    <label>Atraso inicial (ms):</label>
+                                    <input id="printer-start-delay" type="number" min="0" max="5000" step="50" value="0" style="width:100%" />
+                                </div>
+                                <div>
+                                    <label>Atraso até Enter (ms):</label>
+                                    <input id="printer-enter-delay" type="number" min="0" max="5000" step="50" value="500" style="width:100%" />
+                                </div>
+                            </div>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px">
+                                <div>
+                                    <label>Tecla 10x15:</label>
+                                    <input id="key-10x15" type="text" maxlength="1" value="a" style="width:100%" />
+                                </div>
+                                <div>
+                                    <label>Tecla 15x20:</label>
+                                    <input id="key-15x20" type="text" maxlength="1" value="f" style="width:100%" />
+                                </div>
+                                <div>
+                                    <label>Tecla Bolas:</label>
+                                    <input id="key-bolas" type="text" maxlength="1" value="a" style="width:100%" />
+                                </div>
+                            </div>
+                            <div class="button-group" style="margin-top:12px">
+                                <button id="save-printer-config" class="btn-success">💾 Salvar Impressão</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Seção de Miniaturas -->
+            <div class="config-section" id="thumbnails-section">
+                <h2>🎨 Personalização</h2>
+                <div class="config-group">
+                    <h3>👁️ Preview</h3>
+                    <div id="theme-preview" style="background: white; padding: 15px; border-radius: 6px; border: 2px solid #dee2e6; text-align: center; font-size: 1.2rem; font-weight: bold;">
+                        Fotos Mágicas
+                    </div>
+                </div>
+                <div class="config-group">
+                    <label>Texto do cabeçalho:</label>
+                    <input id="personal-text" type="text" placeholder="Digite o texto" style="width:100%;padding:8px;border:1px solid #ced4da;border-radius:6px" />
+                </div>
+                <div class="config-group" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+                    <div>
+                        <label>Cor de fundo do cabeçalho:</label>
+                        <input id="personal-bg-color" type="color" value="#2c3e50" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                    <div>
+                        <label>Cor do texto do cabeçalho:</label>
+                        <input id="personal-text-color" type="color" value="#ffffff" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                    <div>
+                        <label>Cor de destaque:</label>
+                        <input id="personal-accent-color" type="color" value="#3498db" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                    <div>
+                        <label>Cor do texto da lista:</label>
+                        <input id="personal-list-text-color" type="color" value="#212529" style="width:100%;height:38px;border:1px solid #ced4da;border-radius:6px" />
+                    </div>
+                    <div>
+                        <label>Raio da borda da lista:</label>
+                        <input id="personal-list-border-radius" type="range" min="0" max="30" step="1" value="15" style="width:100%" />
+                    </div>
+                </div>
+                <div class="config-group">
+                    <button id="save-personalization" class="btn-success">💾 Salvar Personalização</button>
+                </div>
+                <div class="config-group">
+                    <label>Tamanho das miniaturas:</label>
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <input type="range" id="thumb-size-input" min="60" max="240" step="10" value="100">
+                        <span id="thumb-size-label">100 px</span>
+                    </div>
+                    <div id="thumb-preview" style="margin-top:12px;display:flex;gap:8px">
+                        <div class="miniatura"><div style="width: var(--thumb-size); height: var(--thumb-size); border-radius: 5px; background: linear-gradient(135deg, #f8f9fa, #dee2e6);"></div></div>
+                        <div class="miniatura"><div style="width: var(--thumb-size); height: var(--thumb-size); border-radius: 5px; background: linear-gradient(135deg, #e9ecef, #ced4da);"></div></div>
+                        <div class="miniatura"><div style="width: var(--thumb-size); height: var(--thumb-size); border-radius: 5px; background: linear-gradient(135deg, #f1f3f5, #e9ecef);"></div></div>
+                    </div>
+                    <div class="button-group" style="margin-top:12px">
+                        <button id="save-thumb-size" class="btn-success">💾 Salvar Tamanho</button>
+                    </div>
+                </div>
+
+                <div class="config-group">
+                    <label>Tamanho das miniaturas da lista (esquerda):</label>
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <input type="range" id="sidebar-thumb-size-input" min="80" max="240" step="10" value="120">
+                        <span id="sidebar-thumb-size-label">120 px</span>
+                    </div>
+                    <div class="button-group" style="margin-top:12px">
+                        <button id="save-sidebar-thumb-size" class="btn-success">💾 Salvar Tamanho</button>
+                    </div>
+                </div>
+
+                <div class="config-group">
+                    <label>Fundo da lista (opacidade):</label>
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <input type="range" id="sidebar-opacity-input" min="0" max="1" step="0.05" value="0.10">
+                        <span id="sidebar-opacity-label">10%</span>
+                    </div>
+                    <div class="button-group" style="margin-top:12px">
+                        <button id="save-sidebar-opacity" class="btn-success">💾 Salvar Opacidade</button>
+                    </div>
+                </div>
+
+                
+            </div>
+            
+
+            
+            
+
+            <!-- Seção de Sistema -->
+            <div class="config-section" id="system-section">
+                <h2>⚙️ Sistema</h2>
+                
+                <!-- Controles do Electron -->
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3>🖥️ Controles do Electron</h3>
+                    <button class="btn-primary" onclick="restartApp()">🔄 Reiniciar App</button>
+                    <button class="btn-secondary" onclick="showUserDataPath()">📂 Mostrar Dados</button>
+                    <button class="btn-secondary" onclick="toggleDevTools()">🔧 Dev Tools</button>
+                    <button class="btn-danger" onclick="closeApp()">❌ Fechar App</button>
+                </div>
+                
+                <!-- Atualizações -->
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+                    <h3>🔄 Atualizações</h3>
+                    <p>Versão atual: <span id="current-version">Carregando...</span></p>
+                    <button id="check-updates-button" class="btn-primary">🔍 Verificar Atualizações</button>
+                    <button id="move-today-button" class="btn-warning" style="margin-left:10px">🎄 Mover Fotos de Hoje</button>
+                    <div style="margin-top:15px; display:grid; grid-template-columns: 1fr 1fr; gap:10px">
+                        <div>
+                            <label>Origem:</label>
+                            <input id="move-src" type="text" placeholder="Selecione a pasta de origem" style="width:100%;padding:8px;border:1px solid #ced4da;border-radius:6px" />
+                            <button id="pick-move-src" class="btn-secondary" style="margin-top:6px">📂 Selecionar Origem</button>
+                        </div>
+                        <div>
+                            <label>Destino:</label>
+                            <input id="move-dst" type="text" placeholder="Selecione a pasta de destino" style="width:100%;padding:8px;border:1px solid #ced4da;border-radius:6px" />
+                            <button id="pick-move-dst" class="btn-secondary" style="margin-top:6px">📂 Selecionar Destino</button>
+                        </div>
+                    </div>
+                    <div style="margin-top:10px">
+                        <button id="save-mover-config" class="btn-success">💾 Salvar Configuração de Movimento</button>
+                    </div>
+                    <div style="margin-top:15px">
+                        <div style="width:100%; height:20px; background:#e9ecef; border-radius:10px; overflow:hidden">
+                            <div id="move-progress-bar" style="width:0%; height:100%; background:#28a745; transition:width 0.3s ease"></div>
+                        </div>
+                        <p id="move-progress-text" style="margin-top:5px; font-size:0.9rem; color:#6c757d"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/config.js"></script>
+</body>
+</html>
