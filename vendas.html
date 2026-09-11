@@ -92,6 +92,8 @@
   .op-chip.ribbon-ok .dot{background:var(--green-500);}
   .op-chip.ribbon-alert{border-color:var(--red-400);color:var(--red-400);box-shadow:0 0 0 2px rgba(193,102,107,.25);}
   .op-chip.ribbon-alert .dot{background:var(--red-400);}
+  .op-chip.ribbon-critical{border-color:var(--red-400);color:var(--red-400);box-shadow:0 0 0 2px rgba(193,102,107,.35);background:rgba(193,102,107,.10);animation:blink 1.4s infinite;}
+  .op-chip.ribbon-critical .dot{background:var(--red-400);animation:blink 1s infinite;}
   .op-chip.ribbon-printing{border-color:var(--gold-500);color:var(--gold-300);box-shadow:0 0 0 2px rgba(212,162,76,.25);}
   .op-chip.ribbon-printing .dot{background:var(--gold-500);animation:blink 1s infinite;}
   @keyframes blink { 50% { opacity: .25; } }
@@ -2715,7 +2717,7 @@ async function carregarRibbon(){
 function renderRibbonChip(){
   const chip = document.getElementById('ribbon-chip');
   if(!chip) return;
-  chip.classList.remove('ribbon-ok', 'ribbon-alert', 'ribbon-printing');
+  chip.classList.remove('ribbon-ok', 'ribbon-alert', 'ribbon-printing', 'ribbon-critical');
   if(printando){
     const p = _printProgress;
     const texto = (p && p.total > 1) ? `Imprimindo ${Math.min(p.current || 0, p.total)}/${p.total}...` : 'Imprimindo...';
@@ -2728,7 +2730,9 @@ function renderRibbonChip(){
     dot.className = 'dot';
     chip.prepend(dot);
   }
-  const usarImpressora = printerReal && printerReal.connected !== false
+  const temResposta = !!(printerReal && printerReal.success);
+  const conectada = temResposta && printerReal.connected !== false;
+  const usarImpressora = conectada
     && (Number.isFinite(+printerReal.paper10x15) || Number.isFinite(+printerReal.paper15x20));
   if(usarImpressora){
     const p10 = Number.isFinite(+printerReal.paper10x15) ? +printerReal.paper10x15 : '—';
@@ -2744,15 +2748,18 @@ function renderRibbonChip(){
     }
     return;
   }
-  /* fallback: saldo único de ribbon (contador do sidecar) */
   const saldo = saldoRibbonProjetado();
-  if(saldo === null){
-    chip.textContent = '🖨️ Papel: —';
+  /* conexão real confirmada mas sem papel reportado → usa o contador de ribbon */
+  if(conectada){
+    chip.textContent = `🖨️ Conectada · Ribbon: ${saldo === null ? '—' : saldo} un.`;
+    chip.classList.add(saldo !== null && saldo < 30 ? 'ribbon-alert' : 'ribbon-ok');
     return;
   }
-  chip.textContent = `🖨️ Ribbon: ${saldo} un.`;
-  const alerta = saldo < 30;
-  chip.classList.add(alerta ? 'ribbon-alert' : 'ribbon-ok');
+  /* impressora sem resposta ou desconectada → estado crítico em vermelho */
+  const saldoTxt = (saldo === null) ? '' : ` · Ribbon: ${saldo} un.`;
+  const err = (printerReal && printerReal.lastError && printerReal.lastError !== 'Sem erros') ? ` <small>(${printerReal.lastError})</small>` : '';
+  chip.innerHTML = `<span class="dot"></span>🖨️ <b style="color:var(--red-400);">Impressora não conectada!</b>${saldoTxt}${err}`;
+  chip.classList.add('ribbon-critical');
 }
 
 function addToCart(tipo, produtoId, label, precoUnit, qtd=1){
@@ -3192,6 +3199,13 @@ async function showConfigModal(){
   const kk = formatarCodigoKiosk(_identidade && _identidade.kioskCode);
   const par = window.kioskPair;
   const parOk = par && par.ok;
+  let versaoAtual = '';
+  try{
+    if(window.natal && typeof window.natal.ipcInvoke === 'function'){
+      const v = await window.natal.ipcInvoke('natal:appVersion');
+      if(v) versaoAtual = v;
+    }
+  }catch{}
 
   openModal(`
     <div class="modal-head">
@@ -3254,6 +3268,16 @@ async function showConfigModal(){
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Vazio = impressora padrão do Windows. Usada nos recibos/relatórios.</div>
     </div>
 
+    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Versão e atualização</div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span style="font-size:13px;color:var(--slate-300);">Versão instalada: <b style="color:var(--gold-300);">v${versaoAtual||'—'}</b></span>
+        <span id="cfg-upd-info" style="font-size:12px;font-weight:700;"></span>
+        <button id="cfg-upd-btn" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;">Verificar atualizações</button>
+      </div>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">O PDV verifica sozinho no boot e a cada 60s ocioso. Quando houver nova versão, aparece o aviso na tela com "Instalar agora".</div>
+    </div>
+
     <div class="modal-actions" style="margin-top:20px;">
       <button class="btn btn-primary" id="cfg-save"
         style="background:var(--green-500);color:var(--navy-950);border:none;padding:10px 28px;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;">Salvar</button>
@@ -3273,6 +3297,41 @@ async function showConfigModal(){
     await emparelharKiosk();
     closeModal();
   };
+
+  {
+    const updInfo = document.getElementById('cfg-upd-info');
+    const updBtn = document.getElementById('cfg-upd-btn');
+    const aplicarEstado = () => {
+      if(_updateDisponivel){
+        updInfo.textContent = `⬇️ Nova versão v${_updateDisponivel.version} disponível`;
+        updInfo.style.color = 'var(--green-400)';
+        updBtn.textContent = 'Instalar agora';
+      } else {
+        updInfo.textContent = '';
+        updInfo.style.color = '';
+        updBtn.textContent = 'Verificar atualizações';
+      }
+    };
+    aplicarEstado();
+    updBtn.onclick = async ()=>{
+      updBtn.disabled = true;
+      try{
+        if(_updateDisponivel){
+          await window.instalarAtualizacao();
+          updBtn.disabled = false;
+        } else {
+          const res = await window.natal.ipcInvoke('natal:updateApp').catch(e => ({ success:false, error: e && e.message }));
+          if(res && res.success){
+            if(res.installing){ toast('⬇️ Baixando e instalando...'); closeModal(); }
+            else if(res.upToDate){ toast('✅ App já está atualizado'); updBtn.disabled = false; }
+          } else {
+            toast('⚠ ' + ((res && res.error) || 'Erro ao verificar'));
+            updBtn.disabled = false;
+          }
+        }
+      }catch(e){ toast('⚠ ' + (e && e.message ? e.message : 'Erro')); updBtn.disabled = false; }
+    };
+  }
 
   document.getElementById('cfg-save').onclick = async ()=>{
     const val = document.getElementById('cfg-folder').value.trim();
@@ -4902,7 +4961,9 @@ function dispensarUpdate(){ closeModal(); _updateDispensada = true; }
 window.dispensarUpdate = dispensarUpdate;
 function setUpdateStatus(msg){
   const el = document.getElementById('update-status');
-  if(el) el.textContent = msg;
+  if(el){ el.textContent = msg; return; }
+  const cfg = document.getElementById('cfg-upd-info');
+  if(cfg) cfg.textContent = msg;
 }
 async function instalarAtualizacao(){
   if(!window.natal || typeof window.natal.ipcInvoke !== 'function'){ closeModal(); toast('⚠ Atualização disponível apenas dentro do app (Electron)'); return; }
@@ -4923,6 +4984,10 @@ window.instalarAtualizacao = instalarAtualizacao;
 if(window.natal && typeof window.natal.on === 'function'){
   window.natal.on('natal:updateAvailable', ({ version }) => {
     _updateDisponivel = { version };
+    /* reflete também no modal de Configurações, se estiver aberto */
+    const cfgInfo = document.getElementById('cfg-upd-info');
+    const cfgBtn = document.getElementById('cfg-upd-btn');
+    if(cfgInfo){ cfgInfo.textContent = `⬇️ Nova versão v${version} disponível`; cfgInfo.style.color = 'var(--green-400)'; if(cfgBtn) cfgBtn.textContent = 'Instalar agora'; }
     if(_updateDispensada) return; // não re-abre neste boot (usuário já recusou)
     if(!document.getElementById('modal-overlay').classList.contains('active')){
       mostrarModalUpdate();
