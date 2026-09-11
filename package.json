@@ -53,7 +53,8 @@
     "publish": {
       "provider": "github",
       "owner": "Sploit23",
-      "repo": "Kiosk_Maxx"
+      "repo": "Kiosk_Maxx",
+      "releaseType": "release"
     }
   },
   "dependencies": {
