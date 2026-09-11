@@ -3190,8 +3190,6 @@ async function showConfigModal(){
     natalApi.printerStatus().catch(()=>({})),
   ]);
   const folder = cfg.photosFolder || '';
-  const pdvNome = cfg.pdvNome || '';
-  const thermal = cfg.thermalPrinterName || '';
   const connected = printer && printer.success && printer.connected;
   const p10 = connected && printer.paper10x15 != null ? printer.paper10x15 : '—';
   const p15 = connected && printer.paper15x20 != null ? printer.paper15x20 : '—';
@@ -3252,20 +3250,6 @@ async function showConfigModal(){
         <button id="cfg-pair" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;">Emparelhar agora</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Informe este código na loja do portal de gestão (campo "código do kiosk"). O PDV reconhece sozinho a cada 30s.</div>
-    </div>
-
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
-      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Nome do PDV</div>
-      <input id="cfg-pdv" type="text" value="${pdvNome.replace(/"/g,'&quot;')}" placeholder="VENDA-01"
-        style="width:100%;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:'Inter',sans-serif;outline:none;" />
-      <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Identifica esta máquina no health/status (ex: VENDA-01).</div>
-    </div>
-
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
-      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Impressora térmica (guia)</div>
-      <input id="cfg-thermal" type="text" value="${thermal.replace(/"/g,'&quot;')}" placeholder="Nome do driver no Windows"
-        style="width:100%;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:'Inter',sans-serif;outline:none;" />
-      <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Vazio = impressora padrão do Windows. Usada nos recibos/relatórios.</div>
     </div>
 
     <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
@@ -3335,10 +3319,8 @@ async function showConfigModal(){
 
   document.getElementById('cfg-save').onclick = async ()=>{
     const val = document.getElementById('cfg-folder').value.trim();
-    const npdv = document.getElementById('cfg-pdv').value.trim();
-    const nterm = document.getElementById('cfg-thermal').value.trim();
     try{
-      const partial = { photosFolder: val, pdvNome: npdv, thermalPrinterName: nterm };
+      const partial = { photosFolder: val };
       await natalApi.saveConfig(partial);
       if(window.natal?.saveConfig) await window.natal.saveConfig(partial);
       toast('Configurações salvas');
