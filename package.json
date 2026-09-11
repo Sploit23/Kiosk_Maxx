@@ -43,7 +43,8 @@
     "win": {
       "target": "nsis",
       "icon": null,
-      "requestedExecutionLevel": "asInvoker"
+      "requestedExecutionLevel": "asInvoker",
+      "artifactName": "Maxx-Foto-Vendas-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
