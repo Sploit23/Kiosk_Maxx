@@ -8,7 +8,7 @@
     "start": "npm run electron:dev",
     "dev": "vite",
     "build": "vite build",
-    "build:win": "vite build && electron-builder --win",
+    "build:win": "vite build && electron-builder --win --publish never",
     "release": "vite build && electron-builder --win --publish always",
     "lint": "eslint .",
     "electron:dev": "concurrently \"vite\" \"wait-on tcp:5173 && electron .\""
