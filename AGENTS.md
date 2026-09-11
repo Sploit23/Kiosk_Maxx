@@ -333,9 +333,11 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   cada 1,5s e, quando a subpasta fica estável por 8s (sem alterações), cria a
   sessão `NATAL-XXXXX`, copia as fotos (original + preview normalizado `.jpg`),
   marca `PRONTA` automaticamente e move a subpasta para
-  `photosFolder/importadas/NATAL-XXXXX/`. Arquivos < 1KB ou com tail
-  `.part/.tmp/.crdownload/.download` são ignorados (cópia pela metade). Troca
-  de pasta na config vale na hora.
+  `photosFolder/importadas/NATAL-XXXXX/`. `criadaEm` da sessão = o instante em
+  que a subpasta foi criada (birthtime; fallback: criação da 1ª foto) — momento
+  em que o cliente terminou de fotografar —, e `prontaEm` = instante do import.
+  Arquivos < 1KB ou com tail `.part/.tmp/.crdownload/.download` são ignorados
+  (cópia pela metade). Troca de pasta na config vale na hora.
 - **`vite.config.js`** — alias `@shared` → `./shared`, dedupe de React, porta
   de dev 5173.
 

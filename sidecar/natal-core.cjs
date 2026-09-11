@@ -135,6 +135,21 @@ function snapshotOf(dir) {
   return JSON.stringify(snap);
 }
 
+function sessionCriadaEm(subPath, photos) {
+  try {
+    const folderBirth = fs.statSync(subPath).birthtimeMs;
+    if (typeof folderBirth === 'number' && folderBirth > 0) return folderBirth;
+  } catch {}
+  let earliest = null;
+  for (const f of photos) {
+    try {
+      const b = fs.statSync(path.join(subPath, f)).birthtimeMs;
+      if (typeof b === 'number' && b > 0 && (earliest === null || b < earliest)) earliest = b;
+    } catch {}
+  }
+  return earliest || Date.now();
+}
+
 async function scanPhotosFolder(folder) {
   if (importingLock) return;
   const now = Date.now();
@@ -197,7 +212,7 @@ async function importarSubpastaSessao(folder, subPath, sub, photos) {
   const meta = {
     id,
     estado: ESTADOS.PRONTA, // automático: já disponível para venda
-    criadaEm: Date.now(),
+    criadaEm: sessionCriadaEm(subPath, photos),
     fotosEsperadas: imported.length,
     operadorFotografo: 'PASTA',
     importadaDe: sub,
