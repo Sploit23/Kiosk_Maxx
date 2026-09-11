@@ -102,6 +102,22 @@ export async function composePrintImage(photo) {
     }
   }
 
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', config.image.jpegQuality));
+  // A ASK-400 imprime o papel em paisagem: folha composta em retrato é girada
+  // 90° antes do upload (portado do kiosk-app PrintingScreen.jsx). Os formatos
+  // atuais já nascem em paisagem — isto é um guarda-corpo para overlays/formatos
+  // futuros (polaroid retrato etc.).
+  let printCanvas = canvas;
+  if (printCanvas.height > printCanvas.width) {
+    const rot = document.createElement('canvas');
+    rot.width = printCanvas.height;
+    rot.height = printCanvas.width;
+    const rCtx = rot.getContext('2d');
+    rCtx.translate(rot.width / 2, rot.height / 2);
+    rCtx.rotate((90 * Math.PI) / 180);
+    rCtx.drawImage(printCanvas, -printCanvas.width / 2, -printCanvas.height / 2);
+    printCanvas = rot;
+  }
+
+  const blob = await new Promise((resolve) => printCanvas.toBlob(resolve, 'image/jpeg', config.image.jpegQuality));
   return blob;
 }

@@ -1,6 +1,11 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { ShoppingCart } from 'lucide-react';
 import natalApi from '@shared/api/natalApi';
 import { connectSSE } from '@shared/api/sse';
+import { emparelharKiosk } from '@shared/api/kiosk';
+import { calculateCart } from '@shared/utils/pricing';
+import { formatBRL } from '@shared/utils/imageUtils';
+import { numeroSessao } from './catalog';
 import LoginScreen from './screens/LoginScreen';
 import CaixaScreen from './screens/CaixaScreen';
 import PainelScreen from './screens/PainelScreen';
@@ -60,17 +65,40 @@ export default function App() {
     return () => clearInterval(poll);
   }, [refreshHealth, refreshCaixa, refreshSessoes]);
 
+  // Emparelha o kiosk com o portal (código mostrado na tela ↔ loja) e,
+  // enquanto não emparelhar, re-tenta a cada 30s. Sucesso fica em
+  // window.kioskPair e dispara o evento 'kiosk:pair' p/ a UI reagir.
+  useEffect(() => {
+    const tentar = async () => {
+      const res = await emparelharKiosk();
+      window.kioskPair = res || window.kioskPair;
+      window.dispatchEvent(new CustomEvent('kiosk:pair', { detail: window.kioskPair }));
+    };
+    try {
+      tentar();
+    } catch { /* portal fora do ar — re-tenta no próximo tick */ }
+    const i = setInterval(() => {
+      if (!window.kioskPair || !window.kioskPair.ok) tentar();
+    }, 30000);
+    return () => clearInterval(i);
+  }, []);
+
   useEffect(() => {
     connectSSE((evt, data) => {
       if (evt === 'sessao:status' || evt === 'sessao:criada' || evt === 'sessao:concluida') refreshSessoes();
       if (evt === 'caixa:aberto' || evt === 'caixa:fechado') refreshCaixa();
       if (evt === 'pedido:criado' || evt === 'pedido:pago') refreshSessoes();
+      if (evt === 'print-start') setPrintState({ current: 0, total: data.total || 0, status: 'starting' });
       if (evt === 'printer:progress') setPrintState((p) => ({ ...(p || {}), current: data.current, total: data.total, status: 'printing' }));
       if (evt === 'print-complete') setPrintState((p) => ({ ...(p || {}), done: true, success: data.success, error: data.error }));
     }, setConn);
   }, [refreshSessoes, refreshCaixa]);
 
   const effectiveView = user !== null && caixa === null ? 'caixa' : view;
+
+  const cartResumo = useMemo(() => calculateCart(cart), [cart]);
+  const cartTemItens = cart.items.length > 0 || cart.products.length > 0;
+  const cartQtdItens = cartResumo.fotos.length + cartResumo.prod.length;
 
   const finalizarVenda = () => {
     if (!caixa) { showToast('Abra o caixa antes de vender', 'error'); setView('caixa'); return; }
@@ -125,7 +153,7 @@ export default function App() {
       ) : (
         <>
           {effectiveView === 'caixa' && (
-            <CaixaScreen caixa={caixa} onCaixaChange={setCaixa} onDone={() => setView('painel')} showToast={showToast} />
+            <CaixaScreen caixa={caixa} onCaixaChange={setCaixa} onDone={() => setView('painel')} showToast={showToast} user={user} conn={conn} health={health} />
           )}
           {effectiveView === 'painel' && (
             <PainelScreen
@@ -189,14 +217,44 @@ export default function App() {
               user={user}
               conn={conn}
               health={health}
+              caixa={caixa}
               onReabrirPedido={reabrirPedido}
               onBack={() => setView('painel')}
               showToast={showToast}
             />
           )}
-        </>
-      )}
+        </>)}
       {toast && <div className={`toast${toast.type === 'error' ? ' error' : ''}`}>{toast.msg}</div>}
+      {user !== null && caixa !== null && effectiveView !== 'venda' && effectiveView !== 'checkout' && (
+        <GlobalCart
+          temItens={cartTemItens}
+          qtdItens={cartQtdItens}
+          total={cartResumo.total}
+          sessao={activeSessao}
+          onOpen={() => {
+            if (!activeSessao) { showToast('Abra uma sessão na lista para começar a vender'); return; }
+            abrirVenda(activeSessao);
+          }}
+          showToast={showToast}
+        />
+      )}
+    </div>
+  );
+}
+
+function GlobalCart({ temItens, qtdItens, total, sessao, onOpen, showToast }) {
+  return (
+    <div className={`global-cart ${temItens ? 'has-items' : ''}`} onClick={() => {
+      if (temItens) onOpen();
+      else if (sessao) showToast('Carrinho vazio — selecione fotos e tamanhos para adicionar');
+      else showToast('Abra uma sessão na lista para começar a vender');
+    }}>
+      <div className="gc-icon"><ShoppingCart size={20} /></div>
+      <div className="gc-info">
+        <div className="gc-label">{temItens ? `${qtdItens} ${qtdItens === 1 ? 'item' : 'itens'} no carrinho` : 'Carrinho vazio'}</div>
+        <div className="gc-sub">{temItens ? (sessao ? `Sessão #${numeroSessao(sessao.id)}` : 'Sessões abertas') : (sessao ? 'Selecione fotos para adicionar' : 'Abra uma sessão para começar a vender')}</div>
+      </div>
+      <div className="gc-total">{temItens ? formatBRL(total) : ''}</div>
     </div>
   );
 }

@@ -27,5 +27,11 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        pdv: fileURLToPath(new URL('./vendas.html', import.meta.url)),
+      },
+    },
   },
 })

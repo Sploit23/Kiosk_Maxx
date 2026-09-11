@@ -173,29 +173,35 @@ export default function CheckoutScreen({
   const falha = printState?.status === 'error' || (pronto && !printState.success);
 
   return (
-    <div className="screen screen-enter">
-      <div className="topbar">
-        <div>
-          <h1>
-            {editingPedido ? `Reabertura · Pedido ${String(editingPedido.numero).padStart(4, '0')}` : `Checkout · Sessão ${numeroSessao(sessao.id)}`}
-          </h1>
-          <div className="sub">PDV {health?.pdv ?? ''} · Caixa aberto por {caixa?.operador ?? '—'}</div>
+    <div className="screen-checkout screen-enter">
+      <div className="modal-box wide">
+        <div className="modal-head">
+          <div>
+            <div className="modal-step-label">PDV {health?.pdv ?? ''} · Caixa aberto por {caixa?.operador ?? '—'}</div>
+            <h3>
+              {editingPedido ? `Reabertura · Pedido ${String(editingPedido.numero).padStart(4, '0')}` : `Checkout · Sessão ${numeroSessao(sessao.id)}`}
+            </h3>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {guiaOk && !pedido && <span className="status-pill status-PRONTA">Guia impressa</span>}
+            {!pedido && !busy && (
+              <button className="btn-secondary" style={{ width: 'auto', padding: '8px 14px', marginTop: 0 }} onClick={onCancel}>
+                <X size={15} style={{ verticalAlign: '-2px' }} /> Cancelar
+              </button>
+            )}
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {guiaOk && !pedido && <span className="status-pill status-PRONTA">Guia impressa</span>}
-          {!pedido && !busy && (
-            <button className="btn-navy" onClick={onCancel}><X size={15} /> Cancelar</button>
-          )}
-        </div>
-      </div>
+        <p className="modal-sub">
+          O pagamento é feito fora do sistema (máquina de cartão). Confira os itens, selecione as formas e aloque o total após o cliente pagar.
+        </p>
 
-      <div className="content" style={{ maxWidth: '920px', margin: '0 auto', width: '100%' }}>
-        <div className="card">
+        {/* Itens do pedido */}
+        <div className="modal-section">
           <h3>Itens do pedido</h3>
-          {resumo.fotos.length === 0 && resumo.prod.length === 0 && <p className="muted">Carrinho vazio.</p>}
+          {resumo.fotos.length === 0 && resumo.prod.length === 0 && <p className="muted small">Carrinho vazio.</p>}
           {resumo.fotos.map((item) => (
             <div key={item.id} className="cart-line">
-              <span style={{ fontWeight: 800, color: 'var(--gold)' }}>{item.qty}×</span>
+              <span style={{ fontWeight: 800, color: 'var(--gold-300)' }}>{item.qty}×</span>
               <span style={{ fontWeight: 700 }}>{config.getFormat(item.key).label}</span>
               <span className="muted small" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.filename}</span>
               <span style={{ fontWeight: 800 }}>{formatBRL(item.subtotal)}</span>
@@ -203,7 +209,7 @@ export default function CheckoutScreen({
           ))}
           {resumo.prod.map((item) => (
             <div key={item.key} className="cart-line">
-              <span style={{ fontWeight: 800, color: 'var(--gold)' }}>{item.qty}×</span>
+              <span style={{ fontWeight: 800, color: 'var(--gold-300)' }}>{item.qty}×</span>
               <span style={{ fontWeight: 700 }}>{config.getProduto(item.key).label}</span>
               <span className="muted" style={{ flex: 1 }} />
               <span style={{ fontWeight: 800 }}>{formatBRL(item.subtotal)}</span>
@@ -211,9 +217,9 @@ export default function CheckoutScreen({
           ))}
           {desconto && (
             <div className="cart-line">
-              <span style={{ fontWeight: 700, color: '#7fd99b' }}>Desconto</span>
+              <span style={{ fontWeight: 700, color: '#9fd9bb' }}>Desconto</span>
               <span className="muted" style={{ flex: 1 }}>{desconto.nome}</span>
-              <span style={{ fontWeight: 800, color: '#7fd99b' }}>− {formatBRL(desconto.valor)}</span>
+              <span style={{ fontWeight: 800, color: '#9fd9bb' }}>− {formatBRL(desconto.valor)}</span>
             </div>
           )}
           <div className="total-bar mt-16">
@@ -223,7 +229,7 @@ export default function CheckoutScreen({
         </div>
 
         {!pedido && (
-          <div className="card mt-16">
+          <div className="modal-section">
             <h3>Pagamento (externo) {editingPedido && <span className="muted small" style={{ fontWeight: 500 }}>— gera um novo pedido vinculado ao original</span>}</h3>
 
             <div className="pay-rows">
@@ -266,11 +272,11 @@ export default function CheckoutScreen({
               })}
             </div>
 
-            <button className="btn btn-sm mt-8" onClick={adicionarRow} disabled={rows.length >= formas.length}>
+            <button className="add-pay-row" onClick={adicionarRow} disabled={rows.length >= formas.length}>
               <Plus size={14} /> Adicionar forma de pagamento (multipagamento)
             </button>
 
-            <div className={`restante-banner mt-12 ${restante === 0 ? 'ok' : ''}`}>
+            <div className={`restante-banner ${restante === 0 ? 'ok' : ''}`}>
               <span>{restante === 0 ? 'Valor totalmente alocado' : 'Restante a alocar'}</span>
               <span>{formatBRL(Math.abs(restante))}</span>
             </div>
@@ -281,21 +287,18 @@ export default function CheckoutScreen({
             )}
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
-              <button className="btn" style={{ flex: 1 }} onClick={imprimirGuia} disabled={busy}>
+              <button className="btn-secondary" style={{ flex: 1, marginTop: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} onClick={imprimirGuia} disabled={busy}>
                 <Printer size={18} /> Imprimir guia
               </button>
-              <button className="btn btn-primary btn-lg" style={{ flex: 2 }} disabled={!podePagar || busy} onClick={registrarPagamento}>
+              <button className="btn-primary" style={{ flex: 2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} disabled={!podePagar || busy} onClick={registrarPagamento}>
                 <CreditCard size={20} /> {busy ? 'Registrando…' : 'Registrar pagamento'}
               </button>
             </div>
-            <p className="muted small mt-16">
-              O pagamento é feito fora do sistema (máquina de cartão). Selecione as formas e aloque o total após o cliente pagar.
-            </p>
           </div>
         )}
 
         {pedido && (
-          <div className="card mt-16">
+          <div className="modal-section">
             <h3>Produção · Pedido {String(pedido.numero).padStart(4, '0')}</h3>
             {pedido.origemPedidoId && (
               <p className="muted small">Originado do pedido {pedido.origemPedidoId} · Pagamento: {pagamentosTxt || '—'}</p>
@@ -306,42 +309,43 @@ export default function CheckoutScreen({
             </div>
 
             {prep && (
-              <div className="card mt-16 center" style={{ borderColor: 'rgba(255,193,69,.4)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontWeight: 800 }}>
+              <div className="conf-item mt-16" style={{ cursor: 'default', borderColor: 'rgba(212,162,76,.4)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontWeight: 800, width: '100%' }}>
                   <Loader size={22} className="spin" /> {prep.msg} ({prep.current}/{prep.total})
                 </div>
               </div>
             )}
 
             {printState?.status === 'printing' && !printState.done && (
-              <div className="card mt-16 center" style={{ borderColor: 'rgba(255,193,69,.4)' }}>
-                <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>Imprimindo…</div>
-                <div className="mt-8" style={{ height: '10px', borderRadius: '999px', background: 'var(--panel2)', overflow: 'hidden', border: '1px solid var(--line)' }}>
-                  <div style={{ width: `${printState.total ? Math.round((printState.current / printState.total) * 100) : 0}%`, height: '100%', background: 'linear-gradient(90deg,#ffd07a,var(--gold))', transition: 'width .3s ease' }} />
+              <div className="conf-item mt-16" style={{ cursor: 'default', borderColor: 'rgba(212,162,76,.4)', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ fontWeight: 800, fontSize: '1.05rem' }}>Imprimindo…</div>
+                <div style={{ width: '100%', height: '10px', borderRadius: '999px', background: 'var(--navy-800)', overflow: 'hidden', border: '1px solid var(--navy-line)' }}>
+                  <div style={{ width: `${printState.total ? Math.round((printState.current / printState.total) * 100) : 0}%`, height: '100%', background: 'linear-gradient(90deg,#e8c787,var(--gold-500))', transition: 'width .3s ease' }} />
                 </div>
-                <div className="muted small mt-8">
+                <div className="muted small">
                   Foto {printState.current ?? 0} de {printState.total ?? 0} — aguarde a máquina terminar cada impressão.
                 </div>
               </div>
             )}
 
             {pronto && printState.success && (
-              <div className="card mt-16 center" style={{ borderColor: 'rgba(255,193,69,.55)' }}>
-                <CheckCircle2 size={40} color="var(--gold)" />
-                <div className="serif" style={{ fontWeight: 900, fontSize: '1.3rem', marginTop: '6px' }}>Impressão concluída!</div>
-                <button className="btn btn-primary btn-lg" style={{ width: '100%', marginTop: '14px' }} onClick={onDone}>Concluir pedido</button>
+              <div className="success-box">
+                <div className="success-check"><CheckCircle2 size={30} /></div>
+                <h3>Impressão concluída!</h3>
+                <p>Pedido {String(pedido.numero).padStart(4, '0')} finalizado para a sessão {numeroSessao(sessao.id)}.</p>
+                <button className="btn-primary" onClick={onDone}>Concluir pedido</button>
               </div>
             )}
 
             {falha && (
-              <div className="card mt-16 center" style={{ borderColor: 'rgba(255,107,107,.5)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: '#ffb3b5', fontWeight: 800 }}>
+              <div className="conf-item mt-16" style={{ cursor: 'default', borderColor: 'rgba(193,102,107,.5)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: '#ffc9cb', fontWeight: 800, width: '100%' }}>
                   <AlertTriangle size={22} /> Falha na impressão
                 </div>
-                <p className="muted small mt-8">{printState?.error || 'Verifique a impressora ASK-400.'}</p>
+                <div className="muted small">{printState?.error || 'Verifique a impressora ASK-400.'}</div>
                 <button
-                  className="btn btn-primary btn-lg"
-                  style={{ width: '100%', marginTop: '12px' }}
+                  className="btn-secondary"
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                   onClick={async () => {
                     iniciadoRef.current = false;
                     onPrintStart({ status: 'printing', current: 0, total: fotosUnicas.length, done: false });
@@ -358,7 +362,7 @@ export default function CheckoutScreen({
             )}
 
             {!prep && !pronto && !falha && printState?.status !== 'printing' && (
-              <button className="btn btn-primary btn-lg" style={{ width: '100%', marginTop: '14px' }} onClick={iniciarProducao}>
+              <button className="btn-primary mt-16" onClick={iniciarProducao} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                 <PlayCircle size={22} /> Iniciar produção
               </button>
             )}

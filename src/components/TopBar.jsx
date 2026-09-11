@@ -1,9 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Maximize2, Minimize2, Wallet, Receipt } from 'lucide-react';
 import { LOJA } from '../catalog';
 
+function tickClock() {
+  return new Date().toLocaleTimeString('pt-BR');
+}
+
 export default function TopBar({ user, conn, health, center, rightExtra, onCaixa, onPedidos, onSair }) {
   const [full, setFull] = useState(false);
+  const [clock, setClock] = useState(tickClock);
+
+  useEffect(() => {
+    const t = setInterval(() => setClock(tickClock()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const toggleFullscreen = () => {
     setFull((prev) => {
@@ -16,20 +26,20 @@ export default function TopBar({ user, conn, health, center, rightExtra, onCaixa
   const dot = conn === 'alive' ? 'dot-alive' : conn === 'dead' ? 'dot-dead' : 'dot-conn';
 
   return (
-    <header className="kiosk-top">
-      <div className="k-brand">
-        <div className="k-logo">M</div>
+    <header className="topbar">
+      <div className="brand">
+        <div className="mark">M</div>
         <div className="name">
           {LOJA.nome}
-          <small>{LOJA.evento} · {LOJA.local}</small>
+          <span className="loja">{LOJA.evento} · {LOJA.local}</span>
         </div>
       </div>
 
-      <div className="k-center">{center}</div>
+      <div className="topbar-center">{center}</div>
 
-      <div className="k-right">
+      <div className="topbar-right">
         <span className="k-chip" style={{ cursor: 'default' }}>
-          <span className={`pulse-dot ${dot}`} style={{ width: 7, height: 7, margin: 0 }} />
+          <span className={`dot ${dot}`} />
           {conn === 'alive' ? <>Ribbon <strong>{health?.ribbon ?? '?'}</strong></> : 'Sem conexão'}
         </span>
         {onCaixa && (
@@ -38,14 +48,13 @@ export default function TopBar({ user, conn, health, center, rightExtra, onCaixa
         {onPedidos && (
           <span className="k-chip" onClick={onPedidos} title="Pedidos"><Receipt size={14} /> PEDIDOS</span>
         )}
+        <span className="k-chip clock">{clock}</span>
         <span className="k-chip gold"><UserIcon /> {user?.nome || ''}</span>
         <span className="k-chip icon" onClick={toggleFullscreen} title="Tela cheia">
           {full ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
         </span>
         {onSair && (
-          <button className="btn-navy small" style={{ padding: '7px 14px', borderRadius: '999px' }} onClick={onSair}>
-            SAIR
-          </button>
+          <span className="k-chip sair" onClick={onSair}>SAIR</span>
         )}
         {rightExtra}
       </div>

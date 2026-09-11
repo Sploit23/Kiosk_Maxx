@@ -10,6 +10,15 @@ const DEFAULTS = {
   serverUrl: 'http://localhost:9877',
   // Nome da impressora térmica de guia (driver do Windows).
   thermalPrinterName: '',
+  // Nome do PDV (ex.: VENDA-01) — identifica o kiosk no portal.
+  pdvNome: '',
+  // Backend de cadastro (portal de gestão) publicado na web.
+  portalApiUrl: 'https://maxxfoto.com.br/natalcontroler/api.php',
+  // ID da loja/kiosk no portal (define o time de vendedores/fotógrafos).
+  lojaId: 'teste',
+  // Código de emparelhamento gerado no portal (kiosk.pair) — garantia de
+  // que esta máquina é a "dona" do lojaId (evita dados misturados em clone).
+  pairingCode: '',
 };
 
 let bridge = null;
@@ -26,6 +35,11 @@ function resolveConfig() {
     return {
       serverUrl: cfg.serverUrl || DEFAULTS.serverUrl,
       thermalPrinterName: cfg.thermalPrinterName || DEFAULTS.thermalPrinterName,
+      pdvNome: cfg.pdvNome || DEFAULTS.pdvNome,
+      portalApiUrl: cfg.portalApiUrl || DEFAULTS.portalApiUrl,
+      lojaId: cfg.lojaId || DEFAULTS.lojaId,
+      pairingCode: cfg.pairingCode || DEFAULTS.pairingCode,
+      photosFolder: cfg.photosFolder || '',
     };
   } catch {
     return DEFAULTS;
@@ -81,15 +95,17 @@ const PRODUTOS = {
   'bolinha-natal': { label: 'Bolinha de Natal', pricing: 'bolinha-natal' },
 };
 
-// ─── Preços (R$) — edite aqui os valores reais do evento ──
+// ─── Preços (R$) — valores oficiais do evento ────────────────────
+// O portal (api.php, ação 'precos') é a fonte de verdade; o PDV busca os
+// preços da loja no boot. Estes são o fallback local (catálogo do PDV).
 const PRICING = {
-  '10x15': { base: 20.0, bulk: 18.0, bulkThreshold: 5 },
-  '15x20': { base: 25.0, bulk: 22.0, bulkThreshold: 5 },
-  bolinha: { base: 30.0, bulk: 27.0, bulkThreshold: 5 },
+  '10x15': { base: 15.0, bulk: null, bulkThreshold: null },
+  '15x20': { base: 25.0, bulk: null, bulkThreshold: null },
+  bolinha: { base: 12.0, bulk: null, bulkThreshold: null },
   'porta-foto': { base: 35.0, bulk: null, bulkThreshold: null },
   ima: { base: 10.0, bulk: null, bulkThreshold: null },
-  encarte: { base: 5.0, bulk: null, bulkThreshold: null },
-  'bolinha-natal': { base: 30.0, bulk: null, bulkThreshold: null },
+  encarte: { base: 15.0, bulk: null, bulkThreshold: null },
+  'bolinha-natal': { base: 12.0, bulk: null, bulkThreshold: null },
 };
 
 // ─── Overlays ──────────────────────────────────────────────
@@ -102,6 +118,11 @@ const OVERLAYS = {
 const config = {
   serverUrl: env.serverUrl,
   thermalPrinterName: env.thermalPrinterName,
+  pdvNome: env.pdvNome,
+  portalApiUrl: env.portalApiUrl,
+  lojaId: env.lojaId,
+  pairingCode: env.pairingCode,
+  photosFolder: env.photosFolder || '',
   eventName: 'NATAL 2026',
   appName: 'Sistema Natal',
   appNameFotografo: 'Natal — Fotógrafo',

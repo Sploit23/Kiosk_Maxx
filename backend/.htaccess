@@ -1,0 +1,11 @@
+# Portal de gestão — nunca deixa o browser (ou proxy) servir uma versão
+# antiga (cache). Já aconteceu 2x: a versão em cache do admin.html tinha o
+# input do "código do kiosk" com maxlength=8 e trancava o último char ao colar
+# "XXXX-XXXX", o que quebrava o emparelhamento do PDV. Sem cache = 
+# sempre a versão correta em produção.
+Options -Indexes
+<IfModule mod_headers.c>
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+</IfModule>

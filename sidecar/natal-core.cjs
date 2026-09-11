@@ -33,6 +33,8 @@ const PEDIDOS_DIR = path.join(DATA_DIR, 'pedidos');
 const PRINT_QUEUE_DIR = path.join(DATA_DIR, 'print-queue');
 const PEDIDOS_FILE = path.join(DB_DIR, 'pedidos.json');
 const CAIXA_FILE = path.join(DB_DIR, 'caixa.json');
+const CAIXAS_FILE = path.join(DB_DIR, 'caixas.json');
+const AUDITORIA_FILE = path.join(DB_DIR, 'auditoria.json');
 const COUNTER_FILE = path.join(DB_DIR, 'counter.txt');
 const RIBBON_FILE = path.join(DB_DIR, 'ribbon-counter.txt');
 const CONFIG_FILE = path.join(DB_DIR, 'config.json');
@@ -55,6 +57,8 @@ for (const dir of [DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR]) {
 }
 if (!fs.existsSync(PEDIDOS_FILE)) fs.writeFileSync(PEDIDOS_FILE, '[]', 'utf-8');
 if (!fs.existsSync(CAIXA_FILE)) fs.writeFileSync(CAIXA_FILE, 'null', 'utf-8');
+if (!fs.existsSync(CAIXAS_FILE)) fs.writeFileSync(CAIXAS_FILE, '[]', 'utf-8');
+if (!fs.existsSync(AUDITORIA_FILE)) fs.writeFileSync(AUDITORIA_FILE, '[]', 'utf-8');
 if (!fs.existsSync(RIBBON_FILE)) fs.writeFileSync(RIBBON_FILE, '400', 'utf-8');
 
 // ─── Helpers de IO ───────────────────────────────────────────
@@ -76,11 +80,146 @@ function sanitizeSegment(s) {
 }
 
 // ─── Config da máquina ───────────────────────────────────────
-let machineConfig = readJson(CONFIG_FILE, {});
+// machineId: gerado pelo PDV no primeiro boot e persistido aqui — identifica
+// a máquina física p/ emparelhamento no portal (kiosk.pair) e carimbos futuros.
+const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', pairingCode: '' };
+let machineConfig = { ...MACHINE_DEFAULTS, ...readJson(CONFIG_FILE, {}) };
 function getMachineConfig() { return machineConfig; }
 function setMachineConfig(partial) {
-  machineConfig = { ...machineConfig, ...partial };
+  machineConfig = { ...MACHINE_DEFAULTS, ...machineConfig, ...partial };
   writeJson(CONFIG_FILE, machineConfig);
+  ensurePhotosWatcher();
+}
+
+// ─── Importador de pasta de fotos (drop zone por sessão) ─────
+// Regra: cada subpasta dentro de photosFolder = uma sessão. O outro
+// programa salva as fotos do cliente numa subpasta nova; quando a pasta
+// fica estável (sem alterações) o sidecar cria a sessão NATAL-XXXXX,
+// importa as fotos (original + preview), marca PRONTA e move a subpasta
+// para <photosFolder>/importadas/NATAL-XXXXX/.
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png']);
+const SKIP_TAILS = ['.part', '.tmp', '.crdownload', '.download'];
+const PHOTOS_POLL_MS = 1500;
+const PHOTOS_SETTLE_MS = 8000;
+let photosWatcherTimer = null;
+let dropState = new Map(); // subpasta -> { first, lastChange, names: {nome:size} }
+let importingLock = false;
+
+function ensurePhotosWatcher() {
+  const folder = (machineConfig.photosFolder || '').trim();
+  if (photosWatcherTimer) { clearInterval(photosWatcherTimer); photosWatcherTimer = null; }
+  if (!folder) { dropState.clear(); return; }
+  photosWatcherTimer = setInterval(() => {
+    scanPhotosFolder(folder).catch((e) => console.error('[natal-core] scan photos:', e.message));
+  }, PHOTOS_POLL_MS);
+}
+
+function listImageEntries(dir) {
+  return safeReadDir(dir)
+    .filter((f) => {
+      const low = f.toLowerCase();
+      if (low.startsWith('.')) return false;
+      if (SKIP_TAILS.some((t) => low.endsWith(t))) return false;
+      return IMAGE_EXTS.has(path.extname(low));
+    })
+    .filter((f) => {
+      try { return fs.statSync(path.join(dir, f)).size > 1024; } catch { return false; }
+    });
+}
+
+function snapshotOf(dir) {
+  const snap = {};
+  for (const f of safeReadDir(dir)) {
+    try { snap[f] = fs.statSync(path.join(dir, f)).size; } catch {}
+  }
+  return JSON.stringify(snap);
+}
+
+async function scanPhotosFolder(folder) {
+  if (importingLock) return;
+  const now = Date.now();
+  for (const sub of safeReadDir(folder)) {
+    if (sub === 'importadas') continue;
+    const subPath = path.join(folder, sub);
+    let st;
+    try { st = fs.statSync(subPath); } catch { continue; }
+    if (!st.isDirectory()) continue;
+
+    const photos = listImageEntries(subPath);
+    const snapKey = snapshotOf(subPath);
+    const prev = dropState.get(sub);
+
+    if (!prev) {
+      dropState.set(sub, { first: now, lastChange: now, snap: snapKey });
+      continue;
+    }
+    if (prev.snap !== snapKey) {
+      dropState.set(sub, { ...prev, lastChange: now, snap: snapKey });
+      continue;
+    }
+    // sem mudanças; precisa de ≥1 foto e idade suficiente p/ não cortar cópia
+    if (photos.length === 0) {
+      if (now - prev.lastChange >= PHOTOS_SETTLE_MS) dropState.delete(sub);
+      continue;
+    }
+    if (now - prev.lastChange < PHOTOS_SETTLE_MS) continue;
+
+    importingLock = true;
+    try {
+      await importarSubpastaSessao(folder, subPath, sub, photos);
+    } finally {
+      importingLock = false;
+    }
+  }
+}
+
+async function importarSubpastaSessao(folder, subPath, sub, photos) {
+  const id = nextSessionId();
+  const dir = sessaoDir(id);
+  fs.mkdirSync(path.join(dir, 'previews'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'originais'), { recursive: true });
+
+  const imported = [];
+  for (const file of photos) {
+    const ext = path.extname(file).toLowerCase() === '.png' ? '.png' : '.jpg';
+    const base = sanitizeSegment(path.basename(file, path.extname(file))) || 'foto';
+    const name = base + ext;
+    try {
+      fs.copyFileSync(path.join(subPath, file), path.join(dir, 'originais', name));
+      fs.copyFileSync(path.join(subPath, file), path.join(dir, 'previews', name)); // preview = cópia p/ servir rápido
+      imported.push(name);
+    } catch (e) {
+      console.error(`[natal-core] Falha ao importar ${file}: ${e.message}`);
+    }
+  }
+  if (imported.length === 0) return;
+
+  const meta = {
+    id,
+    estado: ESTADOS.PRONTA, // automático: já disponível para venda
+    criadaEm: Date.now(),
+    fotosEsperadas: imported.length,
+    operadorFotografo: 'PASTA',
+    importadaDe: sub,
+    prontaEm: Date.now(),
+  };
+  writeJson(sessaoMetaPath(id), meta);
+  emit('sessao:criada', { id });
+  emit('sessao:concluida', { id });
+  emit('sessao:status', { id, estado: ESTADOS.PRONTA, fotosQtd: imported.length });
+  console.log(`[natal-core] Sessao ${id} importada da pasta (${imported.length} fotos): ${sub}`);
+
+  // arquiva a subpasta em <photosFolder>/importadas/NATAL-XXXXX/
+  try {
+    const archiveParent = path.join(folder, 'importadas');
+    fs.mkdirSync(archiveParent, { recursive: true });
+    const archive = path.join(archiveParent, id);
+    fs.rmSync(archive, { recursive: true, force: true });
+    fs.renameSync(subPath, archive);
+  } catch (e) {
+    console.error(`[natal-core] Nao arquivou ${sub}: ${e.message}`);
+  }
+  dropState.delete(sub);
 }
 
 // ─── Contador de sessões (NATAL-XXXXX) ───────────────────────
@@ -99,11 +238,22 @@ function nextPedidoNumero() {
   return max + 1;
 }
 
+// ─── Auditoria (uso de senha master) — persiste local pra sobreviver a
+// restart e ser reenviada ao portal (idempotente por id). ─────────────
+let auditoria = readJson(AUDITORIA_FILE, []);
+function saveAuditoria() { writeJson(AUDITORIA_FILE, auditoria); }
+
 // ─── Caixa ───────────────────────────────────────────────────
 let caixa = readJson(CAIXA_FILE, null);
 function saveCaixa() { writeJson(CAIXA_FILE, caixa); }
 function requireCaixaAberto() {
   return caixa && !caixa.fechadoEm ? caixa : null;
+}
+// Histórico de caixas fechados (append-only) — consultado pelo PDV
+let caixas = readJson(CAIXAS_FILE, []);
+function arquivarCaixa(fechada) {
+  caixas.push({ ...fechada, numero: fechada.numero || caixas.length + 1 });
+  writeJson(CAIXAS_FILE, caixas);
 }
 
 // ─── Ribbon (contagem de papel) ──────────────────────────────
@@ -317,6 +467,35 @@ const server = http.createServer(async (req, res) => {
     if (method === 'GET' && p === '/api/config') {
       return sendJson(res, 200, { ...machineConfig, ribbon: getRibbon() });
     }
+    // Status real da impressora ASK-400 (proxy do Java sidecar na porta 8080)
+    if (method === 'GET' && p === '/api/printer/status') {
+      let status = { connected: false, paper10x15: null, paper15x20: null, lastError: null };
+      try {
+        const resp = await fetch('http://localhost:8080/kws/v1/kiosk/checkPrinter', {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json.status === 'OK' && Array.isArray(json.retorno) && json.retorno.length) {
+            const info = json.retorno[0];
+            status = {
+              connected: true,
+              paper10x15: info.paperRemainHalfSize != null ? Number(info.paperRemainHalfSize) : null,
+              paper15x20: info.paperRemain != null ? Number(info.paperRemain) : null,
+              lastError: info.lastError || null,
+            };
+          } else {
+            status.lastError = JSON.stringify(json);
+          }
+        } else {
+          status.lastError = 'HTTP ' + resp.status;
+        }
+      } catch (e) {
+        status.lastError = e.message || String(e);
+      }
+      return sendJson(res, 200, { success: true, ...status, source: 'ask400' });
+    }
     if (method === 'POST' && p === '/api/config') {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
       setMachineConfig(body);
@@ -501,6 +680,24 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { success: true, pedidos: [...pedidos].sort((a, b) => b.criadoEm - a.criadoEm) });
     }
 
+    // ── Auditoria (usos de senha master) — persistência local ──
+    if (method === 'GET' && p === '/api/auditoria') {
+      return sendJson(res, 200, { success: true, usos: [...auditoria].sort((a, b) => String(b.id).localeCompare(String(a.id))) });
+    }
+    if (method === 'POST' && p === '/api/auditoria') {
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      if (!body || !Array.isArray(body.usos)) {
+        return sendJson(res, 400, { success: false, error: 'Esperado { usos: [...] }' });
+      }
+      body.usos.forEach((u) => {
+        if (!u || !u.id) return;
+        const idx = auditoria.findIndex((x) => x.id === u.id);
+        if (idx >= 0) auditoria[idx] = u; else auditoria.push(u);
+      });
+      saveAuditoria();
+      return sendJson(res, 200, { success: true, total: auditoria.length });
+    }
+
     // Upload de imagem pronta para impressão
     const impressaoUpload = p.match(/^\/api\/pedidos\/([^/]+)\/impressao\/([^/]+)$/);
     if (method === 'POST' && impressaoUpload) {
@@ -530,6 +727,10 @@ const server = http.createServer(async (req, res) => {
     // ── Caixa ──
     if (method === 'GET' && p === '/api/pdv/caixa') {
       return sendJson(res, 200, { success: true, caixa: caixa });
+    }
+    if (method === 'GET' && p === '/api/pdv/caixas') {
+      const historico = [...caixas].sort((a, b) => (b.fechadoEm || 0) - (a.fechadoEm || 0));
+      return sendJson(res, 200, { success: true, caixas: historico });
     }
     if (method === 'POST' && p === '/api/pdv/caixa/abrir') {
       if (requireCaixaAberto()) return sendJson(res, 400, { success: false, error: 'Caixa ja esta aberto' });
@@ -567,16 +768,23 @@ const server = http.createServer(async (req, res) => {
         }
       }
       const totalRecebido = Object.values(meios).reduce((a, b) => a + Number(b || 0), 0);
+      const valorEnvelope = Number(body.valorEnvelope || 0);
+      const fechadoPor = String(body.fechadoPor || caixa.operador || '');
       caixa = {
         ...caixa,
+        numero: caixas.length + 1,
         fechadoEm: Date.now(),
         totalVendido,
         totalPorMeio,
         meiosDeclarados: meios,
         totalRecebido,
         diferenca: Number((totalRecebido - totalVendido).toFixed(2)),
+        valorEnvelope,
+        saldoRestante: Number(((meios['dinheiro'] || 0) - valorEnvelope).toFixed(2)),
+        fechadoPor,
         observacoes: body.observacoes || '',
       };
+      arquivarCaixa(caixa);
       saveCaixa();
       emit('caixa:fechado', { id: caixa.id, totalVendido });
       return sendJson(res, 200, { success: true, caixa });
@@ -592,6 +800,10 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`[natal-core] Sidecar Natal rodando em http://${HOST}:${PORT}`);
   console.log(`[natal-core] Dados em: ${DATA_DIR}`);
+  if (machineConfig.photosFolder) {
+    console.log(`[natal-core] Importador de pasta ativo: ${machineConfig.photosFolder}`);
+  }
+  ensurePhotosWatcher();
 });
 
 server.on('error', (e) => {

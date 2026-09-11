@@ -27,5 +27,11 @@ contextBridge.exposeInMainWorld('natal', {
     serverUrl: config.serverUrl,
     thermalPrinterName: config.thermalPrinterName,
     pdvNome: config.pdvNome,
+    portalApiUrl: config.portalApiUrl,
+    lojaId: config.lojaId,
+    pairingCode: config.pairingCode || '',
+    photosFolder: config.photosFolder || '',
   }),
+  selectFolder: () => ipcRenderer.invoke('natal:selectFolder'),
+  saveConfig: (partial) => ipcRenderer.invoke('natal:saveConfig', partial),
 });

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Wallet, LogOut, CheckCircle2 } from 'lucide-react';
+import { Wallet, LogOut, CheckCircle2, ArrowLeft } from 'lucide-react';
 import natalApi from '@shared/api/natalApi';
 import config from '@shared/config';
 import { formatBRL, formatDateTime } from '@shared/utils/imageUtils';
+import TopBar from '../components/TopBar';
 import { LOJA } from '../catalog';
 
-export default function CaixaScreen({ caixa, onCaixaChange, onDone, showToast }) {
+export default function CaixaScreen({ caixa, onCaixaChange, onDone, showToast, user, conn, health }) {
   const [operador, setOperador] = useState('');
   const [valorInicial, setValorInicial] = useState('');
   const [busy, setBusy] = useState(false);
@@ -39,17 +40,11 @@ export default function CaixaScreen({ caixa, onCaixaChange, onDone, showToast })
 
   if (!caixa) {
     return (
-      <div className="login-screen screen-enter">
-        <div className="login-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px' }}>
-            <div style={{ background: 'rgba(255,193,69,.14)', borderRadius: '14px', padding: '11px' }}>
-              <Wallet size={30} color="#ffc145" />
-            </div>
-            <div>
-              <h1 style={{ margin: 0, fontSize: '1.4rem' }}>Abrir caixa</h1>
-              <p className="muted small" style={{ margin: '2px 0 0' }}>{LOJA.nome} · {config.eventName}</p>
-            </div>
-          </div>
+      <div className="login-overlay screen-enter">
+        <div className="login-box">
+          <div className="login-mark">M</div>
+          <h1>Abrir caixa</h1>
+          <p className="login-sub">{LOJA.nome} · {config.eventName}</p>
           <div className="field">
             <label>Operador</label>
             <input autoFocus value={operador} onChange={(e) => setOperador(e.target.value)} placeholder="Nome do operador" />
@@ -58,8 +53,8 @@ export default function CaixaScreen({ caixa, onCaixaChange, onDone, showToast })
             <label>Valor inicial em dinheiro (R$)</label>
             <input inputMode="decimal" value={valorInicial} onChange={(e) => setValorInicial(e.target.value)} placeholder="0,00" />
           </div>
-          <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={abrir} disabled={busy}>
-            {busy ? 'Abrindo…' : 'Abrir caixa'}
+          <button className="btn-primary btn-primary-grad" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} onClick={abrir} disabled={busy}>
+            <Wallet size={19} /> {busy ? 'Abrindo…' : 'Abrir caixa'}
           </button>
         </div>
       </div>
@@ -74,30 +69,35 @@ export default function CaixaScreen({ caixa, onCaixaChange, onDone, showToast })
 
   return (
     <div className="screen screen-enter">
-      <div className="topbar">
-        <div>
-          <h1>Caixa</h1>
-          <div className="sub">{LOJA.nome} · {config.eventName}</div>
-        </div>
-        <span className="status-pill" style={{ background: 'rgba(255,193,69,.16)', color: '#ffd98a' }}>
-          {fechado ? 'Fechado' : 'Aberto'} · {caixa.operador}
-        </span>
-      </div>
-      <div className="content" style={{ maxWidth: '720px', margin: '0 auto', width: '100%' }}>
+      <TopBar
+        user={user}
+        conn={conn}
+        health={health}
+        center={<span className="k-chip gold" style={{ cursor: 'default' }}>CAIXA</span>}
+        rightExtra={<span className="k-chip ghost" onClick={onDone}><ArrowLeft size={14} /> VOLTAR</span>}
+      />
+      <div className="pages-wrap" style={{ maxWidth: '780px', margin: '0 auto', width: '100%' }}>
         <div className="card" style={{ marginBottom: '16px' }}>
-          <div className="muted small">Aberto em</div>
-          <div className="serif" style={{ fontWeight: 900, fontSize: '1.1rem' }}>{formatDateTime(caixa.abertoEm)}</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <div>
+              <div className="muted small">Aberto em</div>
+              <div className="serif" style={{ fontWeight: 900, fontSize: '1.1rem' }}>{formatDateTime(caixa.abertoEm)}</div>
+            </div>
+            <span className={`k-chip ${fechado ? '' : 'gold'}`} style={{ cursor: 'default', textTransform: 'uppercase' }}>
+              {fechado ? 'Fechado' : 'Aberto'} · {caixa.operador}
+            </span>
+          </div>
           <div className="muted small mt-16">Inicial em dinheiro</div>
-          <div className="serif" style={{ fontWeight: 900, fontSize: '1.5rem', color: 'var(--gold)' }}>{formatBRL(caixa.valorInicial ?? 0)}</div>
+          <div className="serif" style={{ fontWeight: 900, fontSize: '1.5rem', color: 'var(--gold-300)' }}>{formatBRL(caixa.valorInicial ?? 0)}</div>
         </div>
 
         <div className="card" style={{ marginBottom: '16px' }}>
           <h3>Vendas deste turno</h3>
           <div className="pay-grid">
             {config.meiosPagamento.map((m) => (
-              <div key={m.key} className="card" style={{ padding: '14px', textAlign: 'center' }}>
+              <div key={m.key} className="card" style={{ padding: '14px', textAlign: 'center', margin: 0 }}>
                 <div className="muted small">{m.label}</div>
-                <div style={{ fontWeight: 900, fontSize: '1.15rem', color: 'var(--white)' }}>{formatBRL(meiosDoCaixa[m.key] ?? 0)}</div>
+                <div style={{ fontWeight: 900, fontSize: '1.15rem', color: 'var(--cream-100)' }}>{formatBRL(meiosDoCaixa[m.key] ?? 0)}</div>
               </div>
             ))}
           </div>
@@ -109,11 +109,11 @@ export default function CaixaScreen({ caixa, onCaixaChange, onDone, showToast })
 
         {fechado ? (
           <div className="card center">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--gold)', fontWeight: 800, fontSize: '1.3rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--gold-300)', fontWeight: 800, fontSize: '1.3rem' }}>
               <CheckCircle2 size={26} /> Caixa fechado
             </div>
             <p className="muted small mt-8">Diferença: {formatBRL(caixa.diferenca ?? 0)}</p>
-            <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={onDone}>OK</button>
+            <button className="btn-primary btn-primary-grad" style={{ marginTop: '12px' }} onClick={onDone}>OK</button>
           </div>
         ) : confirmClose ? (
           <div className="card">
@@ -130,7 +130,7 @@ export default function CaixaScreen({ caixa, onCaixaChange, onDone, showToast })
               <label>Observações</label>
               <input value={observacoes} onChange={(e) => setObservacoes(e.target.value)} />
             </div>
-            <div className="total-bar" style={{ background: diff === 0 ? 'rgba(255,193,69,.14)' : diff < 0 ? 'var(--red-bg)' : 'rgba(255,193,69,.14)', borderColor: diff === 0 ? 'rgba(255,193,69,.45)' : 'rgba(255,107,107,.5)', color: diff < 0 ? '#ffb3b5' : '#ffd98a' }}>
+            <div className="total-bar" style={{ background: diff === 0 ? 'rgba(212,162,76,.14)' : diff < 0 ? 'var(--red-bg)' : 'rgba(212,162,76,.14)', borderColor: diff === 0 ? 'rgba(212,162,76,.45)' : 'rgba(255,107,107,.5)', color: diff < 0 ? '#ffb3b5' : '#f2dcb2' }}>
               <span>Conferido</span>
               <span>{formatBRL(declarado)}</span>
             </div>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Trash2, Plus, Minus, Pencil, Check, ShoppingCart, Camera, RotateCw, BadgePercent, X } from 'lucide-react';
+import { Plus, Pencil, ShoppingCart, BadgePercent, Camera, RotateCw, X } from 'lucide-react';
 import config from '@shared/config';
 import natalApi from '@shared/api/natalApi';
 import { calculateCart } from '@shared/utils/pricing';
@@ -113,8 +113,6 @@ export default function VendaScreen({
     });
   };
 
-  const limparTudo = () => onCart({ items: [], products: [] });
-
   const aplicarDescontoCatalogo = (d) => {
     if (desconto) return;
     const valor = valorDesconto(d, resumo.total);
@@ -151,7 +149,7 @@ export default function VendaScreen({
   };
 
   return (
-    <div className="venda-grid screen-enter">
+    <div className="screen screen-venda screen-enter">
       <TopBar
         user={user}
         conn={conn}
@@ -167,196 +165,234 @@ export default function VendaScreen({
         }
       />
 
-      {/* ─── Thumbs ─────────────────────────────────────── */}
-      <aside className="venda-thumbs">
-        <div className="sec-title" style={{ marginTop: 2 }}>Fotos <span className="muted2">{fotos.length}</span></div>
-        {fotos.length === 0 ? (
-          <p className="muted small center" style={{ marginTop: '18px', lineHeight: 1.5 }}>
-            Nenhuma foto ainda.<br />Aguarde a transferência do fotógrafo.
-          </p>
-        ) : (
-          <div className="thumbs-grid">
-            {fotos.map((f, idx) => {
+      <div className="screen-body">
+        {/* ─── Left panel: sessão + fotos + carrinho ─── */}
+        <aside className="left-panel">
+          <div className="lp-head">
+            <button className="lp-back" onClick={onBack}>← VOLTAR</button>
+            <div className="lp-senha">Sessão {numeroSessao(sessao.id)}</div>
+            <div className="lp-meta">
+              {fotos.length} fotos · aberta {new Date(sessao.criadaEm).toLocaleTimeString('pt-BR')}
+              {editingPedido ? ` · reabertura do pedido ${String(editingPedido.numero).padStart(4, '0')}` : ''}
+            </div>
+          </div>
+
+          <div className="thumb-strip">
+            {fotos.map((f) => {
               const name = filenameOf(f);
               const url = natalApi.fotoUrl(sessao.id, 'previews', name);
               const active = selectedName === name;
+              const inCart = cart.items.some((i) => i.filename === name);
               return (
-                <div key={name} className={`k-thumb${active ? ' active' : ''}`} onClick={() => clickFoto(f)}>
+                <div key={name} className={`thumb${active ? ' selected' : ''}`} onClick={() => clickFoto(f)}>
                   <img src={url} alt="" loading="lazy" />
-                  <span className="n">{String(idx + 1).padStart(2, '0')}</span>
-                  {active && selectedFoto && <span className="chk"><Check size={10} color="#ffc145" /></span>}
+                  {inCart && <div className="in-cart-badge">✓</div>}
                 </div>
               );
             })}
+            {fotos.length === 0 && (
+              <div className="cart-empty" style={{ gridColumn: '1 / -1' }}>
+                Nenhuma foto ainda.<br />Aguarde a transferência do fotógrafo.
+              </div>
+            )}
           </div>
-        )}
-      </aside>
 
-      {/* ─── Área de trabalho ───────────────────────────── */}
-      <section className="venda-work">
-        {adjusting ? (
-          <div style={{ flex: 1, minHeight: 0, borderRadius: '16px', overflow: 'hidden', border: '1px solid var(--line)' }}>
-            <AdjustFraming
-              photos={[adjusting.foto]}
-              single
-              formatKey={adjusting.foto.key}
-              maxPreview={{ w: 880, h: 620 }}
-              onBack={() => setAdjusting(null)}
-              onComplete={onFramingComplete}
-            />
-          </div>
-        ) : selectedFoto ? (
-          <div className="venda-preview">
-            <span className="selName"><Camera size={11} style={{ verticalAlign: '-1px' }} /> {filenameOf(selectedFoto)}</span>
-            <div className="photoBox">
-              <img src={natalApi.fotoUrl(sessao.id, 'previews', filenameOf(selectedFoto))} alt="" />
+          <div className="cart-panel">
+            <div className="cart-head">
+              <h3>Carrinho</h3>
+              <span className="cart-count">{cartCount} {cartCount === 1 ? 'item' : 'itens'}</span>
             </div>
-            <div className="frameTag">{config.getFormat(tamanho).label} · {formatBRL(config.getPreco(tamanho))}</div>
-          </div>
-        ) : (
-          <div className="venda-preview">
-            <div className="hint">
-              <div className="big">Clique em uma foto para começar</div>
-              <p>
-                Escolha a foto na coluna da esquerda, selecione o tamanho e ajuste o
-                enquadramento antes de adicionar ao carrinho.
-              </p>
-              <button className="btn-gold-ghost" style={{ pointerEvents: 'none' }}>
-                <Camera size={16} /> FOTOS DA SESSÃO {numeroSessao(sessao.id)}
+            <div className="cart-items">
+              {resumo.fotos.map((item) => (
+                <div key={item.id} className="cart-item">
+                  <div className="ci-top">
+                    <img src={item.url} alt="" />
+                    <div className="ci-info">
+                      <div className="ci-label">{config.getFormat(item.key).label}</div>
+                      <div className="ci-price">{item.filename}</div>
+                    </div>
+                    <button className="ci-remove" title="Remover" onClick={() => removeFoto(item.id)}>×</button>
+                  </div>
+                  <div className="ci-qty">
+                    <button onClick={() => setFotoQty(item.id, item.qty - 1)}>−</button>
+                    <span>{item.qty}</span>
+                    <button onClick={() => setFotoQty(item.id, item.qty + 1)}>+</button>
+                    <span className="ci-unit">{formatBRL(item.subtotal)}</span>
+                    <button
+                      style={{ background: 'none', border: 'none', color: 'var(--slate-500)', padding: '0 2px', width: 'auto', height: 'auto' }}
+                      title="Ajustar enquadramento"
+                      onClick={() => abrirEditor({ name: item.filename, filename: item.filename }, 'edit', item)}
+                    >
+                      <Pencil size={11} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {resumo.prod.map((item) => (
+                <div key={item.key} className="cart-item">
+                  <div className="ci-top">
+                    <img src={SVG_PLACEHOLDER} alt="" />
+                    <div className="ci-info">
+                      <div className="ci-label">{config.getProduto(item.key).label}</div>
+                      <div className="ci-price">Unidade · {formatBRL(item.unitPrice)}</div>
+                    </div>
+                    <button className="ci-remove" title="Remover" onClick={() => setProdutoQty(item.key, 0)}>×</button>
+                  </div>
+                  <div className="ci-qty">
+                    <button onClick={() => setProdutoQty(item.key, item.qty - 1)}>−</button>
+                    <span>{item.qty}</span>
+                    <button onClick={() => setProdutoQty(item.key, item.qty + 1)}>+</button>
+                    <span className="ci-unit">{formatBRL(item.subtotal)}</span>
+                  </div>
+                </div>
+              ))}
+              {cartCount === 0 && (
+                <div className="cart-empty">Carrinho vazio.<br />Clique em uma foto e escolha o formato.</div>
+              )}
+            </div>
+            <div className="cart-footer">
+              <button className="btn-desconto-venda" disabled={cartCount === 0 || !!desconto} onClick={() => setDescModal('catalogo')}>
+                <BadgePercent size={12} style={{ verticalAlign: '-1px' }} /> {desconto ? 'Desconto aplicado' : descontoCombo > 0 ? `Combo de papel ativo · ${formatBRL(descontoCombo)}` : 'Aplicar desconto'}
+              </button>
+              {desconto && (
+                <div className="cart-total-row">
+                  <span className="lbl">
+                    {desconto.nome} <button className="k-chip ghost" style={{ padding: '1px 6px', fontSize: '9px' }} onClick={() => onDesconto(null)}><X size={9} /> remover</button>
+                  </span>
+                  <span style={{ color: 'var(--green-300)', fontWeight: 700 }}>− {formatBRL(desconto.valor)}</span>
+                </div>
+              )}
+              <div className="cart-total-row">
+                <span className="lbl">Total</span>
+                <span className="val">{formatBRL(totalPagar)}</span>
+              </div>
+              <button className="btn-finalizar" disabled={cartCount === 0} onClick={onCheckout}>
+                <ShoppingCart size={16} /> FINALIZAR VENDA · {formatBRL(totalPagar)}
               </button>
             </div>
           </div>
-        )}
-      </section>
+        </aside>
 
-      {/* ─── Coluna lateral ─────────────────────────────── */}
-      <aside className="venda-side">
-        {/* Tamanhos */}
-        <div className="sec-title">Formatos <span className="muted2">{config.formatList().length}</span></div>
-        {config.formatList().map((f) => (
-          <div key={f.key} className={`tam-row${tamanho === f.key ? ' active' : ''}`} onClick={() => clickTamanho(f.key)}>
-            <div className="thumb">
-              {f.overlay ? <img src={f.overlay.image} alt="" /> : <RotateCw size={14} style={{ margin: '12px auto 0', color: '#5a6a8c' }} />}
-            </div>
-            <div className="info">
-              <b>{f.label}</b>
-              <span>{f.overlay ? 'Molde personalizado' : 'Foto em brilho'}</span>
-            </div>
-            <span className="price">{formatBRL(f.price)}</span>
+        {/* ─── Área de trabalho ─── */}
+        <section className="work-area">
+          <div className="wa-top">
+            <h2>
+              {adjusting
+                ? 'Ajuste o enquadramento e clique em "Conferida"'
+                : selectedFoto
+                  ? 'Selecione um formato ao lado para ajustar o enquadramento'
+                  : 'Clique em uma foto para começar'}
+            </h2>
           </div>
-        ))}
-
-        {/* Produtos */}
-        <div className="sec-title" style={{ marginTop: '18px' }}>Produtos</div>
-        {config.produtoList().map((prod) => {
-          const qty = cart.products.find((p) => p.key === prod.key)?.qty || 0;
-          return (
-            <div key={prod.key} className="prod-row">
-              <div className="icon"><img src={SVG_PLACEHOLDER} alt="" /></div>
-              <div className="info">
-                <b>{prod.label}</b>
-                <span>Unidade</span>
-              </div>
-              <span className="price">{formatBRL(prod.price)}</span>
-              {qty > 0 && <span className="prod-qty">{qty}</span>}
-              <button className="prod-plus" onClick={() => addProduto(prod.key)}><Plus size={14} /></button>
+          {editingPedido?.numero && (
+            <div className="reopen-note">
+              ♻ Pedido {String(editingPedido.numero).padStart(4, '0')} reaberto — ao finalizar, gera um pedido novo vinculado ao original.
             </div>
-          );
-        })}
+          )}
 
-        {/* Carrinho */}
-        {editingPedido && (
-          <div className="reopen-note">
-            ♻ Pedido {String(editingPedido.numero).padStart(4, '0')} reaberto — ao finalizar, gera um pedido novo vinculado ao original.
-          </div>
-        )}
-        <div className="cart-box">
-          <div className="sec-title">
-            Carrinho <span className="muted2">{cartCount} {cartCount === 1 ? 'item' : 'itens'}</span>
-            {cartCount > 0 && (
-              <span className="k-chip ghost" style={{ padding: '3px 8px', fontSize: '9px' }} onClick={limparTudo}>LIMPAR</span>
-            )}
-          </div>
-
-          <div className="cart-items">
-            {resumo.fotos.map((item) => (
-              <div key={item.id} className="k-item">
-                <div className="thumb"><img src={item.url} alt="" /></div>
-                <div className="info">
-                  <div className="t">{config.getFormat(item.key).label}</div>
-                  <div className="s">{item.filename} · {formatBRL(item.unitPrice)}</div>
-                  <div className="bottom">
-                    <span className="unit">{formatBRL(item.subtotal)}</span>
-                    <span className="k-qty">
-                      <button onClick={() => setFotoQty(item.id, item.qty - 1)}><Minus size={10} /></button>
-                      <span className="val">{item.qty}</span>
-                      <button onClick={() => setFotoQty(item.id, item.qty + 1)}><Plus size={10} /></button>
+          <div className="wa-body">
+            <div className="photo-column">
+              {selectedFoto && !adjusting && (
+                <div className="size-badge">
+                  {config.getFormat(tamanho).label} · {formatBRL(config.getPreco(tamanho))}
+                </div>
+              )}
+              <div className="frame-zone">
+                {adjusting ? (
+                  <div className="adjust-frame">
+                    <AdjustFraming
+                      photos={[adjusting.foto]}
+                      single
+                      formatKey={adjusting.foto.key}
+                      maxPreview={{ w: 880, h: 620 }}
+                      onBack={() => setAdjusting(null)}
+                      onComplete={onFramingComplete}
+                    />
+                  </div>
+                ) : selectedFoto ? (
+                  <div className="venda-preview">
+                    <span className="selName"><Camera size={11} style={{ verticalAlign: '-1px' }} /> {filenameOf(selectedFoto)}</span>
+                    <div className="photoBox" style={{ aspectRatio: `${config.getFormat(tamanho).printRes.width} / ${config.getFormat(tamanho).printRes.height}` }}>
+                      <img src={natalApi.fotoUrl(sessao.id, 'previews', filenameOf(selectedFoto))} alt="" />
+                    </div>
+                    <div className="frameTag">{config.getFormat(tamanho).label} · {formatBRL(config.getPreco(tamanho))}</div>
+                  </div>
+                ) : (
+                  <div className="hint-select">
+                    <div className="big">Clique em uma foto para começar</div>
+                    <p style={{ color: 'var(--slate-400)', fontSize: '13px', lineHeight: 1.5, margin: '10px 0 14px' }}>
+                      Escolha a foto na coluna da esquerda, selecione o tamanho e ajuste o
+                      enquadramento antes de adicionar ao carrinho.
+                    </p>
+                    <span className="oc-select-btn" style={{ pointerEvents: 'none', background: 'var(--navy-800)', border: '1px solid var(--gold-500)', color: 'var(--gold-300)' }}>
+                      <Camera size={13} style={{ verticalAlign: '-2px' }} /> FOTOS DA SESSÃO {numeroSessao(sessao.id)}
                     </span>
                   </div>
-                </div>
-                <div className="actions">
-                  <button onClick={() => abrirEditor(selectedFoto || { name: item.filename, filename: item.filename }, 'edit', item)} title="Ajustar enquadramento"><Pencil size={12} /></button>
-                  <button className="del" onClick={() => removeFoto(item.id)}><Trash2 size={12} /></button>
-                </div>
+                )}
               </div>
-            ))}
-            {resumo.prod.map((item) => (
-              <div key={item.key} className="k-item">
-                <div className="thumb"><img src={SVG_PLACEHOLDER} alt="" /></div>
-                <div className="info">
-                  <div className="t">{config.getProduto(item.key).label}</div>
-                  <div className="s">Unidade · {formatBRL(item.unitPrice)}</div>
-                  <div className="bottom">
-                    <span className="unit">{formatBRL(item.subtotal)}</span>
-                    <span className="k-qty">
-                      <button onClick={() => setProdutoQty(item.key, item.qty - 1)}><Minus size={10} /></button>
-                      <span className="val">{item.qty}</span>
-                      <button onClick={() => setProdutoQty(item.key, item.qty + 1)}><Plus size={10} /></button>
-                    </span>
-                  </div>
-                </div>
-                <div className="actions">
-                  <button className="del" onClick={() => setProdutoQty(item.key, 0)}><Trash2 size={12} /></button>
-                </div>
-              </div>
-            ))}
-            {cartCount === 0 && (
-              <p className="muted small center" style={{ marginTop: '16px', lineHeight: 1.6 }}>
-                Carrinho vazio.<br />Clique em uma foto e escolha o formato.
-              </p>
-            )}
-          </div>
-
-          <div className="cart-sum">
-            <div className="sum-row"><span>Subtotal</span><strong>{formatBRL(subtotalBase)}</strong></div>
-            <div className="sum-row gold"><span>Desconto combo ♢</span><strong>{formatBRL(descontoCombo)}</strong></div>
-            {desconto && (
-              <div className="sum-row gold">
-                <span>
-                  {desconto.nome}
-                  <button className="k-chip ghost" style={{ marginLeft: '6px', padding: '1px 6px', fontSize: '9px' }} onClick={() => onDesconto(null)}><X size={9} /> remover</button>
-                </span>
-                <strong>{formatBRL(desconto.valor)}</strong>
-              </div>
-            )}
-            <button
-              className="btn btn-sm"
-              style={{ width: '100%', marginTop: '8px', justifyContent: 'center' }}
-              disabled={cartCount === 0 || !!desconto}
-              onClick={() => setDescModal('catalogo')}
-            >
-              <BadgePercent size={13} /> {desconto ? 'Desconto aplicado' : 'Aplicar desconto'}
-            </button>
-            <div className="grand-row">
-              <span>Total</span>
-              <strong>{formatBRL(totalPagar)}</strong>
             </div>
-            <button className="finish-btn" disabled={cartCount === 0} onClick={onCheckout}>
-              <ShoppingCart size={18} /> FINALIZAR VENDA · {formatBRL(totalPagar)}
-            </button>
+
+            {/* side controls */}
+            <div className="side-controls">
+              <div className="option-group">
+                <h4>Tamanhos <span style={{ color: 'var(--slate-500)' }}>({config.formatList().length})</span></h4>
+                <div className="option-cards">
+                  {config.formatList().map((f) => (
+                    <div key={f.key} className={`option-card${tamanho === f.key ? ' selected' : ''}`} onClick={() => clickTamanho(f.key)}>
+                      <div className="oc-left">
+                        <div className="oc-name">{f.label}</div>
+                        <div className="oc-price">{f.overlay ? 'Molde personalizado' : 'Foto em brilho'}</div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span className="oc-price" style={{ fontFamily: "'Fraunces',serif", fontSize: '14px', color: 'var(--gold-300)', fontWeight: '700' }}>
+                          {formatBRL(f.price)}
+                        </span>
+                        <RotateCw size={13} style={{ color: '#4b5a7c' }} />
+                        <button
+                          type="button"
+                          className={`oc-select-btn${tamanho === f.key ? ' is-selected' : ''}`}
+                          onClick={(e) => { e.stopPropagation(); clickTamanho(f.key); }}
+                        >
+                          {tamanho === f.key ? 'Selecionado' : 'Selecionar'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="option-group">
+                <h4>Produtos extras</h4>
+                <div className="option-cards">
+                  {config.produtoList().map((prod) => {
+                    const qty = cart.products.find((p) => p.key === prod.key)?.qty || 0;
+                    return (
+                      <div key={prod.key} className="option-card">
+                        <div className="oc-left">
+                          <div className="oc-name">{prod.label}</div>
+                          <div className="oc-price">Unidade · {formatBRL(prod.price)}</div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          {qty > 0 && <span className="prod-qty">{qty}x</span>}
+                          <button type="button" className="oc-select-btn" onClick={() => addProduto(prod.key)}>
+                            <Plus size={11} style={{ verticalAlign: '-1px' }} /> Adicionar
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="option-group">
+                <button className="btn-desconto-venda" style={{ padding: '11px', margin: 0 }} disabled={cartCount === 0 || !!desconto} onClick={() => setDescModal('catalogo')}>
+                  <BadgePercent size={13} style={{ verticalAlign: '-1px' }} /> {desconto ? 'Desconto aplicado' : 'Aplicar desconto'}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      </aside>
+        </section>
+      </div>
 
       {/* ─── Modal de desconto (catálogo + senha master) ─── */}
       {descModal === 'catalogo' && (

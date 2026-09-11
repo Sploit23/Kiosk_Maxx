@@ -11,7 +11,9 @@ export const LOJA = {
   local: 'ROYAL PLAZA',
 };
 
-// Operadores com acesso ao painel de vendas (login do app).
+// Operadores com acesso ao painel de vendas.
+// Fonte oficial: cadastro do portal (portalApi / lojaId). Esta lista é o
+// FALLBACK offline — usada quando o kiosk não alcança o portal.
 export const USERS = [
   { user: 'admin', pass: '1234', nome: 'ADMINISTRADOR' },
   { user: 'vendedor', pass: '1234', nome: 'VENDEDOR' },

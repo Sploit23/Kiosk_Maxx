@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
@@ -148,9 +148,9 @@ function createWindow() {
     },
   });
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://localhost:5173/vendas.html');
   } else {
-    mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
+    mainWindow.loadFile(path.join(__dirname, 'dist', 'vendas.html'));
   }
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -163,6 +163,22 @@ ipcMain.handle('natal:enterFullscreen', () => {
   if (mainWindow && !mainWindow.isFullScreen()) mainWindow.setFullScreen(true);
 });
 ipcMain.handle('natal:appVersion', () => app.getVersion());
+
+// ─── IPC: config + folder picker ──────────────────────────────
+ipcMain.handle('natal:getConfig', () => ({ ...config }));
+ipcMain.handle('natal:selectFolder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: 'Selecionar pasta de fotos',
+    defaultPath: config.photosFolder || undefined,
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+ipcMain.handle('natal:saveConfig', async (_event, partial) => {
+  config = { ...config, ...partial };
+  try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8'); } catch {}
+  return { success: true };
+});
 
 // ─── 5. IPC: impressão da guia (impressora térmica via driver) ──
 // Recebe o HTML da guia do renderer e imprime silencioso na impressora

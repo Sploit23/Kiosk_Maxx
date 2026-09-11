@@ -50,8 +50,13 @@ const natalApi = {
 
   // ─── Caixa (PDV) ─────────────────────────────────────────
   caixaEstado: () => api('GET', '/api/pdv/caixa'),
+  caixasHistorico: () => api('GET', '/api/pdv/caixas'),
   caixaAbrir: (data) => api('POST', '/api/pdv/caixa/abrir', data),
   caixaFechar: (data) => api('POST', '/api/pdv/caixa/fechar', data),
+
+  // ─── Auditoria (uso de senha master) ─────────────────────
+  auditoriaList: () => api('GET', '/api/auditoria'),
+  auditoriaSave: (usos) => api('POST', '/api/auditoria', { usos }),
 
   // ─── Impressão ASK-400 (produção) ────────────────────────
   // Envia o JPEG final de cada foto composta no PDV para a fila do pedido.
@@ -63,6 +68,11 @@ const natalApi = {
   // ─── Saúde / config ──────────────────────────────────────
   health: () => api('GET', '/api/health'),
   configPdv: () => api('GET', '/api/config'),
+  // Status real da impressora ASK-400 (proxy do sidecar Java na 8080)
+  printerStatus: () => api('GET', '/api/printer/status'),
+  // Config da máquina (salva no sidecar)
+  getConfig: () => api('GET', '/api/config'),
+  saveConfig: (partial) => api('POST', '/api/config', partial),
 };
 
 export default natalApi;
