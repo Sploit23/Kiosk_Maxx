@@ -162,6 +162,11 @@ Fonte: `impressora/status_ok/` (ver `RESUMO.md`).
 O core do Node chama `/kws/v1/kiosk/checkPrinter` para o endpoint
 `/api/printer/status` e usa `/kws/v1/printer/print2` no pipeline de impressão.
 
+O **JRE 8 32-bit vem embutido** no instalador (`resources/jre8/`, vindo de
+`jre8/runtime` — pasta gitignorada, baixada do Adoptium no CI). O
+`findJava()` em `electron-main.cjs` prioriza o JRE embutido antes de procurar
+JRE instalado na máquina, então o PDV não depende de instalação externa.
+
 ## Estrutura de diretórios
 
 ```

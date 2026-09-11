@@ -100,6 +100,8 @@ function startSidecar() {
 // ─── 2. Sidecar Java (Fujifilm ASK-400) ─────────────────────
 function findJava() {
   const candidates = [
+    path.join(getResourcePath('jre8'), 'bin', 'java.exe'),
+    path.join(__dirname, 'jre8', 'runtime', 'bin', 'java.exe'),
     'C:\\Program Files (x86)\\Eclipse Adoptium\\jre-8.0.472.8-hotspot\\bin\\java.exe',
     'C:\\Program Files\\Eclipse Adoptium\\jre-8.0.472.8-hotspot\\bin\\java.exe',
     ...(process.env.JAVA_HOME ? [path.join(process.env.JAVA_HOME, 'bin', 'java.exe')] : []),

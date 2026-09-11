@@ -25,6 +25,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Baixar JRE 8 (x86) para embutir no instalador
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force jre8 | Out-Null
+          Invoke-WebRequest -Uri "https://api.adoptium.net/v3/binary/latest/8/ga/windows/x86/jre/hotspot/normal/eclipse?project=jdk" -OutFile jre8/jre8.zip
+          Expand-Archive jre8/jre8.zip -DestinationPath jre8 -Force
+          $root = Get-ChildItem jre8 -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'bin\java.exe') } | Select-Object -First 1
+          if (-not $root) { throw "JRE nao extraido corretamente em jre8/" }
+          $target = "jre8/runtime"
+          if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+          New-Item -ItemType Directory -Force $target | Out-Null
+          Copy-Item (Join-Path $root.FullName '*') $target -Recurse -Force
+          Remove-Item jre8/jre8.zip, $root.FullName -Recurse -Force
+
       - name: Build instalador (NSIS)
         run: npm run build:win
 
