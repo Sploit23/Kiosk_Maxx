@@ -154,6 +154,16 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, 'dist', 'vendas.html'));
   }
+  // Repassa console do renderer para o terminal (mesmo estilo [Sidecar]/[Java]),
+  // pra erros da UI aparecerem mesmo sem abrir o DevTools.
+  mainWindow.webContents.on('console-message', (_e, a, b, c, d) => {
+    const args = typeof a === 'object' ? a : { level: a, message: b, lineNumber: c, sourceId: d };
+    const lv = { 0: 'log', 1: 'warn', 2: 'error', 3: 'info' }[args.level] || 'log';
+    const line = `${args.message}`.trim();
+    if (!line) return;
+    if (lv === 'error' || lv === 'warn') console.error(`[renderer:${lv}] ${line}`);
+    else console.log(`[renderer] ${line}`);
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 

@@ -82,7 +82,7 @@ function sanitizeSegment(s) {
 // ─── Config da máquina ───────────────────────────────────────
 // machineId: gerado pelo PDV no primeiro boot e persistido aqui — identifica
 // a máquina física p/ emparelhamento no portal (kiosk.pair) e carimbos futuros.
-const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', pairingCode: '' };
+const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM' };
 let machineConfig = { ...MACHINE_DEFAULTS, ...readJson(CONFIG_FILE, {}) };
 function getMachineConfig() { return machineConfig; }
 function setMachineConfig(partial) {
@@ -729,7 +729,7 @@ const server = http.createServer(async (req, res) => {
     const imprimirMatch = p.match(/^\/api\/pedidos\/([^/]+)\/imprimir$/);
     if (method === 'POST' && imprimirMatch) {
       const body = JSON.parse((await readBody(req, 5 * 1024 * 1024)).toString() || '{}');
-      const pedido = pedidos.find((x) => x.id === imprimirMatch[1]);
+      const pedido = pedidos.find((x) => x.id === imprimirMatch[1] || String(x.numero) === imprimirMatch[1]);
       if (!pedido) return sendJson(res, 404, { success: false, error: 'Pedido nao encontrado' });
       if (pedido.status !== 'PAGO') return sendJson(res, 400, { success: false, error: 'Pedido nao pago' });
       pedido.fotos = body.fotos || [];

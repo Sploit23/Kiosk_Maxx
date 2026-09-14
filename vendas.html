@@ -465,6 +465,8 @@
     position:relative;min-width:0;min-height:0;
   }
   .frame-box{
+    --frame-inset-x: 9px;   /* laterais — mantém 100% c/ impressão */
+    --frame-inset-y: 12px;  /* cima/baixo — ajuste fino c/ impressão */
     position:relative;
     background:#000;
     border-radius:4px;
@@ -487,16 +489,24 @@
   }
   .viewfinder{
     position:absolute;inset:0;pointer-events:none;
+    z-index:3;
   }
   .viewfinder.hidden{display:none;}
   .viewfinder i{
     position:absolute;width:22px;height:22px;
     border-color:var(--gold-500);border-style:solid;border-width:0;
   }
-  .viewfinder .tl{top:6px;left:6px;border-top-width:3px;border-left-width:3px;}
-  .viewfinder .tr{top:6px;right:6px;border-top-width:3px;border-right-width:3px;}
-  .viewfinder .bl{bottom:6px;left:6px;border-bottom-width:3px;border-left-width:3px;}
-  .viewfinder .br{bottom:6px;right:6px;border-bottom-width:3px;border-right-width:3px;}
+  .viewfinder .tl{top:var(--frame-inset-y);left:var(--frame-inset-x);border-top-width:3px;border-left-width:3px;}
+  .viewfinder .tr{top:var(--frame-inset-y);right:var(--frame-inset-x);border-top-width:3px;border-right-width:3px;}
+  .viewfinder .bl{bottom:var(--frame-inset-y);left:var(--frame-inset-x);border-bottom-width:3px;border-left-width:3px;}
+  .viewfinder .br{bottom:var(--frame-inset-y);right:var(--frame-inset-x);border-bottom-width:3px;border-right-width:3px;}
+  .frame-margin-mask{
+    position:absolute;inset:0;
+    border-width:var(--frame-inset-y) var(--frame-inset-x);
+    border-style:solid;
+    border-color:#000;
+    pointer-events:none;
+  }
 
   /* card estilo Polaroid: quadrado de foto dentro de um cartão maior, com borda */
   .polaroid-square{
@@ -1076,6 +1086,12 @@ import portalApi from './shared/api/portalApi.js';
 import { connectSSE } from './shared/api/sse.js';
 import { numeroSessao } from './src/catalog.js';
 import { composePrintImage } from './shared/utils/printUtils.js';
+import config from './shared/config.js';
+
+/* Erros globais (timers/SSE/callbacks fora de try) → terminal via bridge do main */
+window.addEventListener('error', (e) => console.error('[global:error]', e.error || e.message));
+window.addEventListener('unhandledrejection', (e) => console.error('[global:unhandledrejection]', e.reason));
+console.log('[renderer:bootstrap] vendas.html carregado');
 
 /* ---------------- MOCK DATA ---------------- */
 const FALLBACK_USERS = [
@@ -1211,6 +1227,7 @@ let currentOrientation = 'paisagem'; // 'paisagem' | 'retrato' — default paisa
 let addQty = 1;
 let showOverlay = true;
 let includeLogo = true;
+let logoTexto = 'SHOPPING PALLADIUM'; // texto da logo do shopping (configurável nas Configurações ⚙)
 let zoom = 100, offX = 0, offY = 0;
 let dragging=false, dragStart={x:0,y:0}, offStart={x:0,y:0};
 let resizing=false, resizeStart={dist:0,zoom:100};
@@ -1322,7 +1339,7 @@ function mapearPedido(p){
       tipo: 'tamanho', produtoId: it.key, label: labelProduto(it.key, 'tamanho'),
       qtd: it.qty || 1, precoUnit: it.unitPrice || 0, preco: it.subtotal || 0,
       zoom: it.scale || 100, offX: it.diffx || 0, offY: it.diffy || 0,
-      orientation: it.orientation || 'retrato', logo: true,
+      orientation: it.orientation || 'retrato', logo: true, pdv: true,
     })),
     ...(p.produtos || []).map(it => ({
       cartId: 'ped-p-' + p.id + '-' + it.key,
@@ -1538,7 +1555,13 @@ async function emparelharKiosk(){
   atualizarKioskUI();
 }
 /* resolve a identidade do kiosk imediatamente para exibir na tela de login */
-garantirIdentidade().then(() => atualizarKioskUI()).catch(()=>{});
+garantirIdentidade().then(async () => {
+  atualizarKioskUI();
+  try{
+    const cfg = await natalApi.getConfig().catch(()=>({}));
+    if(cfg && String(cfg.logoTexto || '').trim()) logoTexto = String(cfg.logoTexto).trim();
+  }catch{ }
+}).catch(()=>{});
 
 /* ---------------- SYNC DE VENDAS → PORTAL (snapshot diário por loja) ----------------
    Envia o resumo do dia da loja (vendas.push) ao portal de gestão. É um snap do
@@ -1789,7 +1812,7 @@ async function criarPedidoReal(itens, total, origemPedidoId){
       // filename pro backend é o nome simples (o seed tem sessaoId/nome para exibição)
       key: c.produtoId, qty: c.qtd || 1, filename: (c.fotoSeed || '').includes('/') ? String(c.fotoSeed).split('/').pop() : (c.fotoSeed || null),
       scale: c.zoom || 100, diffx: c.offX || 0, diffy: c.offY || 0, angle: 0,
-      orientation: c.orientation || 'paisagem', unitPrice: c.precoUnit || 0, subtotal: c.preco || 0,
+      orientation: c.orientation || 'paisagem', unitPrice: c.precoUnit || 0, subtotal: c.preco || 0, pdv: true,
     })),
     produtos: produtos.map(c => ({ key: c.produtoId, qty: c.qtd || 1, unitPrice: c.precoUnit || 0, subtotal: c.preco || 0 })),
     total: +total.toFixed(2),
@@ -1831,7 +1854,8 @@ async function iniciarImpressaoFotos(pedidoId, itens){
       sessionId: sessId, filename: uploadName, key: f.produtoId,
       qty: f.qtd || 1, url: natalApi.fotoUrl(sessId, 'originais', fileName || ''),
       scale: f.zoom || 100, diffx: f.offX || 0, diffy: f.offY || 0, angle: 0,
-      orientation: f.orientation || 'paisagem',
+      orientation: f.orientation || 'paisagem', pdv: true,
+      logo: !!f.logo, logoTexto,
     });
   }
   const lista = [...agrupado.values()];
@@ -1841,25 +1865,30 @@ async function iniciarImpressaoFotos(pedidoId, itens){
   printando = true;
   renderRibbonChip();
   toast('🖨️ Preparando ' + lista.length + ' foto(s) para impressão...');
+  let etapa = 'preparação';
   try{
     for(let i = 0; i < lista.length; i++){
       const f = lista[i];
+      etapa = 'composição da imagem (' + f.filename + ')';
       const blob = await composePrintImage(f);
+      etapa = 'upload da imagem de impressão (' + f.filename + ')';
       const up = await natalApi.uploadImpressao(pedidoId, f.filename, blob);
       if(!up.success) throw new Error(up.error || 'Falha ao enviar imagem');
       _printProgress = { current: i + 1, total: lista.length };
       renderRibbonChip();
     }
+    etapa = 'início da impressão';
     const res = await natalApi.imprimirPedido(pedidoId, lista.map(f => ({ key: f.key, filename: f.filename, qty: f.qty })));
     if(!res.success) throw new Error(res.error || 'Falha ao iniciar impressão');
     toast('🖨️ Impressão iniciada — aguardando terminar...');
     renderRibbonChip();
   }catch(e){
-    console.error('[print] falha na impressão ASK-400:', e);
+    const detalheEtapa = (typeof etapa === 'string' && etapa) ? etapa : 'desconhecida';
+    console.error(`[print] falha na impressão ASK-400 (etapa: ${detalheEtapa}):`, e);
     printando = false;
     _printProgress = null;
     renderRibbonChip();
-    mostrarFalhaImpressao('Falha ao preparar a impressão', e.message);
+    mostrarFalhaImpressao('Falha ao preparar a impressão', `${detalheEtapa} — ${e.message}`);
   }
 }
 
@@ -1873,7 +1902,7 @@ async function finalizarVenda(){
   if(r.error){ toast('⚠ ' + r.error); return; }
 
   const novoPedido = r.pedido;
-  const pedidoId = novoPedido.id;
+  const pedidoId = novoPedido._realId || novoPedido.id;
   const itensResumo = [...cart];
   const pagamentos = efetivoRows.map(r => r.forma + ': ' + fmt(r.valor)).join(' · ');
   const senhasResumo = [...new Set(cart.map(c => c.sessionSenha))];
@@ -2502,6 +2531,32 @@ function setupCover(im, boxW, boxH){
   else im.addEventListener('load', compute);
 }
 
+// Dimensões do box de enquadramento — replicam EXATAMENTE o que sai na impressão
+// (mesma lógica do kiosk React em AdjustFraming: formatos com molde imprimem sempre
+// paisagem no ratio do editorFrame; você vê na tela exatamente o corte que sai no papel).
+function frameBoxDims(t){
+  const comMolde = !t.circle && !t.polaroid;
+  const ef = config.getEditorFrame(t.id);
+  let W, H;
+  if(t.polaroid){
+    H = 480;
+    W = Math.round(H * Number(String(t.ratio).split('/')[0]) / Number(String(t.ratio).split('/')[1]));
+  } else if(t.circle){
+    H = 620;
+    W = H;
+  } else if(comMolde){
+    H = 460; // 10x15 / 15x20: folha sempre paisagem, ratio do papel (editorFrame)
+    W = Math.round(H * ef.width / ef.height);
+  } else {
+    // formato sem molde (hipotético): respeita a orientação escolhida
+    let [rw, rh] = String(t.ratio).split('/').map(Number);
+    if(currentOrientation==='paisagem'){ [rw, rh] = [rh, rw]; }
+    H = (currentOrientation==='paisagem') ? 460 : 620;
+    W = Math.round(H * rw/rh);
+  }
+  return { W, H };
+}
+
 function renderFrame(){
   const box = document.getElementById('frame-box');
   const controls = document.getElementById('frame-controls');
@@ -2530,14 +2585,12 @@ function renderFrame(){
   badge.style.display='block';
   badge.textContent = `${t.label} · ${fmt(t.preco)}`;
 
-  // bolinha e polaroide não têm orientação (formato fixo) — esconde o botão de orientação
-  document.getElementById('btn-orientacao').style.display = (t.circle || t.polaroid) ? 'none' : 'inline-flex';
+  // formatos com molde (10x15/15x20) imprimem sempre paisagem — igual ao kiosk React,
+  // o botão de orientação não existe para eles; bolinha (círculo) e polaroide são fixos.
+  document.getElementById('btn-orientacao').style.display = (t.circle || t.polaroid || config.getOverlay(t.id)) ? 'none' : 'inline-flex';
 
   box.className='frame-box';
-  let [rw, rh] = t.ratio.split('/').map(Number);
-  if(!t.circle && !t.polaroid && currentOrientation==='paisagem'){ [rw, rh] = [rh, rw]; } // inverte para paisagem
-  const H = t.polaroid ? 480 : ((currentOrientation==='paisagem' && !t.circle) ? 460 : 620);
-  const W = t.circle ? H : Math.round(H * rw/rh);
+  const { W, H } = frameBoxDims(t);
   box.style.width=W+'px'; box.style.height=H+'px';
   box.style.borderRadius = t.circle ? '50%' : '4px';
 
@@ -2583,7 +2636,7 @@ function renderFrame(){
       logo.className='shop-logo';
       logo.style.bottom='6px';
       logo.style.zIndex='4';
-      logo.textContent='SHOPPING PALLADIUM';
+      logo.textContent=logoTexto;
       square.appendChild(logo);
     }
   } else {
@@ -2604,10 +2657,20 @@ function renderFrame(){
     vf.innerHTML='<i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i>';
     box.appendChild(vf);
 
+    // máscara nas 4 bordas (10x15/15x20): cobre a sobra de foto que fica
+    // além dos cantos dourados, então a foto parece terminar exatamente no limite
+    // dourado — sem recortar pixel nenhum dentro dos cantos (o que sai na impressora).
+    // Espessura = --frame-inset (configurável no CSS).
+    if(!t.circle && showOverlay){
+      const mask=document.createElement('div');
+      mask.className='frame-margin-mask';
+      box.appendChild(mask);
+    }
+
     if(includeLogo){
       const logo=document.createElement('div');
       logo.className='shop-logo';
-      logo.textContent='SHOPPING PALLADIUM';
+      logo.textContent=logoTexto;
       box.appendChild(logo);
     }
   }
@@ -2777,7 +2840,8 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1){
     qtd, precoUnit, preco: +(precoUnit*qtd).toFixed(2),
     zoom: tipo==='tamanho'?zoom:100, offX: tipo==='tamanho'?offX:0, offY: tipo==='tamanho'?offY:0,
     orientation: tipo==='tamanho'?currentOrientation:null,
-    logo: tipo==='tamanho'?includeLogo:false
+    logo: tipo==='tamanho'?includeLogo:false,
+    pdv: true,
   });
   baixarEstoqueFisico(produtoId, qtd);
   renderCart(); renderThumbs();
@@ -2917,10 +2981,9 @@ function renderEnquadramentoEstatico(wrap, c){
   const t = TAMANHOS.find(x=>x.id===c.produtoId);
   if(!t){ wrap.innerHTML = `<img src="${img(c.fotoSeed,420,520)}" style="max-width:100%;border-radius:10px;">`; return; }
 
-  let [rw, rh] = t.ratio.split('/').map(Number);
-  if(!t.circle && !t.polaroid && c.orientation==='paisagem'){ [rw, rh] = [rh, rw]; }
+  const ed = frameBoxDims(t);
   const H = t.polaroid ? 380 : (t.circle ? 340 : ((c.orientation==='paisagem' && !t.circle) ? 320 : 420));
-  const W = t.circle ? H : Math.round(H * rw/rh);
+  const W = t.circle ? H : Math.round(H * ed.W / ed.H);
 
   const card = document.createElement('div');
   card.style.position='relative';
@@ -2975,7 +3038,7 @@ function renderEnquadramentoEstatico(wrap, c){
   if(c.logo){
     const logo=document.createElement('div');
     logo.className='shop-logo';
-    logo.textContent='SHOPPING PALLADIUM';
+    logo.textContent=logoTexto;
     squareEl.appendChild(logo);
   }
 
@@ -3190,6 +3253,8 @@ async function showConfigModal(){
     natalApi.printerStatus().catch(()=>({})),
   ]);
   const folder = cfg.photosFolder || '';
+  const logoTextoCfg = String(cfg.logoTexto || '').trim() || 'SHOPPING PALLADIUM';
+  const logoTextoEsc = logoTextoCfg.replace(/"/g, '&quot;');
   const connected = printer && printer.success && printer.connected;
   const p10 = connected && printer.paper10x15 != null ? printer.paper10x15 : '—';
   const p15 = connected && printer.paper15x20 != null ? printer.paper15x20 : '—';
@@ -3221,6 +3286,14 @@ async function showConfigModal(){
         <button id="cfg-browse" style="padding:10px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;white-space:nowrap;font-family:'Inter',sans-serif;">Procurar</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Onde o software do fotógrafo salva as fotos nesta máquina.</div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Logo do shopping</div>
+      <input id="cfg-logo" type="text" value="${logoTextoEsc}"
+        placeholder="SHOPPING PALLADIUM"
+        style="width:100%;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:'Inter',sans-serif;outline:none;box-sizing:border-box;" />
+      <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Escrita na frente das fotos quando a opção "Incluir logo do shopping" estiver marcada no enquadramento.</div>
     </div>
 
     <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
@@ -3319,10 +3392,13 @@ async function showConfigModal(){
 
   document.getElementById('cfg-save').onclick = async ()=>{
     const val = document.getElementById('cfg-folder').value.trim();
+    const logoEl = document.getElementById('cfg-logo');
+    const logoVal = (logoEl ? logoEl.value.trim() : '') || 'SHOPPING PALLADIUM';
     try{
-      const partial = { photosFolder: val };
+      const partial = { photosFolder: val, logoTexto: logoVal };
       await natalApi.saveConfig(partial);
       if(window.natal?.saveConfig) await window.natal.saveConfig(partial);
+      logoTexto = logoVal;
       toast('Configurações salvas');
       closeModal();
     }catch(e){

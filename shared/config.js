@@ -19,6 +19,8 @@ const DEFAULTS = {
   // Código de emparelhamento gerado no portal (kiosk.pair) — garantia de
   // que esta máquina é a "dona" do lojaId (evita dados misturados em clone).
   pairingCode: '',
+  // Texto da logo do shopping que sai na frente da foto (editor + impressão).
+  logoTexto: 'SHOPPING PALLADIUM',
 };
 
 let bridge = null;
@@ -40,6 +42,7 @@ function resolveConfig() {
       lojaId: cfg.lojaId || DEFAULTS.lojaId,
       pairingCode: cfg.pairingCode || DEFAULTS.pairingCode,
       photosFolder: cfg.photosFolder || '',
+      logoTexto: cfg.logoTexto || DEFAULTS.logoTexto,
     };
   } catch {
     return DEFAULTS;
@@ -123,6 +126,7 @@ const config = {
   lojaId: env.lojaId,
   pairingCode: env.pairingCode,
   photosFolder: env.photosFolder || '',
+  logoTexto: env.logoTexto || 'SHOPPING PALLADIUM',
   eventName: 'NATAL 2026',
   appName: 'Sistema Natal',
   appNameFotografo: 'Natal — Fotógrafo',

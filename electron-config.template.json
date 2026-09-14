@@ -6,5 +6,6 @@
   "portalApiUrl": "https://maxxfoto.com.br/natalcontroler/api.php",
   "lojaId": "teste",
   "pairingCode": "",
-  "photosFolder": ""
+  "photosFolder": "",
+  "logoTexto": "SHOPPING PALLADIUM"
 }

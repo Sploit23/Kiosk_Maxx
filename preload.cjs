@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('natal', {
     lojaId: config.lojaId,
     pairingCode: config.pairingCode || '',
     photosFolder: config.photosFolder || '',
+    logoTexto: config.logoTexto || 'SHOPPING PALLADIUM',
   }),
   selectFolder: () => ipcRenderer.invoke('natal:selectFolder'),
   saveConfig: (partial) => ipcRenderer.invoke('natal:saveConfig', partial),
