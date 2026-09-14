@@ -177,8 +177,11 @@ function setMachineConfig(partial) {
 // Regra: cada subpasta dentro de photosFolder = uma sessão. O outro
 // programa salva as fotos do cliente numa subpasta nova; quando a pasta
 // fica estável (sem alterações) o sidecar cria a sessão NATAL-XXXXX,
-// importa as fotos (original + preview), marca PRONTA e move a subpasta
-// para <photosFolder>/importadas/NATAL-XXXXX/.
+// importa as fotos (original + preview) e marca PRONTA. A subpasta do
+// cliente NÃO é movida/removida (é do programa externo — se sumir, ele
+// recria e gera sessões novas em loop). Pastas já importadas ficam
+// registradas (pasta-importadas.json) e só geram sessão nova se o
+// conteúdo mudar.
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png']);
 const SKIP_TAILS = ['.part', '.tmp', '.crdownload', '.download'];
 const PHOTOS_POLL_MS = 1500;
@@ -187,15 +190,14 @@ let photosWatcherTimer = null;
 let dropState = new Map(); // subpasta -> { first, lastChange, names: {nome:size} }
 let importingLock = false;
 
-// Pastas de fotos JÁ importadas (abs path -> id da sessão). Persistido em
+// Pastas de fotos JÁ importadas (abs path -> { id, snap }) — persistido em
 // pasta-importadas.json p/ sobreviver a restart. Evita que a MESMA pasta
-// gere sessões novas em loop quando o arquivamento (rename) falha por lock
-// do S.O. (OneDrive/antivírus/rede) — a pasta fica na drop zone, mas nunca
-// é re-importada.
+// gere sessões novas em loop (ex.: programa externo que recria a pasta ao
+// perceber que ela sumiu). A pasta não é movida/removida pelo importer.
 let pastaImportadas = readJson(PASTA_IMPORTADAS_FILE, {});
 function savePastaImportadas() { try { writeJson(PASTA_IMPORTADAS_FILE, pastaImportadas); } catch {} }
 const pastaPendentes = Object.keys(pastaImportadas).length;
-if (pastaPendentes) console.log(`[natal-core] ${pastaPendentes} pasta(s) com arquivamento pendente; nao serao re-importadas.`);
+if (pastaPendentes) console.log(`[natal-core] ${pastaPendentes} pasta(s) ja importadas (serao ignoradas se permanecerem na drop zone).`);
 
 function ensurePhotosWatcher() {
   const folder = (machineConfig.photosFolder || '').trim();
@@ -252,24 +254,37 @@ async function scanPhotosFolder(folder) {
     try { st = fs.statSync(subPath); } catch { continue; }
     if (!st.isDirectory()) continue;
 
-    // Já importada (arquivamento pendente/falhou): nunca re-importa; só
-    // re-tenta arquivar em background.
     const chave = path.resolve(subPath);
-    if (pastaImportadas[chave]) {
-      tentarArquivar(folder, sub, subPath, pastaImportadas[chave]);
-      continue;
+    const snapAtual = snapshotOf(subPath);
+    const jaImportada = pastaImportadas[chave];
+    const prev = dropState.get(sub);
+    const reimportando = !!(prev && prev.reimportando);
+
+    // Pasta já importada (soma de fotos daquele cliente). NÃO mexemos nela —
+    // o programa externo é dono da pasta: se ela sumir, ele recria e o
+    // ping-pong (mover → recriar → nova sessão) recomeça. Mesmo conteúdo p/
+    // já importado = ignora sempre. Só re-importa se o conteúdo MUDOU de
+    // verdade (nova leva de fotos); registros antigos (sem snapshot, string)
+    // nunca são re-importados p/ não refazer o loop.
+    if (jaImportada) {
+      const mesmoConteudo = typeof jaImportada === 'object' && !!jaImportada.snap && jaImportada.snap === snapAtual;
+      if (mesmoConteudo || reimportando === false) {
+        if (mesmoConteudo) continue;
+        // conteúdo mudou: reinicia a estabilização SEM atualizar o mapa (o
+        // mapa só muda quando a nova leva for de fato importada).
+        dropState.set(sub, { first: now, lastChange: now, snap: snapAtual, reimportando: true });
+        continue;
+      }
     }
 
     const photos = listImageEntries(subPath);
-    const snapKey = snapshotOf(subPath);
-    const prev = dropState.get(sub);
 
     if (!prev) {
-      dropState.set(sub, { first: now, lastChange: now, snap: snapKey });
+      dropState.set(sub, { first: now, lastChange: now, snap: snapAtual });
       continue;
     }
-    if (prev.snap !== snapKey) {
-      dropState.set(sub, { ...prev, lastChange: now, snap: snapKey });
+    if (prev.snap !== snapAtual) {
+      dropState.set(sub, { ...prev, lastChange: now, snap: snapAtual });
       continue;
     }
     // sem mudanças; precisa de ≥1 foto e idade suficiente p/ não cortar cópia
@@ -281,14 +296,24 @@ async function scanPhotosFolder(folder) {
 
     importingLock = true;
     try {
-      await importarSubpastaSessao(folder, subPath, sub, photos);
+      await importarSubpastaSessao(subPath, sub, photos, reimportando);
     } finally {
       importingLock = false;
     }
   }
 }
 
-async function importarSubpastaSessao(folder, subPath, sub, photos) {
+async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
+  // Re-settle que voltou ao conteúdo JÁ importado (mudança transitória):
+  // não cria sessão duplicada.
+  if (reimportando) {
+    const chave = path.resolve(subPath);
+    const ant = pastaImportadas[chave];
+    if (ant && typeof ant === 'object' && ant.snap === snapshotOf(subPath)) {
+      dropState.delete(sub);
+      return;
+    }
+  }
   const id = nextSessionId();
   const dir = sessaoDir(id);
   fs.mkdirSync(path.join(dir, 'previews'), { recursive: true });
@@ -324,46 +349,12 @@ async function importarSubpastaSessao(folder, subPath, sub, photos) {
   emit('sessao:status', { id, estado: ESTADOS.PRONTA, fotosQtd: imported.length });
   console.log(`[natal-core] Sessao ${id} importada da pasta (${imported.length} fotos): ${sub}`);
 
-  // Registra na drop zone como já importada ANTES de arquivar: mesmo que o
-  // arquivamento falhe (lock do S.O.), a pasta nunca vira outra sessão.
-  pastaImportadas[path.resolve(subPath)] = id;
+  // Registra como importada com o snapshot do conteúdo. A pasta NÃO é movida
+  // nem removida: pertence ao programa externo que alimenta a drop zone — se
+  // ela sumir, ele a recria e o loop recomeça.
+  pastaImportadas[path.resolve(subPath)] = { id, snap: snapshotOf(subPath), importadaEm: Date.now() };
   savePastaImportadas();
   dropState.delete(sub);
-  tentarArquivar(folder, sub, subPath, id);
-}
-
-// Arquiva a subpasta do cliente em <photosFolder>/importadas/NATAL-XXXXX/.
-// Se o rename falhar (pasta travada por antivírus/OneDrive/rede), tenta
-// copiar+remover; persistindo o registro em pasta-importadas.json a pasta
-// continua sendo retentada a cada scan, sem nunca gerar nova sessão.
-let arquivoErroLog = {}; // abs path -> lastTimestamp do último log
-function tentarArquivar(folder, sub, subPath, id) {
-  const chave = path.resolve(subPath);
-  try {
-    const archiveParent = path.join(folder, 'importadas');
-    fs.mkdirSync(archiveParent, { recursive: true });
-    const archive = path.join(archiveParent, id);
-    fs.rmSync(archive, { recursive: true, force: true });
-    try {
-      fs.renameSync(subPath, archive);
-    } catch {
-      fs.cpSync(subPath, archive, { recursive: true });
-      fs.rmSync(subPath, { recursive: true, force: true });
-    }
-    if (!fs.existsSync(subPath)) delete pastaImportadas[chave];
-    savePastaImportadas();
-    if (fs.existsSync(subPath)) console.warn(`[natal-core] Pasta ${sub} ainda existe apos arquivar (pode ser re-tentada).`);
-    return true;
-  } catch (e) {
-    pastaImportadas[chave] = id;
-    savePastaImportadas();
-    const last = arquivoErroLog[chave] || 0;
-    if (Date.now() - last > 30000) {
-      arquivoErroLog[chave] = Date.now();
-      console.error(`[natal-core] Nao arquivou ${sub}: ${e.message} (mantida como importada, s/ nova sessao)`);
-    }
-    return false;
-  }
 }
 
 // ─── Contador de sessões (NATAL-XXXXX) ───────────────────────
