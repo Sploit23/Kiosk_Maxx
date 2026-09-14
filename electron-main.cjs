@@ -82,6 +82,7 @@ function startSidecar() {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       NATAL_DATA_DIR: app.getPath('userData'),
+      NATAL_PHOTOS_FOLDER: (config.photosFolder || '').trim(),
     };
     sidecarProcess = spawn(process.execPath, [sidecarPath], { env, windowsHide: true });
     sidecarProcess.stdout.on('data', (d) => console.log(`[Sidecar] ${d}`.trim()));

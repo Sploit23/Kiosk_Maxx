@@ -26,18 +26,82 @@ const PORT = parseInt(process.env.NATAL_PORT, 10) || 9877;
 const HOST = process.env.NATAL_HOST || '0.0.0.0';
 
 // ─── Caminhos ────────────────────────────────────────────────
-const DATA_DIR = process.env.NATAL_DATA_DIR || path.join(process.env.APPDATA || process.cwd(), 'natal-app');
-const DB_DIR = path.join(DATA_DIR, 'database');
-const SESSOES_DIR = path.join(DATA_DIR, 'sessoes');
-const PEDIDOS_DIR = path.join(DATA_DIR, 'pedidos');
-const PRINT_QUEUE_DIR = path.join(DATA_DIR, 'print-queue');
-const PEDIDOS_FILE = path.join(DB_DIR, 'pedidos.json');
-const CAIXA_FILE = path.join(DB_DIR, 'caixa.json');
-const CAIXAS_FILE = path.join(DB_DIR, 'caixas.json');
-const AUDITORIA_FILE = path.join(DB_DIR, 'auditoria.json');
-const COUNTER_FILE = path.join(DB_DIR, 'counter.txt');
-const RIBBON_FILE = path.join(DB_DIR, 'ribbon-counter.txt');
-const CONFIG_FILE = path.join(DB_DIR, 'config.json');
+// Tudo (sessões, pedidos, caixa, counters, config) fica centralizado em
+// <photosFolder>\natal-app — a pasta escolhida no ⚙ Configurações. Sem pasta
+// configurada, usa o diretório legado (NATAL_DATA_DIR / %APPDATA%\natal-app).
+const LEGACY_BOOT_DIR = process.env.NATAL_DATA_DIR || path.join(process.env.APPDATA || process.cwd(), 'natal-app');
+const FOLDER_POINTER_FILE = path.join(LEGACY_BOOT_DIR, 'database', 'fotos-folder.txt');
+
+function readBootstrapPhotosFolder() {
+  const envFolder = String(process.env.NATAL_PHOTOS_FOLDER || '').trim();
+  if (envFolder) return envFolder;
+  try {
+    const ptr = fs.readFileSync(FOLDER_POINTER_FILE, 'utf-8').trim();
+    if (ptr) return ptr;
+  } catch {}
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(LEGACY_BOOT_DIR, 'database', 'config.json'), 'utf-8'));
+    if (cfg.photosFolder && String(cfg.photosFolder).trim()) return String(cfg.photosFolder).trim();
+  } catch {}
+  return '';
+}
+
+function computeDataDir(photosFolder) {
+  const p = String(photosFolder || '').trim();
+  return p ? path.join(p, 'natal-app') : LEGACY_BOOT_DIR;
+}
+
+function bindPaths(dataDir) {
+  DB_DIR = path.join(dataDir, 'database');
+  SESSOES_DIR = path.join(dataDir, 'sessoes');
+  PEDIDOS_DIR = path.join(dataDir, 'pedidos');
+  PRINT_QUEUE_DIR = path.join(dataDir, 'print-queue');
+  PEDIDOS_FILE = path.join(DB_DIR, 'pedidos.json');
+  CAIXA_FILE = path.join(DB_DIR, 'caixa.json');
+  CAIXAS_FILE = path.join(DB_DIR, 'caixas.json');
+  AUDITORIA_FILE = path.join(DB_DIR, 'auditoria.json');
+  COUNTER_FILE = path.join(DB_DIR, 'counter.txt');
+  RIBBON_FILE = path.join(DB_DIR, 'ribbon-counter.txt');
+  CONFIG_FILE = path.join(DB_DIR, 'config.json');
+}
+
+// Move dados do diretório antigo para o novo (1º boot na pasta centralizada
+// ou troca de pasta no ⚙). Não sobrescreve se o destino já tem dados. O
+// fotos-folder.txt (ponteiro de bootstrap) fica no legado de propósito.
+function moverDados(antigo, novo) {
+  if (!antigo || !novo || antigo === novo) return;
+  if (!fs.existsSync(path.join(antigo, 'database'))) return;
+  if (fs.existsSync(path.join(novo, 'database', 'config.json'))) return;
+  fs.mkdirSync(path.join(novo, 'database'), { recursive: true });
+  for (const sub of ['sessoes', 'pedidos', 'print-queue', 'database']) {
+    const src = path.join(antigo, sub);
+    if (!fs.existsSync(src)) continue;
+    const dest = path.join(novo, sub);
+    fs.mkdirSync(dest, { recursive: true });
+    for (const entry of fs.readdirSync(src)) {
+      if (sub === 'database' && entry === 'fotos-folder.txt') continue;
+      const from = path.join(src, entry);
+      const to = path.join(dest, entry);
+      try { fs.renameSync(from, to); } catch {
+        fs.cpSync(from, to, { recursive: true });
+        fs.rmSync(from, { recursive: true, force: true });
+      }
+    }
+  }
+}
+
+function persistFolderPointer(folder) {
+  try {
+    fs.mkdirSync(path.dirname(FOLDER_POINTER_FILE), { recursive: true });
+    fs.writeFileSync(FOLDER_POINTER_FILE, String(folder || ''), 'utf-8');
+  } catch {}
+}
+
+let DATA_DIR = computeDataDir(readBootstrapPhotosFolder());
+let DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR;
+let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE;
+bindPaths(DATA_DIR);
+moverDados(LEGACY_BOOT_DIR, DATA_DIR);
 
 // ─── Estados de sessão ───────────────────────────────────────
 const ESTADOS = {
@@ -52,14 +116,17 @@ const ESTADOS = {
 };
 
 // ─── Init de dados (idempotente) ─────────────────────────────
-for (const dir of [DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR]) {
-  fs.mkdirSync(dir, { recursive: true });
+function inicializarDados() {
+  for (const dir of [DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR]) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  if (!fs.existsSync(PEDIDOS_FILE)) fs.writeFileSync(PEDIDOS_FILE, '[]', 'utf-8');
+  if (!fs.existsSync(CAIXA_FILE)) fs.writeFileSync(CAIXA_FILE, 'null', 'utf-8');
+  if (!fs.existsSync(CAIXAS_FILE)) fs.writeFileSync(CAIXAS_FILE, '[]', 'utf-8');
+  if (!fs.existsSync(AUDITORIA_FILE)) fs.writeFileSync(AUDITORIA_FILE, '[]', 'utf-8');
+  if (!fs.existsSync(RIBBON_FILE)) fs.writeFileSync(RIBBON_FILE, '400', 'utf-8');
 }
-if (!fs.existsSync(PEDIDOS_FILE)) fs.writeFileSync(PEDIDOS_FILE, '[]', 'utf-8');
-if (!fs.existsSync(CAIXA_FILE)) fs.writeFileSync(CAIXA_FILE, 'null', 'utf-8');
-if (!fs.existsSync(CAIXAS_FILE)) fs.writeFileSync(CAIXAS_FILE, '[]', 'utf-8');
-if (!fs.existsSync(AUDITORIA_FILE)) fs.writeFileSync(AUDITORIA_FILE, '[]', 'utf-8');
-if (!fs.existsSync(RIBBON_FILE)) fs.writeFileSync(RIBBON_FILE, '400', 'utf-8');
+inicializarDados();
 
 // ─── Helpers de IO ───────────────────────────────────────────
 function readJson(file, fallback) {
@@ -84,9 +151,22 @@ function sanitizeSegment(s) {
 // a máquina física p/ emparelhamento no portal (kiosk.pair) e carimbos futuros.
 const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM' };
 let machineConfig = { ...MACHINE_DEFAULTS, ...readJson(CONFIG_FILE, {}) };
+persistFolderPointer(machineConfig.photosFolder);
 function getMachineConfig() { return machineConfig; }
 function setMachineConfig(partial) {
-  machineConfig = { ...MACHINE_DEFAULTS, ...machineConfig, ...partial };
+  const novo = { ...MACHINE_DEFAULTS, ...machineConfig, ...partial };
+  const novoFolder = String(novo.photosFolder || '').trim();
+  const atualFolder = String(machineConfig.photosFolder || '').trim();
+  machineConfig = novo;
+  persistFolderPointer(novoFolder);
+  const novoRoot = computeDataDir(novoFolder);
+  if (novoRoot !== DATA_DIR) {
+    moverDados(DATA_DIR, novoRoot);
+    DATA_DIR = novoRoot;
+    bindPaths(novoRoot);
+    inicializarDados();
+    recarregarEstadoLocal();
+  }
   writeJson(CONFIG_FILE, machineConfig);
   ensurePhotosWatcher();
 }
@@ -269,6 +349,16 @@ let caixas = readJson(CAIXAS_FILE, []);
 function arquivarCaixa(fechada) {
   caixas.push({ ...fechada, numero: fechada.numero || caixas.length + 1 });
   writeJson(CAIXAS_FILE, caixas);
+}
+
+// Re-carrega o estado em memória após relocar o diretório de dados (troca de
+// pasta no ⚙): o outro diretório pode ter seus próprios pedidos/caixa/etc.
+function recarregarEstadoLocal() {
+  counter = parseInt(readText(COUNTER_FILE), 10) || 0;
+  pedidos = readJson(PEDIDOS_FILE, []);
+  auditoria = readJson(AUDITORIA_FILE, []);
+  caixa = readJson(CAIXA_FILE, null);
+  caixas = readJson(CAIXAS_FILE, []);
 }
 
 // ─── Ribbon (contagem de papel) ──────────────────────────────
