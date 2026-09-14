@@ -63,6 +63,7 @@ function bindPaths(dataDir) {
   COUNTER_FILE = path.join(DB_DIR, 'counter.txt');
   RIBBON_FILE = path.join(DB_DIR, 'ribbon-counter.txt');
   CONFIG_FILE = path.join(DB_DIR, 'config.json');
+  PASTA_IMPORTADAS_FILE = path.join(DB_DIR, 'pasta-importadas.json');
 }
 
 // Move dados do diretório antigo para o novo (1º boot na pasta centralizada
@@ -99,7 +100,7 @@ function persistFolderPointer(folder) {
 
 let DATA_DIR = computeDataDir(readBootstrapPhotosFolder());
 let DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR;
-let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE;
+let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE;
 bindPaths(DATA_DIR);
 moverDados(LEGACY_BOOT_DIR, DATA_DIR);
 
@@ -125,6 +126,7 @@ function inicializarDados() {
   if (!fs.existsSync(CAIXAS_FILE)) fs.writeFileSync(CAIXAS_FILE, '[]', 'utf-8');
   if (!fs.existsSync(AUDITORIA_FILE)) fs.writeFileSync(AUDITORIA_FILE, '[]', 'utf-8');
   if (!fs.existsSync(RIBBON_FILE)) fs.writeFileSync(RIBBON_FILE, '400', 'utf-8');
+  if (!fs.existsSync(PASTA_IMPORTADAS_FILE)) fs.writeFileSync(PASTA_IMPORTADAS_FILE, '{}', 'utf-8');
 }
 inicializarDados();
 
@@ -185,6 +187,16 @@ let photosWatcherTimer = null;
 let dropState = new Map(); // subpasta -> { first, lastChange, names: {nome:size} }
 let importingLock = false;
 
+// Pastas de fotos JÁ importadas (abs path -> id da sessão). Persistido em
+// pasta-importadas.json p/ sobreviver a restart. Evita que a MESMA pasta
+// gere sessões novas em loop quando o arquivamento (rename) falha por lock
+// do S.O. (OneDrive/antivírus/rede) — a pasta fica na drop zone, mas nunca
+// é re-importada.
+let pastaImportadas = readJson(PASTA_IMPORTADAS_FILE, {});
+function savePastaImportadas() { try { writeJson(PASTA_IMPORTADAS_FILE, pastaImportadas); } catch {} }
+const pastaPendentes = Object.keys(pastaImportadas).length;
+if (pastaPendentes) console.log(`[natal-core] ${pastaPendentes} pasta(s) com arquivamento pendente; nao serao re-importadas.`);
+
 function ensurePhotosWatcher() {
   const folder = (machineConfig.photosFolder || '').trim();
   if (photosWatcherTimer) { clearInterval(photosWatcherTimer); photosWatcherTimer = null; }
@@ -239,6 +251,14 @@ async function scanPhotosFolder(folder) {
     let st;
     try { st = fs.statSync(subPath); } catch { continue; }
     if (!st.isDirectory()) continue;
+
+    // Já importada (arquivamento pendente/falhou): nunca re-importa; só
+    // re-tenta arquivar em background.
+    const chave = path.resolve(subPath);
+    if (pastaImportadas[chave]) {
+      tentarArquivar(folder, sub, subPath, pastaImportadas[chave]);
+      continue;
+    }
 
     const photos = listImageEntries(subPath);
     const snapKey = snapshotOf(subPath);
@@ -304,17 +324,46 @@ async function importarSubpastaSessao(folder, subPath, sub, photos) {
   emit('sessao:status', { id, estado: ESTADOS.PRONTA, fotosQtd: imported.length });
   console.log(`[natal-core] Sessao ${id} importada da pasta (${imported.length} fotos): ${sub}`);
 
-  // arquiva a subpasta em <photosFolder>/importadas/NATAL-XXXXX/
+  // Registra na drop zone como já importada ANTES de arquivar: mesmo que o
+  // arquivamento falhe (lock do S.O.), a pasta nunca vira outra sessão.
+  pastaImportadas[path.resolve(subPath)] = id;
+  savePastaImportadas();
+  dropState.delete(sub);
+  tentarArquivar(folder, sub, subPath, id);
+}
+
+// Arquiva a subpasta do cliente em <photosFolder>/importadas/NATAL-XXXXX/.
+// Se o rename falhar (pasta travada por antivírus/OneDrive/rede), tenta
+// copiar+remover; persistindo o registro em pasta-importadas.json a pasta
+// continua sendo retentada a cada scan, sem nunca gerar nova sessão.
+let arquivoErroLog = {}; // abs path -> lastTimestamp do último log
+function tentarArquivar(folder, sub, subPath, id) {
+  const chave = path.resolve(subPath);
   try {
     const archiveParent = path.join(folder, 'importadas');
     fs.mkdirSync(archiveParent, { recursive: true });
     const archive = path.join(archiveParent, id);
     fs.rmSync(archive, { recursive: true, force: true });
-    fs.renameSync(subPath, archive);
+    try {
+      fs.renameSync(subPath, archive);
+    } catch {
+      fs.cpSync(subPath, archive, { recursive: true });
+      fs.rmSync(subPath, { recursive: true, force: true });
+    }
+    if (!fs.existsSync(subPath)) delete pastaImportadas[chave];
+    savePastaImportadas();
+    if (fs.existsSync(subPath)) console.warn(`[natal-core] Pasta ${sub} ainda existe apos arquivar (pode ser re-tentada).`);
+    return true;
   } catch (e) {
-    console.error(`[natal-core] Nao arquivou ${sub}: ${e.message}`);
+    pastaImportadas[chave] = id;
+    savePastaImportadas();
+    const last = arquivoErroLog[chave] || 0;
+    if (Date.now() - last > 30000) {
+      arquivoErroLog[chave] = Date.now();
+      console.error(`[natal-core] Nao arquivou ${sub}: ${e.message} (mantida como importada, s/ nova sessao)`);
+    }
+    return false;
   }
-  dropState.delete(sub);
 }
 
 // ─── Contador de sessões (NATAL-XXXXX) ───────────────────────
@@ -359,6 +408,7 @@ function recarregarEstadoLocal() {
   auditoria = readJson(AUDITORIA_FILE, []);
   caixa = readJson(CAIXA_FILE, null);
   caixas = readJson(CAIXAS_FILE, []);
+  pastaImportadas = readJson(PASTA_IMPORTADAS_FILE, {});
 }
 
 // ─── Ribbon (contagem de papel) ──────────────────────────────
