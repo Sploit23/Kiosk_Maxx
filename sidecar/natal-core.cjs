@@ -386,6 +386,7 @@ function requireCaixaAberto() {
 }
 // Histórico de caixas fechados (append-only) — consultado pelo PDV
 let caixas = readJson(CAIXAS_FILE, []);
+const pedidosImprimindo = new Set(); // lock anti impressão dupla (pipeline concorrente)
 function arquivarCaixa(fechada) {
   caixas.push({ ...fechada, numero: fechada.numero || caixas.length + 1 });
   writeJson(CAIXAS_FILE, caixas);
@@ -762,7 +763,7 @@ const server = http.createServer(async (req, res) => {
         ? (pagamentos.length === 1 ? pagamentos[0].meio : 'MULTI')
         : (body.meio || null);
       const pedido = {
-        id: `PED-${Date.now().toString(36).toUpperCase()}`,
+        id: `PED-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
         numero,
         sessaoId: sessao.id,
         itens: body.itens || [],       // fotos: [{ key, qty }]
@@ -781,6 +782,8 @@ const server = http.createServer(async (req, res) => {
         impressoEm: null,
       };
       pedidos.push(pedido);
+      if (caixa.pedidos && !caixa.pedidos.includes(pedido.id)) caixa.pedidos.push(pedido.id);
+      saveCaixa();
       savePedidos();
       atualizarSessao(sessao.id, { estado: ESTADOS.EM_ATENDIMENTO, pedidoNumero: numero });
       emit('pedido:criado', { pedidoId: pedido.id, numero, sessaoId: sessao.id, total: pedido.total });
@@ -800,6 +803,9 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
       const pedido = pedidos.find((x) => x.id === pagamentoMatch[1]);
       if (!pedido) return sendJson(res, 404, { success: false, error: 'Pedido nao encontrado' });
+      if (pedido.status !== 'AGUARDANDO') {
+        return sendJson(res, 409, { success: false, error: 'Pedido ja foi pago/cancelado' });
+      }
       if (Array.isArray(body.pagamentos) && body.pagamentos.length) {
         const pgs = body.pagamentos
           .filter((pg) => pg && Number(pg.valor) > 0)
@@ -808,6 +814,10 @@ const server = http.createServer(async (req, res) => {
             valor: Number(pg.valor),
             parcelas: pg.parcelas ? Number(pg.parcelas) : undefined,
           }));
+        const somaPaga = pgs.reduce((s, pg) => s + pg.valor, 0);
+        if (Math.abs(somaPaga - Number(pedido.total || 0)) > 0.005) {
+          return sendJson(res, 400, { success: false, error: `Soma dos pagamentos (${somaPaga.toFixed(2)}) diferente do total (${Number(pedido.total || 0).toFixed(2)})` });
+        }
         pedido.pagamentos = pgs;
         pedido.meio = pgs.length === 1 ? pgs[0].meio : 'MULTI';
       } else {
@@ -824,6 +834,45 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'GET' && p === '/api/pedidos') {
       return sendJson(res, 200, { success: true, pedidos: [...pedidos].sort((a, b) => b.criadoEm - a.criadoEm) });
+    }
+
+    // Atualização de correções pós-pagamento feitas no PDV (cobrança de
+    // diferença, correção da forma de pagamento, cancelamento com devolução).
+    // Persiste no sidecar para sobreviver a restart e mantém o portal coerente.
+    const pedidoPut = p.match(/^\/api\/pedidos\/([^/]+)$/);
+    if (method === 'PUT' && pedidoPut) {
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      const idx = pedidos.findIndex((x) => x.id === pedidoPut[1] || String(x.numero) === pedidoPut[1]);
+      if (idx < 0) return sendJson(res, 404, { success: false, error: 'Pedido nao encontrado' });
+      const pedido = pedidos[idx];
+      if (typeof body.total === 'number' && Number.isFinite(body.total)) {
+        pedido.total = Number(+body.total.toFixed(2));
+      }
+      if (Array.isArray(body.pagamentos)) {
+        const pgs = body.pagamentos
+          .filter((pg) => pg && Number(pg.valor) > 0)
+          .map((pg) => ({
+            meio: String(pg.meio || ''),
+            valor: Number(pg.valor),
+            parcelas: pg.parcelas ? Number(pg.parcelas) : undefined,
+          }));
+        pedido.pagamentos = pgs;
+        pedido.meio = pgs.length === 1 ? pgs[0].meio : 'MULTI';
+      }
+      if (Array.isArray(body.itens)) pedido.itens = body.itens;
+      if (Array.isArray(body.produtos)) pedido.produtos = body.produtos;
+      if (body.desconto !== undefined) pedido.desconto = body.desconto || null;
+      if (typeof body.status === 'string') {
+        const st = body.status.toUpperCase();
+        if (['AGUARDANDO', 'PAGO', 'IMPRESSO', 'CANCELADO'].includes(st)) {
+          pedido.status = st;
+          if (st === 'CANCELADO') pedido.canceladoEm = Date.now();
+        }
+      }
+      pedidos[idx] = pedido;
+      savePedidos();
+      emit('pedido:atualizado', { pedidoId: pedido.id, status: pedido.status, total: pedido.total });
+      return sendJson(res, 200, { success: true, pedido });
     }
 
     // ── Auditoria (usos de senha master) — persistência local ──
@@ -863,10 +912,17 @@ const server = http.createServer(async (req, res) => {
       const pedido = pedidos.find((x) => x.id === imprimirMatch[1] || String(x.numero) === imprimirMatch[1]);
       if (!pedido) return sendJson(res, 404, { success: false, error: 'Pedido nao encontrado' });
       if (pedido.status !== 'PAGO') return sendJson(res, 400, { success: false, error: 'Pedido nao pago' });
-      pedido.fotos = body.fotos || [];
+      if (pedidosImprimindo.has(pedido.id)) return sendJson(res, 409, { success: false, error: 'Pedido ja esta em impressao' });
+      const fotos = Array.isArray(body.fotos) ? body.fotos : [];
+      if (!fotos.length) return sendJson(res, 400, { success: false, error: 'Nenhuma foto para imprimir' });
+      pedido.fotos = fotos;
       savePedidos();
-      emit('print-start', { pedidoId: pedido.id, total: body.fotos?.length || 0 });
-      setImmediate(() => runPrintPipeline(pedido));
+      pedidosImprimindo.add(pedido.id);
+      setTimeout(() => pedidosImprimindo.delete(pedido.id), 1000 * 60 * 60); // libera o lock em caso de trave
+      emit('print-start', { pedidoId: pedido.id, total: fotos.length });
+      setImmediate(() => runPrintPipeline(pedido).finally(() => {
+        pedidosImprimindo.delete(pedido.id);
+      }));
       return sendJson(res, 200, { success: true });
     }
 
@@ -899,7 +955,9 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
       const meios = body.meios || {};
       const pedidosDoCaixa = pedidos.filter((x) => x.caixaId === caixa.id);
-      const totalVendido = pedidosDoCaixa.reduce((acc, x) => acc + x.total, 0);
+      const totalVendido = pedidosDoCaixa
+        .filter((x) => x.status === 'PAGO')
+        .reduce((acc, x) => acc + x.total, 0);
       const totalPorMeio = {};
       for (const p of pedidosDoCaixa) {
         if (p.status !== 'PAGO') continue;

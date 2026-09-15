@@ -47,6 +47,8 @@ const natalApi = {
   registrarPagamento: (id, data) => api('POST', `/api/pedidos/${encodeURIComponent(id)}/pagamento`, data),
   listarPedidos: () => api('GET', '/api/pedidos'),
   getPedido: (id) => api('GET', `/api/pedidos/${encodeURIComponent(id)}`),
+  // Persiste correções pós-pagamento (diferença, forma de pagamento, cancelamento)
+  atualizarPedido: (id, data) => api('PUT', `/api/pedidos/${encodeURIComponent(id)}`, data),
 
   // ─── Caixa (PDV) ─────────────────────────────────────────
   caixaEstado: () => api('GET', '/api/pdv/caixa'),

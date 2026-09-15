@@ -1351,6 +1351,10 @@ function mapearPedido(p){
   return {
     id: String(p.numero ?? p.id),
     _realId: p.id, numero: p.numero, horario,
+    pagoEm: p.pagoEm ? new Date(p.pagoEm) : null,
+    desconto: (p.desconto && Number(p.desconto.valor) > 0)
+      ? { nome: p.desconto.nome || 'Desconto', valor: Number(p.desconto.valor) }
+      : null,
     sessoes: sessaoId ? [{ id: sessaoId, senha: senhaSessao }] : [],
     itens, total: p.total || 0,
     pagamentosEfetivos: (p.pagamentos || []).map(pg => ({
@@ -1629,6 +1633,7 @@ let _pushHistoricoPedidos = false;
 let _pushPedidosTimer = null;
 
 function unidadesItemPortal(item){
+  if(item.tipo !== 'tamanho') return 0;
   const t = TAMANHOS.find(x => x.id === item.produtoId);
   return t ? (t.unidades || 0) * (item.qtd || 1) : 0;
 }
@@ -1639,27 +1644,36 @@ function montarPedidoPortal(p){
     meio: r.meio || '', forma: r.forma || '', valor: +(r.valor || 0), parcelas: r.parcelas || 0,
   }));
   const itens = (p.itens || []).map(it => ({
-    tipo: it.tipo === 'extra' ? 'extra' : 'tamanho',
+    tipo: (it.tipo === 'extra' || it.tipo === 'ajuste') ? it.tipo : 'tamanho',
     produtoId: it.produtoId || '', label: it.label || '',
     qtd: it.qtd || 1, unidades: unidadesItemPortal(it),
     precoUnit: +(it.precoUnit || 0), subtotal: +(it.preco || 0),
   }));
-  const desconto = (p.itens || []).filter(it => it.preco < 0).reduce((s, it) => s + (-(+it.preco || 0)), 0);
+  // Desconto (combo/falha/comercial) vem separado no pedido — manda como linha
+  // de ajuste negativa para a soma dos itens fechar com o total (base do DRE).
+  const descontoValor = p.desconto ? +(Number(p.desconto.valor) || 0).toFixed(2) : 0;
+  if(descontoValor > 0.004 && !(p.itens || []).some(it => it.preco < 0)){
+    itens.push({
+      tipo: 'ajuste', produtoId: '', label: p.desconto.nome || 'Desconto',
+      qtd: 1, unidades: 0, precoUnit: -descontoValor, subtotal: -descontoValor,
+    });
+  }
   const horario = p.horario instanceof Date ? p.horario : new Date(p.horario);
+  const pagoAt = (p.pagoEm instanceof Date && !isNaN(p.pagoEm)) ? p.pagoEm : horario;
   return {
     id: p._realId || p.id,
     numero: p.numero || p.id,
     pdvNome: (par && par.pareamento && par.pareamento.pdvNome) || '',
     data: horario instanceof Date && !isNaN(horario) ? isoDataLocal(horario) : '',
     criadoEm: (horario instanceof Date && !isNaN(horario) ? horario : new Date()).toISOString(),
-    pagoEm: p.status === 'pago' && horario instanceof Date && !isNaN(horario) ? horario.toISOString() : '',
+    pagoEm: p.status === 'pago' && pagoAt instanceof Date && !isNaN(pagoAt) ? pagoAt.toISOString() : '',
     total: +(p.total || 0),
     status: p.status === 'cancelado' ? 'cancelado' : 'pago',
     operador: p.operador || '—',
     itens,
     pagamentos,
     sessoes: (p.sessoes || []).map(s => ({ id: s.id, senha: s.senha })),
-    desconto: +desconto.toFixed(2),
+    desconto: +descontoValor.toFixed(2),
     caixaId: typeof caixaReal === 'object' && caixaReal && caixaReal.id ? caixaReal.id : '',
     origemPedidoId: p.origemPedidoId || null,
     guiaImpressa: false,
@@ -3867,7 +3881,8 @@ function formatarFormasPagamento(pagamentosEfetivos){
 }
 
 function renderPedidosScreen(){
-  const pagos = pedidosRealizados.filter(p=>p.status==='pago');
+  const desde = caixaAbertoEm ? +caixaAbertoEm : 0;
+  const pagos = pedidosRealizados.filter(p=>p.status==='pago' && (!p.horario || +p.horario >= desde));
   const totalVendas = pagos.reduce((s,p)=>s+p.total,0);
   const ticketMedio = pagos.length ? totalVendas/pagos.length : 0;
   const saldoDinheiro = fundoTrocoCaixa + pagos.reduce((s,p)=>
@@ -4195,7 +4210,18 @@ function showReopenOrder(pedidoId){
             p.itens.push({tipo:'ajuste', produtoId:'diferenca', label:`Diferença cobrada (senha ${senha})`, qtd:1, precoUnit:valor, preco:valor, sessionSenha:p.sessoes[0].senha, fotoSeed:p.itens[0].fotoSeed});
             p.total = +(p.total + valor).toFixed(2);
             p.pagamentosEfetivos = p.pagamentosEfetivos.concat(rows);
-            vendasHojeTotal += valor;
+            if(p.horario && p.horario.toDateString() === new Date().toDateString()) vendasHojeTotal += valor;
+            try{
+              // persiste a diferença no sidecar (senão some no restart e o portal fica com o total antigo)
+              natalApi.atualizarPedido(p._realId || p.id, {
+                total: p.total,
+                pagamentos: p.pagamentosEfetivos.filter(r=>r.valor>0).map(r=>{
+                  const m = meioDeForma(r.forma);
+                  return { meio: m.meio || (typeof m === 'string' ? m : ''), valor: r.valor, parcelas: m.parcelas || undefined };
+                }),
+              });
+              agendarPedidosPortal(500);
+            }catch(e){ console.warn('[pdv] falha ao persistir diferença:', e); }
             toast(`Diferença de ${fmt(valor)} cobrada no ${p.id} — motivo registrado`);
             renderPedidosScreen();
           });
@@ -4211,6 +4237,16 @@ function showReopenOrder(pedidoId){
         `Selecione a nova composição de pagamento para o ${p.id} — pode dividir em mais de uma forma.`,
         (rows)=>{
           p.pagamentosEfetivos = rows;
+          try{
+            // persiste a correção no sidecar (senão reverte após restart e o portal guarda a forma antiga)
+            natalApi.atualizarPedido(p._realId || p.id, {
+              pagamentos: rows.filter(r=>r.valor>0).map(r=>{
+                const m = meioDeForma(r.forma);
+                return { meio: m.meio || (typeof m === 'string' ? m : ''), valor: r.valor, parcelas: m.parcelas || undefined };
+              }),
+            });
+            agendarPedidosPortal(500);
+          }catch(e){ console.warn('[pdv] falha ao persistir forma de pagamento:', e); }
           toast(`Forma de pagamento do ${p.id} corrigida`);
           renderPedidosScreen();
         });
@@ -4268,10 +4304,15 @@ function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo){
   const itensPerdidos = itensReais.filter(it=>!itensQueVoltam.includes(it));
 
   p.status = 'cancelado';
-  agendarPedidosPortal(500);
   p.itensDevolvidos = itensQueVoltam.map(it=>it.label);
   p.itensPerdidos = itensPerdidos.map(it=>it.label);
-  vendasHojeTotal -= p.total;
+  if(p.horario && p.horario.toDateString() === new Date().toDateString()) vendasHojeTotal -= p.total;
+  try{
+    // persiste o cancelamento no sidecar (sobrevive a restart — sem isso o pedido
+    // volta a 'pago' no reboot e o portal "des-cancela" o registro)
+    natalApi.atualizarPedido(p._realId || p.id, { status: 'cancelado' });
+  }catch(e){ console.warn('[pdv] falha ao persistir cancelamento:', e); }
+  agendarPedidosPortal(500);
   renderRibbonChip();
   renderCombos();
   toast(`Pedido ${p.id} cancelado — ${itensQueVoltam.length} iten${itensQueVoltam.length===1?'':'s'} devolvido${itensQueVoltam.length===1?'':'s'} ao estoque, motivo registrado`);
@@ -4522,7 +4563,8 @@ document.addEventListener('click', ()=>{ document.getElementById('caixa-menu').s
 document.getElementById('cx-consultar').addEventListener('click', (e)=>{
   e.stopPropagation();
   document.getElementById('caixa-menu').style.display='none';
-  const vendaDinheiroHoje = pedidosRealizados.filter(p=>p.status==='pago')
+  const desde = caixaAbertoEm ? +caixaAbertoEm : 0;
+  const vendaDinheiroHoje = pedidosRealizados.filter(p=>p.status==='pago' && (!p.horario || +p.horario >= desde))
     .reduce((s,p)=>s+p.pagamentosEfetivos.filter(r=>r.forma==='Dinheiro').reduce((s2,r)=>s2+r.valor,0),0);
   const caixaAtual = caixasHoje.find(c=>c.aberto);
   const equipeTxt = caixaAtual && caixaAtual.equipe && caixaAtual.equipe.length ? caixaAtual.equipe.join(', ') : 'nenhuma selecionada';
@@ -4647,7 +4689,9 @@ function conciliacaoReceiptHtml(f){
 }
 
 function abrirTelaFechamento(){
-  const pagos = pedidosRealizados.filter(p=>p.status==='pago');
+  // escopo = pedidos pagos DESTE caixa (janela desde a abertura), não o histórico todo
+  const desde = caixaAbertoEm ? +caixaAbertoEm : 0;
+  const pagos = pedidosRealizados.filter(p=>p.status==='pago' && (!p.horario || +p.horario >= desde));
   // soma o valor que o SISTEMA registrou, por forma de pagamento — inclui o fundo de troco só no Dinheiro
   const porForma = {};
   FORMAS.forEach(f=>porForma[f]=0);

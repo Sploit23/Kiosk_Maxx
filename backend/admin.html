@@ -1232,16 +1232,18 @@ async function renderVendas(){
     var C = 2*Math.PI*36;
     var acc = 0;
     var segs = [];
+    var legendHtml = '';
     PAY_META.forEach(function(pm, i){
       var frac = a.meios[pm.k]/pmtTotal;
       var colors = ['#d4a24c','#4fae7f','#6b9ab4','#e8a83c'];
       segs.push('<circle cx="45" cy="45" r="36" fill="none" stroke="'+colors[i]+'" stroke-width="13" '+
         'stroke-dasharray="'+(frac*C)+' '+(C - frac*C)+'" stroke-dashoffset="'+(25 - acc*C)+'" stroke-linecap="round"/>');
       acc += frac;
-      legend.innerHTML += '<div class="donut-item"><span class="donut-dot" style="background:'+colors[i]+'"></span>'+
+      legendHtml += '<div class="donut-item"><span class="donut-dot" style="background:'+colors[i]+'"></span>'+
         esc(pm.label)+' — <b>'+(frac*100).toFixed(0)+'%</b> ('+fmtBRL(a.meios[pm.k])+')</div>';
     });
     svg.innerHTML = '<circle cx="45" cy="45" r="36" fill="none" stroke="var(--navy-800)" stroke-width="13"/>' + segs.join('');
+    legend.innerHTML = legendHtml;
   } else {
     svg.innerHTML = '';
     legend.innerHTML = '<div style="color:var(--slate-500);font-style:italic;font-size:12px;">Sem pagamentos no período.</div>';
@@ -1392,7 +1394,11 @@ function calcDre(rows, params, despesas, cut){
   params = params || {};
   var vendas = 0, unidades = 0, pedidos = 0;
   var porOperador = {};
-  rows.filter(function(p){ return p.status==='pago' || p.status==='impresso'; }).forEach(function(p){
+  var corte = cut ? dayStr(cut) : '';
+  rows.filter(function(p){
+    return (p.status==='pago' || p.status==='impresso')
+      && (!corte || (p.data||'') >= corte);
+  }).forEach(function(p){
     vendas += toNum(p.total);
     unidades += toNum(p.unidadesTotal);
     pedidos++;
@@ -1403,7 +1409,8 @@ function calcDre(rows, params, despesas, cut){
   var comissoes = 0;
   for(var k in porOperador){
     var fn = funcaoDeOperador(k);
-    var pct = fn==='fotografo' ? toNum(params.comissaoFotografo) : toNum(params.comissaoVendedor);
+    // comissão só incide sobre vendedor/fotógrafo — admin/gerente não geram custo
+    var pct = fn==='fotografo' ? toNum(params.comissaoFotografo) : (fn==='vendedor' ? toNum(params.comissaoVendedor) : 0);
     comissoes += porOperador[k] * pct / 100;
   }
   var desp = despesas.filter(function(d){ return cut ? (d.data||'') >= dayStr(cut) : true; })
@@ -1412,11 +1419,15 @@ function calcDre(rows, params, despesas, cut){
 }
 function preencherParametros(){
   var p = state.parametros || {};
-  var set = function(id, v){ var el = $(id); if(el && el.value==='') el.value = (v==null||v==='') ? '' : v; };
-  set('#f-param-ribbon', toNum(p.custoRibbonUnitario) || '');
-  set('#f-param-cv', toNum(p.comissaoVendedor) || '');
-  set('#f-param-cf', toNum(p.comissaoFotografo) || '');
-  set('#f-param-crit', toNum(p.ribbonCritico) || '');
+  var fmtNum = function(id, v){
+    var el = $(id);
+    if(!el || el.value !== '') return;
+    el.value = (v === null || v === undefined || v === '') ? '' : String(toNum(v));
+  };
+  fmtNum('#f-param-ribbon', p.custoRibbonUnitario);
+  fmtNum('#f-param-cv', p.comissaoVendedor);
+  fmtNum('#f-param-cf', p.comissaoFotografo);
+  fmtNum('#f-param-crit', p.ribbonCritico);
 }
 async function salvarParametros(){
   var num = function(id){ return parseFloat(String($(id).value).replace(',', '.')); };
@@ -2226,7 +2237,9 @@ function salvarPrecos(){
   var precos = {};
   PRODUTOS_PRECO.forEach(function(pp){
     var el = document.getElementById('preco-'+pp[0]);
-    var num = parseFloat(el ? el.value : NaN);
+    var str = (el ? el.value : '').trim();
+    if(str === '') return; // campo vazio = volta ao preço oficial (backend reseta o default)
+    var num = parseFloat(str.replace(',', '.'));
     precos[pp[0]] = isNaN(num) ? 0 : num;
   });
   call('precos.save', { lojaId: lojaId, precos: precos }).then(function(res){

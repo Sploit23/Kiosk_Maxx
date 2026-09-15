@@ -87,9 +87,10 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 | POST | `/api/pedidos` | Criar pedido (exige caixa aberto + sessão) → `AGUARDANDO` |
 | GET | `/api/pedidos` | Listar pedidos (mais novos primeiro) |
 | GET | `/api/pedidos/:id` | Buscar pedido (por `id` ou `numero`) |
-| POST | `/api/pedidos/:id/pagamento` | Registra pagamento → `PAGO`, sessão `VENDIDA` |
+| POST | `/api/pedidos/:id/pagamento` | Registra pagamento → `PAGO`, sessão `VENDIDA`. Exige pedido `AGUARDANDO` e soma dos pagamentos == total |
 | POST | `/api/pedidos/:id/impressao/:filename` | Upload da imagem final de impressão (fila) |
-| POST | `/api/pedidos/:id/imprimir` | Dispara pipeline de impressão (exige `PAGO`) |
+| POST | `/api/pedidos/:id/imprimir` | Dispara pipeline de impressão (exige `PAGO`, fotos não vazia, lock anti-impressão dupla) |
+| PUT | `/api/pedidos/:id` | Persiste correções pós-pagamento feitas no PDV (total, pagamentos/meio, itens/produtos, desconto, status `CANCELADO`) |
 | GET | `/api/pdv/caixa` | Estado do caixa atual |
 | GET | `/api/pdv/caixas` | Histórico de caixas fechados (persistido em `caixas.json`, ordenado do mais recente primeiro) |
 | POST | `/api/pdv/caixa/abrir` | Abre caixa (`CX-...`) |
@@ -119,7 +120,7 @@ Autenticação pública por usuário; ações admin exigem header `X-Token` (ou 
 | `precos` | `lojaId` | Preços do catálogo da loja (fonte de verdade do PDV): `{ ok, lojaId, precos }` — defaults oficiais + overlay salvo no admin (`data/precos.json`) |
 | `kiosk.pair` | `kioskCode` (+ `pdvNome`, `machineId`; legado `lojaId`+`pairingCode`) | Emparelha o kiosk com a loja: resolve a loja pelo código exibido NA TELA do PDV, registra `pareamento` e bloqueia máquina já usada por outra loja (`KIOSK_NAO_EMPARELELHADO`, `MAQUINA_JA_EMPARELHADA`) → `{ loja, pareamento }` |
 | `vendas.push` | `lojaId`, `machineId`, `data` (YYYY-MM-DD) + snapshot | PDV → portal: snapshot diário de vendas por loja. Exige `machineId` == `pareamento.machineId` da loja (`LOJA_NAO_EMPARELELHADA` 403, com delay anti-bruteforce). Upsert em `data/vendas.json` por loja+data: `lojaNome`, `pdvNome`, `totalVendido`, `pedidos`, `sessoesCriadas`, `sessoesVendidas`, `taxacombo`, `ribbonRestante`, `papel10x15`/`papel15x20` (papel REAL da impressora via checkPrinter, `null` se sem resposta), `meios {dinheiro,debito,credito,pix}`, `ultimaVenda`, `caixa {numero,aberto}`, `enviadoEm` |
-| `pedido.push` | `lojaId`, `machineId` + `pedido` (objeto) | PDV → portal: pedido completo, **idempotente pelo `pedido.id`** (reenvio só sobrescreve). Exige máquina pareada (mesmo bloqueio do `vendas.push`). Normaliza `itens [{tipo,produtoId,label,qtd,unidades,precoUnit,subtotal}]`, `pagamentos [{meio,forma,valor,parcelas}]`, `sessoes`, `desconto`, `caixaId`, `origemPedidoId`, `guiaImpressa`, `unidadesTotal` (somada dos itens). Alimenta Pedidos/Ranking/DRE. Persistido em `data/pedidos.json` |
+| `pedido.push` | `lojaId`, `machineId` + `pedido` (objeto) | PDV → portal: pedido completo, **idempotente pelo `pedido.id`** (reenvio só sobrescreve). Exige máquina pareada (mesmo bloqueio do `vendas.push`). Normaliza `itens [{tipo,produtoId,label,qtd,unidades,precoUnit,subtotal}]` — `precoUnit`/`subtotal` podem ser **negativos** (linha de ajuste de desconto/diferença) —, `pagamentos [{meio,forma,valor,parcelas}]`, `pagoEm` (hora real do pagamento), `sessoes`, `desconto`, `caixaId`, `origemPedidoId`, `guiaImpressa`, `unidadesTotal` (somada dos itens de tamanho). Alimenta Pedidos/Ranking/DRE. Persistido em `data/pedidos.json` |
 | `auditoria.push` | `lojaId`, `machineId` + `uso` (objeto) | PDV → portal: uso de senha master (perda, desconto/cancelamento, cobrança de diferença), **idempotente pelo `uso.id`**. Campos: `titulo`, `operador`, `motivo`, `data`, `criadoEm`, `pedidoContexto`, `pedidoGeradoId`. Persistido em `data/auditoria.json`, alimenta a tela Auditoria |
 
 **Admin (token):** `admin.login` (valida senha SHA-256 → `{ token, expiraEm }`),
@@ -132,10 +133,11 @@ esse campo é o heartbeat do kiosk), `lojas.save`, `lojas.delete`, `usuarios.lis
 `data/precos.json`; valores vazios resetam para os defaults),
 `vendas.resumo` (todos os snapshots de `data/vendas.json`, data desc → lojaId asc →
 `{ ok, vendas }`), `pedido.list` (pedidos consolidados de `data/pedidos.json`,
-filtros `lojaId`/`dataIni`/`dataFim`/`q`/`status`, sort criadoEm desc →
+filtros `lojaId`/`dataIni`/`dataFim`/`q`/`status` — `status` é case-insensitive,
+sort criadoEm desc →
 `{ ok, pedidos, total, totalLiquido }` − exclui status `cancelado` do
 totalLiquido), `auditoria.list` (usos de `data/auditoria.json`, filtros
-`lojaId`/`dataIni`/`dataFim`, sort criadoEm desc → `{ ok, usos }`),
+`lojaId`/`dataIni`/`dataFim`, sort criadoEm desc → `{ ok, auditoria, usos }`),
 `parametros.get`/`parametros.save` (parâmetros globais do DRE/estoque em
 `data/parametros.json` — ver `PARAMS_DEFAULT` abaixo; save aceita qualquer
 subconjunto, comissões cap 100),

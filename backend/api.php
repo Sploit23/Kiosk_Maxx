@@ -446,8 +446,9 @@ try {
             }
 
             $meios = [];
+            $rawMeios = is_array($p['meios'] ?? null) ? $p['meios'] : [];
             foreach (['dinheiro', 'debito', 'credito', 'pix'] as $mk) {
-                $meios[$mk] = round(max(0, (float) ($p['meios'][$mk] ?? 0)), 2);
+                $meios[$mk] = round(max(0, (float) ($rawMeios[$mk] ?? 0)), 2);
             }
             $snap = [
                 'lojaId' => $lojaId,
@@ -504,8 +505,9 @@ try {
                     'label' => trim((string) ($it['label'] ?? '')),
                     'qtd' => max(0, (int) ($it['qtd'] ?? 1)),
                     'unidades' => max(0, (int) ($it['unidades'] ?? 0)),
-                    'precoUnit' => round(max(0, (float) ($it['precoUnit'] ?? 0)), 2),
-                    'subtotal' => round(max(0, (float) ($it['subtotal'] ?? 0)), 2),
+                    // preço/subtotal podem ser negativos (desconto de combo, ajustes)
+                    'precoUnit' => round((float) ($it['precoUnit'] ?? 0), 2),
+                    'subtotal' => round((float) ($it['subtotal'] ?? 0), 2),
                 ];
             }
             $pagamentos = [];
@@ -733,7 +735,7 @@ try {
             $dataIni = trim((string) ($p['dataIni'] ?? ''));
             $dataFim = trim((string) ($p['dataFim'] ?? ''));
             $q = mb_strtolower(trim((string) ($p['q'] ?? '')), 'UTF-8');
-            $status = trim((string) ($p['status'] ?? ''));
+            $status = mb_strtolower(trim((string) ($p['status'] ?? '')), 'UTF-8');
             $out = [];
             foreach ($todos as $r) {
                 if ($lojaId !== '' && ($r['lojaId'] ?? '') !== $lojaId) continue;
@@ -774,7 +776,7 @@ try {
             usort($out, function ($a, $b) {
                 return strcmp((string) ($b['criadoEm'] ?? ''), (string) ($a['criadoEm'] ?? '')) ?: 0;
             });
-            respond(['ok' => true, 'usos' => array_values($out)]);
+            respond(['ok' => true, 'auditoria' => array_values($out), 'usos' => array_values($out)]);
         }
 
         // Parâmetros globais (DRE/estoque) — leitura e gravação pela gestão.
