@@ -352,11 +352,9 @@ select.form-input{appearance:none;}
     <div class="sb-item" data-screen="equipe"><span class="ico">👥</span> Colaboradores</div>
     <div class="sb-item" data-screen="ranking"><span class="ico">🏆</span> Ranking</div>
     <div class="sb-section">Controle</div>
-    <div class="sb-item" data-screen="pedidos"><span class="ico">📋</span> Pedidos</div>
     <div class="sb-item" data-screen="auditoria"><span class="ico">🔑</span> Auditoria</div>
     <div class="sb-section">Admin</div>
     <div class="sb-item" data-screen="config"><span class="ico">⚙️</span> Configurações</div>
-    <div class="sb-item" data-screen="cadastros"><span class="ico">🗂</span> Cadastros</div>
   </div>
   <div class="sb-footer">
     <div class="user"><strong id="footer-user">—</strong><span id="footer-acesso">Acesso total</span></div>
@@ -462,26 +460,16 @@ select.form-input{appearance:none;}
           <table id="tabela-api"></table>
         </div>
       </div>
-    </div>
-
-    <!-- ====== CADASTROS ====== -->
-    <div class="screen" id="screen-cadastros">
-      <div class="section-head"><div><h2>Cadastros</h2><p>Visão geral de lojas e usuários do sistema</p></div></div>
-      <div class="grid2">
-        <div class="card">
-          <h3>Lojas cadastradas</h3>
-          <table id="tabela-cad-lojas"></table>
-          <div style="margin-top:12px;"><button class="btn btn-ghost" style="width:100%;" id="btn-go-lojas">+ Nova loja</button></div>
-        </div>
-        <div class="card">
-          <h3>Usuários do sistema</h3>
-          <table id="tabela-cad-users"></table>
-          <div style="margin-top:12px;"><button class="btn btn-ghost" style="width:100%;" id="btn-go-equipe">+ Novo operador</button></div>
+      <div class="card">
+        <h3>Exportação de dados</h3>
+        <p style="margin:0 0 12px;color:var(--slate-400);font-size:12px;">Baixe uma visão completa do portal (lojas, equipe, vendas, pedidos, despesas, auditoria e parâmetros).</p>
+        <div class="form-row-h">
+          <button class="btn btn-primary" id="btn-exportar-relatorio">🖨️ Relatório (HTML)</button>
+          <button class="btn btn-ghost" id="btn-exportar-json">⬇️ Backup completo (JSON)</button>
         </div>
       </div>
     </div>
 
-  <!-- ====== VENDAS & BI ====== -->
     <!-- ====== FINANCEIRO ====== -->
     <div class="screen" id="screen-financeiro">
       <div class="section-head">
@@ -509,6 +497,10 @@ select.form-input{appearance:none;}
       <div class="card">
         <h3>Receita por loja — período</h3>
         <table id="fin-tabela"></table>
+      </div>
+      <div class="card">
+        <h3>Pedidos do período <em style="color:var(--slate-400);font-size:11px;font-weight:400;font-style:normal;">(consolidado dos PDVs)</em></h3>
+        <table id="fin-pedidos"></table>
       </div>
       <div class="card">
         <h3>DRE do período <em style="color:var(--slate-400);font-size:11px;font-weight:400;">(pedidos reais do PDV × parâmetros da gestão)</em></h3>
@@ -617,38 +609,6 @@ select.form-input{appearance:none;}
       </div>
     </div>
 
-    <!-- ====== PEDIDOS (consolidado por pedido, enviado pelo PDV) ====== -->
-    <div class="screen" id="screen-pedidos">
-      <div class="section-head">
-        <div>
-          <h2>Pedidos</h2>
-          <p>Consolidado de todas as lojas — o PDV envia cada pedido (idempotente) no ato da venda e a cada sincronização</p>
-        </div>
-        <div class="period-tabs" id="ped-periodo">
-          <button class="period-tab active" data-period="hoje">Hoje</button>
-          <button class="period-tab" data-period="7d">7 dias</button>
-          <button class="period-tab" data-period="mes">Este mês</button>
-          <button class="period-tab" data-period="temporada">Temporada</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="form-row-h" style="align-items:flex-end;gap:12px;">
-          <div class="form-row"><label class="form-label">Loja</label>
-            <select class="form-input" id="ped-loja" style="min-width:200px;"></select>
-          </div>
-          <div class="form-row"><label class="form-label">De</label><input class="form-input" id="ped-ini" type="date"></div>
-          <div class="form-row"><label class="form-label">Até</label><input class="form-input" id="ped-fim" type="date"></div>
-          <div class="form-row" style="flex:2;"><label class="form-label">Buscar (nº, loja, operador)</label><input class="form-input" id="ped-q" placeholder="Ex.: PED-0007, Maria..."></div>
-          <button class="btn btn-primary" id="btn-ped-filtrar" style="height:38px;">Filtrar</button>
-          <button class="btn btn-ghost" id="btn-ped-limpar" style="height:38px;">Limpar</button>
-        </div>
-      </div>
-      <div class="kpi-grid" id="ped-kpis"></div>
-      <div class="card">
-        <table id="ped-tabela"></table>
-      </div>
-    </div>
-
     <!-- ====== RANKING (agregação por operador/loja) ====== -->
     <div class="screen" id="screen-ranking">
       <div class="section-head">
@@ -749,7 +709,7 @@ var FN_LABEL = { vendedor:'Vendedora', fotografo:'Fotógrafo', admin:'Administra
 var FN_ACESSO = { vendedor:'Kiosk', fotografo:'Kiosk', admin:'Total', gerente:'Regional' };
 
 var token = sessionStorage.getItem('nac_token') || '';
-var state = { currentUser:null, lojas:[], usuarios:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', finPeriodo:'hoje', fluxoPeriodo:'hoje', despesasPeriodo:'mes', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, auditoria:[], _audProm:null, _audDirty:false, parametros:null, _paramProm:null, pedPeriodo:'hoje', rankPeriodo:'hoje', auditPeriodo:'7d' };
+var state = { currentUser:null, lojas:[], usuarios:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', finPeriodo:'hoje', fluxoPeriodo:'hoje', despesasPeriodo:'mes', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, auditoria:[], _audProm:null, _audDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje', auditPeriodo:'7d' };
 var notificacoes = [];
 var currentScreen = 'dashboard';
 
@@ -822,10 +782,10 @@ function healthPing(){
 // ——— NAVEGAÇÃO ———
 var titles = {
   dashboard:'Dashboard', lojas:'Lojas', equipe:'Colaboradores', ranking:'Ranking',
-  config:'Configurações', cadastros:'Cadastros', precos:'Catálogo de produtos',
+  config:'Configurações', precos:'Catálogo de produtos',
   financeiro:'Financeiro', fluxo:'Fluxo de Caixa',
   despesas:'Despesas & Taxas', estoque:'Estoque',
-  pedidos:'Pedidos', auditoria:'Auditoria'
+  auditoria:'Auditoria'
 };
 $$('.sb-item[data-screen]').forEach(function(item){
   item.addEventListener('click', function(){
@@ -847,13 +807,11 @@ function goScreen(name){
   if(name==='lojas') renderLojas();
   if(name==='equipe') renderEquipe();
   if(name==='config') renderConfig();
-  if(name==='cadastros') renderCadastros();
   if(name==='precos') renderPrecos();
   if(name==='financeiro') renderFinanc();
   if(name==='fluxo') renderFluxo();
   if(name==='despesas') renderDespesas();
   if(name==='estoque') renderEstoque();
-  if(name==='pedidos') renderPedidos();
   if(name==='ranking') renderRanking();
   if(name==='auditoria') renderAuditoria();
 }
@@ -1420,6 +1378,12 @@ async function renderFinanc(){
     tb.innerHTML = '<tr><td class="empty" colspan="9">Sem vendas no período.</td></tr>';
   }
 
+  var peds = state.pedidos.filter(function(p){ return cut ? (p.data||'') >= dayStr(cut) : true; })
+    .sort(function(a,b){ return String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')); });
+  var ptb = $('#fin-pedidos');
+  ptb.innerHTML = pedidosTabelaHTML(peds, 200);
+  bindPedidoVer(ptb);
+
   var params = state.parametros || {};
   var dre = calcDre(state.pedidos, params, state.despesas, cut);
   $('#fin-dre').innerHTML =
@@ -1661,71 +1625,38 @@ function pedStatusPill(st){
   return 'pill-amber';
 }
 function pedId(p){ return p._realId || p.id; }
-async function renderPedidos(){
-  await getPedidos();
-  var lojaSel = $('#ped-loja');
-  if(lojaSel && lojaSel.options.length===0){
-    lojaSel.innerHTML = '<option value="">Todas as lojas</option>' +
-      state.lojas.map(function(l){ return '<option value="'+escAttr(l.id)+'">'+esc(l.nome)+'</option>'; }).join('');
-  }
-  var period = state.pedPeriodo;
-  var cut = periodCutoff(period);
-  var lojaF = $('#ped-loja').value || '';
-  var ini = $('#ped-ini').value || '';
-  var fim = $('#ped-fim').value || '';
-  var q = ($('#ped-q').value||'').trim().toLowerCase();
-  var rows = state.pedidos.filter(function(p){
-    if(lojaF && p.lojaId!==lojaF) return false;
-    if(ini && (p.data||'') < ini) return false;
-    if(fim && (p.data||'') > fim) return false;
-    if(q){
-      var hay = String(p.numero||'')+' '+String(p.lojaNome||'')+' '+String(p.operador||'');
-      if(hay.toLowerCase().indexOf(q)===-1) return false;
-    }
-    return cut ? (p.data||'') >= dayStr(cut) : true;
-  }).sort(function(a,b){ return String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')); });
-
-  var pagos = rows.filter(function(p){ return p.status==='pago'||p.status==='impresso'; });
-  var receita = pagos.reduce(function(s,p){ return s+toNum(p.total); },0);
-  var canc = rows.filter(function(p){ return p.status==='cancelado'; }).length;
-  $('#ped-kpis').innerHTML =
-    kpi('Pedidos ('+typeVal(null,period)+')', fmtInt(rows.length), 'do filtro aplicado', rows.length?'ok':'alert') +
-    kpi('Receita (pagantes)', fmtBRL(receita), pagos.length+' pedidos PAGO', receita?'ok':'alert') +
-    kpi('Ticket médio', pagos.length?fmtBRL(receita/pagos.length):'—', 'receita ÷ pedidos', pagos.length?'ok':'alert') +
-    kpi('Cancelados', fmtInt(canc), 'mantidos no consolidado', canc?'warn':'ok');
-
-  var tb = $('#ped-tabela');
-  if(rows.length){
-    tb.innerHTML = '<tr><th></th><th>Pedido</th><th>Quando</th><th>Loja / PDV</th><th>Operador</th><th>Itens</th><th>Pagamento(s)</th><th>Total</th><th>Status</th></tr>' +
-      rows.slice(0,200).map(function(p){
-        var itens = (p.itens||[]).map(function(it){
-          return (it.qtd>1?it.qtd+'x ':'')+(it.label||it.produtoId||'?');
-        }).join(', ') || '—';
-        var pg = (p.pagamentos||[]).map(function(x){
-          var m = x.meio || x.forma || '';
-          return (MEIO_LABEL[m]||m||'—') + (toNum(x.valor)?' '+fmtBRL(toNum(x.valor)):'');
-        }).join(' · ') || '—';
-        var st = p.status || '—';
-        return '<tr>'+
-          '<td><button class="btn btn-ghost" style="padding:3px 8px;font-size:11px;" data-ver-pedido="'+escAttr(pedId(p))+'">Ver</button></td>'+
-          '<td><b>'+esc(p.numero||pedId(p))+'</b></td>'+
-          '<td style="white-space:nowrap;">'+fmtDt(p.criadoEm)+'</td>'+
-          '<td>'+esc(p.lojaNome||p.lojaId||'—')+'<div style="font-size:11px;color:var(--slate-400);">'+esc(p.pdvNome||'')+'</div></td>'+
-          '<td>'+esc(p.operador||'—')+'</td>'+
-          '<td style="max-width:260px;color:var(--slate-400);font-size:11px;">'+esc(itens)+'</td>'+
-          '<td style="font-size:11px;">'+pg+'</td>'+
-          '<td>'+fmtBRL(toNum(p.total))+'</td>'+
-          '<td><span class="pill '+pedStatusPill(st)+'">'+esc(st)+'</span></td></tr>';
-      }).join('');
-    tb.querySelectorAll('[data-ver-pedido]').forEach(function(b){
-      b.addEventListener('click', function(){
-        var p = state.pedidos.find(function(x){ return pedId(x)===b.dataset.verPedido; });
-        if(p) modalPedido(p);
-      });
+function pedidosTabelaHTML(rows, limit){
+  if(!rows.length) return '<tr><td class="empty" colspan="9">Nenhum pedido no período — o PDV envia cada venda na hora (e o histórico completo no 1º boot emparelhado).</td></tr>';
+  var max = limit || rows.length;
+  return '<tr><th></th><th>Pedido</th><th>Quando</th><th>Loja / PDV</th><th>Operador</th><th>Itens</th><th>Pagamento(s)</th><th>Total</th><th>Status</th></tr>' +
+    rows.slice(0, max).map(function(p){
+      var itens = (p.itens||[]).map(function(it){
+        return (it.qtd>1?it.qtd+'x ':'')+(it.label||it.produtoId||'?');
+      }).join(', ') || '—';
+      var pg = (p.pagamentos||[]).map(function(x){
+        var m = x.meio || x.forma || '';
+        return (MEIO_LABEL[m]||m||'—') + (toNum(x.valor)?' '+fmtBRL(toNum(x.valor)):'');
+      }).join(' · ') || '—';
+      var st = p.status || '—';
+      return '<tr>'+
+        '<td><button class="btn btn-ghost" style="padding:3px 8px;font-size:11px;" data-ver-pedido="'+escAttr(pedId(p))+'">Ver</button></td>'+
+        '<td><b>'+esc(p.numero||pedId(p))+'</b></td>'+
+        '<td style="white-space:nowrap;">'+fmtDt(p.criadoEm)+'</td>'+
+        '<td>'+esc(p.lojaNome||p.lojaId||'—')+'<div style="font-size:11px;color:var(--slate-400);">'+esc(p.pdvNome||'')+'</div></td>'+
+        '<td>'+esc(p.operador||'—')+'</td>'+
+        '<td style="max-width:260px;color:var(--slate-400);font-size:11px;">'+esc(itens)+'</td>'+
+        '<td style="font-size:11px;">'+pg+'</td>'+
+        '<td>'+fmtBRL(toNum(p.total))+'</td>'+
+        '<td><span class="pill '+pedStatusPill(st)+'">'+esc(st)+'</span></td></tr>';
+    }).join('');
+}
+function bindPedidoVer(container){
+  container.querySelectorAll('[data-ver-pedido]').forEach(function(b){
+    b.addEventListener('click', function(){
+      var p = state.pedidos.find(function(x){ return pedId(x)===b.dataset.verPedido; });
+      if(p) modalPedido(p);
     });
-  } else {
-    tb.innerHTML = '<tr><td class="empty" colspan="9">Nenhum pedido no período — o PDV envia cada venda na hora (e o histórico completo no 1º boot emparelhado).</td></tr>';
-  }
+  });
 }
 function modalPedido(p){
   var pg = (p.pagamentos||[]).map(function(x){
@@ -1830,18 +1761,8 @@ async function renderAuditoria(){
 }
 
 // ——— BINDs das novas telas ———
-bindPeriodTabs('#ped-periodo', function(p){ state.pedPeriodo = p; renderPedidos(); });
 bindPeriodTabs('#rank-periodo', function(p){ state.rankPeriodo = p; renderRanking(); });
 bindPeriodTabs('#audit-periodo', function(p){ state.auditPeriodo = p; renderAuditoria(); });
-$('#ped-loja').addEventListener('change', renderPedidos);
-$('#ped-ini').addEventListener('change', renderPedidos);
-$('#ped-fim').addEventListener('change', renderPedidos);
-$('#ped-q').addEventListener('input', renderPedidos);
-$('#btn-ped-filtrar').addEventListener('click', renderPedidos);
-$('#btn-ped-limpar').addEventListener('click', function(){
-  $('#ped-loja').value=''; $('#ped-ini').value=''; $('#ped-fim').value=''; $('#ped-q').value='';
-  renderPedidos();
-});
 $('#audit-loja').addEventListener('change', renderAuditoria);
 $('#audit-tipo').addEventListener('change', renderAuditoria);
 
@@ -2083,20 +2004,149 @@ $('#btn-trocar-senha').addEventListener('click', function(){
   });
 });
 
-// ——— CADASTROS ———
-function renderCadastros(){
-  $('#tabela-cad-lojas').innerHTML = '<tr><th>Loja</th><th>PDV</th><th>Status</th></tr>' +
-    (state.lojas.length ? state.lojas.map(function(l){
-      return '<tr><td>'+esc(l.nome)+'</td><td>'+esc(l.pdv||'—')+'</td><td><span class="pill '+(l.ativo?'pill-green':'pill-red')+'">'+(l.ativo?'Ativa':'Inativa')+'</span></td></tr>';
-    }).join('') : '<tr><td colspan="3" class="empty">Nenhuma loja</td></tr>');
-  $('#tabela-cad-users').innerHTML = '<tr><th>Nome</th><th>Função</th><th>Acesso</th></tr>' +
-    (state.usuarios.length ? state.usuarios.map(function(u){
-      return '<tr><td>'+esc(u.nome)+'</td><td>'+esc(FN_LABEL[u.funcao]||u.funcao)+'</td>'+
-        '<td><span class="pill '+(FN_ACESSO[u.funcao]==='Total'?'pill-green':FN_ACESSO[u.funcao]==='Kiosk'?'pill-slate':'pill-amber')+'">'+esc(FN_ACESSO[u.funcao]||'—')+'</span></td></tr>';
-    }).join('') : '<tr><td colspan="3" class="empty">Nenhum usuário</td></tr>');
+// ——— EXPORTAÇÃO DE DADOS ———
+function exportarTudo(){
+  return Promise.all([
+    getVendas(), getPedidos(), getAuditoria(), getParametros(), loadDespesas()
+  ]).catch(function(){});
 }
-$('#btn-go-lojas').addEventListener('click', function(){ goScreen('lojas'); });
-$('#btn-go-equipe').addEventListener('click', function(){ goScreen('equipe'); });
+function expTabela(headers, rows, emptyMsg){
+  if(!rows.length) return '<table><tr><td class="empty" style="padding:10px;">'+(emptyMsg||'Sem registros')+'</td></tr></table>';
+  return '<table><tr>'+headers.map(function(h){ return '<th style="text-align:left;padding:6px 10px;border-bottom:2px solid #ccc;background:#f1f1f1;">'+esc(h)+'</th>'; }).join('')+'</tr>'+
+    rows.map(function(r){
+      return '<tr>'+r.map(function(c){
+        return '<td style="padding:5px 10px;border-bottom:1px solid #eee;">'+c+'</td>';
+      }).join('')+'</tr>';
+    }).join('')+'</table>';
+}
+function exportarDados(){
+  exportarTudo().then(function(){
+    var params = state.parametros || {};
+    var vendas = state.vendasRaw || [];
+    var pedidos = state.pedidos || [];
+    var despesas = state.despesas || [];
+    var auditoria = state.auditoria || [];
+    var agora = new Date();
+    var pagos = pedidos.filter(function(p){ return p.status==='pago'||p.status==='impresso'; });
+    var receita = pagos.reduce(function(s,p){ return s+toNum(p.total); },0);
+    var totalDesp = despesas.reduce(function(s,d){ return s+toNum(d.valor); },0);
+
+    var html = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">'+
+      '<title>Maxx Foto — Exportação de dados</title>'+
+      '<style>body{font-family:Arial,sans-serif;font-size:13px;color:#222;margin:24px;}h1{font-size:20px;margin:0;}h2{font-size:15px;margin:26px 0 10px;border-bottom:2px solid #333;padding-bottom:4px;}'+
+      '.sub{color:#666;margin:4px 0 0;}table{border-collapse:collapse;width:100%;font-size:12px;}th{background:#ececec;}'+
+      '.resumo{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0;} .rs{background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px 14px;}'+
+      '.rs b{display:block;font-size:18px;} .rs span{font-size:11px;color:#666;}@media print{.no-print{display:none;}}</style></head><body>'+
+      '<div class="no-print" style="margin-bottom:14px;"><button onclick="window.print()" style="padding:8px 16px;">Imprimir / PDF</button></div>'+
+      '<h1>Maxx Foto — Natal 2026 · Exportação de dados</h1>'+
+      '<div class="sub">Gerado em '+fmtDt(agora.toISOString())+' · Portal maxxfoto.com.br/natalcontroler</div>'+
+      '<div class="resumo">'+
+      '<div class="rs"><b>'+fmtInt(state.lojas.length)+'</b><span>lojas cadastradas</span></div>'+
+      '<div class="rs"><b>'+fmtInt(state.usuarios.length)+'</b><span>operadores na equipe</span></div>'+
+      '<div class="rs"><b>'+fmtInt(vendas.length)+'</b><span>snapshots diários</span></div>'+
+      '<div class="rs"><b>'+fmtInt(pedidos.length)+'</b><span>pedidos consolidados</span></div>'+
+      '<div class="rs"><b>'+fmtBRL(receita)+'</b><span>receita (pedidos pago/impresso)</span></div>'+
+      '<div class="rs"><b>'+fmtBRL(totalDesp)+'</b><span>despesas lançadas</span></div>'+
+      '<div class="rs"><b>'+fmtInt(auditoria.length)+'</b><span>registros de auditoria</span></div>'+
+      '</div>';
+
+    html += '<h2>Lojas</h2>' + expTabela(
+      ['ID','Nome','PDV','Operadores','Emparelhado','Conexão','Status'],
+      state.lojas.map(function(l){
+        var qtd = state.usuarios.filter(function(u){ return u.lojaId===l.id; }).length;
+        return [ esc(l.id), esc(l.nome), esc(l.pdv||'—'), fmtInt(qtd),
+          (l.pareamento?esc(l.pareamento.pdvNome||'Sim'):'—'),
+          esc(l.ultimaConexao?conexaoDeltaMin(l.ultimaConexao):'Nunca'),
+          (l.ativo?'Ativa':'Inativa') ];
+      }));
+
+    html += '<h2>Equipe</h2>' + expTabela(
+      ['Nome','Usuário','Função','Acesso','Loja'],
+      state.usuarios.map(function(u){
+        var loja = state.lojas.find(function(l){ return l.id===u.lojaId; });
+        return [ esc(u.nome||'—'), esc(u.usuario||'—'), esc(FN_LABEL[u.funcao]||u.funcao||'—'),
+          esc(FN_ACESSO[u.funcao]||'—'), esc(loja?loja.nome:'—') ];
+      }), 'Nenhum usuário cadastrado');
+
+    html += '<h2>Vendas diárias (snapshot por loja)</h2>' + expTabela(
+      ['Data','Loja','PDV','Total','Pedidos','Dinheiro','Débito','Crédito','PIX'],
+      vendas.sort(function(a,b){ return String(b.data||'').localeCompare(String(a.data||'')); }).map(function(v){
+        var m = v.meios || {};
+        return [ esc(v.data||'—'), esc(v.lojaNome||v.lojaId||'—'), esc(v.pdvNome||'—'),
+          fmtBRL(toNum(v.totalVendido)), fmtInt(toNum(v.pedidos)),
+          fmtBRL(toNum(m.dinheiro)), fmtBRL(toNum(m.debito)), fmtBRL(toNum(m.credito)), fmtBRL(toNum(m.pix)) ];
+      }));
+
+    html += '<h2>Pedidos (consolidado dos PDVs)</h2>' + expTabela(
+      ['Nº','Quando','Loja','PDV','Operador','Total','Status'],
+      pedidos.sort(function(a,b){ return String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')); }).map(function(p){
+        return [ esc(p.numero||pedId(p)), fmtDt(p.criadoEm), esc(p.lojaNome||p.lojaId||'—'),
+          esc(p.pdvNome||'—'), esc(p.operador||'—'), fmtBRL(toNum(p.total)), esc(p.status||'—') ];
+      }));
+
+    html += '<h2>Despesas &amp; Taxas</h2>' + expTabela(
+      ['Data','Loja','Categoria','Descrição','Valor'],
+      despesas.sort(function(a,b){ return String(b.data||'').localeCompare(String(a.data||'')); }).map(function(d){
+        var loja = state.lojas.find(function(l){ return l.id===d.lojaId; });
+        return [ esc(d.data||'—'), esc(loja?loja.nome:(d.lojaId||'Geral')), esc(d.categoria||'—'),
+          esc(d.descricao||'—'), fmtBRL(toNum(d.valor)) ];
+      }));
+
+    html += '<h2>Auditoria</h2>' + expTabela(
+      ['Quando','Loja','Operador','Título','Motivo'],
+      auditoria.sort(function(a,b){ return String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')); }).map(function(u){
+        return [ fmtDt(u.criadoEm), esc(u.lojaNome||u.lojaId||'—'), esc(u.operador||'—'),
+          esc(u.titulo||'—'), esc(u.motivo||'—') ];
+      }));
+
+    html += '<h2>Parâmetros (DRE / estoque)</h2>' + expTabela(
+      ['Parâmetro','Valor'],
+      [
+        ['Custo de ribbon (por unidade)', fmtBRL(toNum(params.custoRibbonUnitario))],
+        ['Comissão vendedora', toNum(params.comissaoVendedor)+'%'],
+        ['Comissão fotógrafo', toNum(params.comissaoFotografo)+'%'],
+        ['Ribbon crítico (un.)', fmtInt(toNum(params.ribbonCritico))]
+      ]);
+
+    html += '</body></html>';
+
+    var blob = new Blob([html], { type:'text/html;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'maxx-dados-'+dayStr(agora)+'.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    toast('Relatório exportado');
+  });
+}
+function exportarJSON(){
+  exportarTudo().then(function(){
+    var agora = new Date();
+    var payload = {
+      exportadoEm: agora.toISOString(),
+      lojas: state.lojas,
+      usuarios: state.usuarios,
+      vendas: state.vendasRaw,
+      pedidos: state.pedidos,
+      despesas: state.despesas,
+      auditoria: state.auditoria,
+      parametros: state.parametros
+    };
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'maxx-dados-'+dayStr(agora)+'.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    toast('Backup exportado');
+  });
+}
+$('#btn-exportar-relatorio').addEventListener('click', exportarDados);
+$('#btn-exportar-json').addEventListener('click', exportarJSON);
 
 // ——— CATÁLOGO DE PRODUTOS (preços por loja) ———
 var PRODUTOS_PRECO = [
