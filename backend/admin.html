@@ -343,7 +343,6 @@ select.form-input{appearance:none;}
     <div class="sb-section">Operação</div>
     <div class="sb-item active" data-screen="dashboard"><span class="ico">🏠</span> Dashboard</div>
     <div class="sb-item" data-screen="lojas"><span class="ico">🏪</span> Lojas <span class="badge" id="lojas-badge">0</span></div>
-    <div class="sb-item" data-screen="vendas"><span class="ico">📈</span> Vendas &amp; BI</div>
     <div class="sb-item" data-screen="financeiro"><span class="ico">💰</span> Financeiro</div>
     <div class="sb-item" data-screen="despesas"><span class="ico">💸</span> Despesas &amp; Taxas</div>
     <div class="sb-item" data-screen="fluxo"><span class="ico">💧</span> Fluxo de Caixa</div>
@@ -386,8 +385,13 @@ select.form-input{appearance:none;}
     <!-- ====== DASHBOARD ====== -->
     <div class="screen active" id="screen-dashboard">
       <div class="section-head">
-        <div><h2>Dashboard</h2><p>Status da rede de kiosks · cadastro e operadores</p></div>
-        <div class="live-badge"><span class="live-dot"></span>Ao vivo — atualizado ao abrir</div>
+        <div><h2>Dashboard</h2><p>Status da rede de kiosks · cadastro, vendas e operadores</p></div>
+        <div class="period-tabs" id="dash-periodo">
+          <button class="period-tab active" data-period="hoje">Hoje</button>
+          <button class="period-tab" data-period="7d">7 dias</button>
+          <button class="period-tab" data-period="mes">Este mês</button>
+          <button class="period-tab" data-period="temporada">Temporada</button>
+        </div>
       </div>
       <div class="kpi-grid" id="dash-kpis"></div>
       <div class="section-head"><div>
@@ -395,15 +399,18 @@ select.form-input{appearance:none;}
         <p>Verde = ativa (aparece no login do kiosk) · Vermelho = inativa</p>
       </div></div>
       <div class="store-grid" id="dash-stores"></div>
-      <div class="grid2">
-        <div class="card">
-          <h3>Alertas do sistema</h3>
-          <div class="alert-list" id="dash-alerts"></div>
+      <div class="card">
+        <h3>Formas de pagamento — período (rede toda)</h3>
+        <div class="donut-row">
+          <svg id="donut-pagamento" width="90" height="90" viewBox="0 0 90 90"></svg>
+          <div class="donut-legend" id="donut-pagamento-legend"></div>
         </div>
-        <div class="card">
-          <h3>Equipe por loja</h3>
-          <table id="dash-equipe"></table>
-        </div>
+        <div class="grid4-pay" id="dash-pagamentos"></div>
+        <div id="dash-pag-rodape" style="font-size:11px;color:var(--slate-500);margin-top:12px;"></div>
+      </div>
+      <div class="card">
+        <h3>Vendas por loja — período</h3>
+        <table id="dash-tabela-vendas"></table>
       </div>
     </div>
 
@@ -475,48 +482,6 @@ select.form-input{appearance:none;}
     </div>
 
   <!-- ====== VENDAS & BI ====== -->
-    <div class="screen" id="screen-vendas">
-      <div class="section-head">
-        <div>
-          <h2>Vendas &amp; Business Intelligence</h2>
-          <p>Consolidado dos snapshots diários de vendas enviados pelos kiosks (por loja)</p>
-        </div>
-        <div class="period-tabs" id="vendas-periodo">
-          <button class="period-tab active" data-period="hoje">Hoje</button>
-          <button class="period-tab" data-period="7d">7 dias</button>
-          <button class="period-tab" data-period="mes">Este mês</button>
-          <button class="period-tab" data-period="temporada">Temporada</button>
-        </div>
-      </div>
-
-      <div class="kpi-grid" id="vendas-kpis"></div>
-
-      <div class="grid2">
-        <div class="card">
-          <h3>Vendas por dia — período selecionado</h3>
-          <div class="bar-chart" id="chart-vendas-diarias"></div>
-        </div>
-        <div class="card">
-          <h3>Formas de pagamento — período (rede toda)</h3>
-          <div class="donut-row">
-            <svg id="donut-pagamento" width="90" height="90" viewBox="0 0 90 90"></svg>
-            <div class="donut-legend" id="donut-pagamento-legend"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Total por forma de pagamento — período</h3>
-        <div class="grid4-pay" id="vendas-pagamentos"></div>
-        <div id="vendas-total-rodape" style="font-size:11px;color:var(--slate-500);margin-top:12px;"></div>
-      </div>
-
-      <div class="card">
-        <h3>Vendas por loja — período</h3>
-        <table id="tabela-vendas"></table>
-      </div>
-    </div>
-
     <!-- ====== FINANCEIRO ====== -->
     <div class="screen" id="screen-financeiro">
       <div class="section-head">
@@ -858,7 +823,7 @@ function healthPing(){
 var titles = {
   dashboard:'Dashboard', lojas:'Lojas', equipe:'Colaboradores', ranking:'Ranking',
   config:'Configurações', cadastros:'Cadastros', precos:'Catálogo de produtos',
-  vendas:'Vendas & BI', financeiro:'Financeiro', fluxo:'Fluxo de Caixa',
+  financeiro:'Financeiro', fluxo:'Fluxo de Caixa',
   despesas:'Despesas & Taxas', estoque:'Estoque',
   pedidos:'Pedidos', auditoria:'Auditoria'
 };
@@ -884,7 +849,6 @@ function goScreen(name){
   if(name==='config') renderConfig();
   if(name==='cadastros') renderCadastros();
   if(name==='precos') renderPrecos();
-  if(name==='vendas') renderVendas();
   if(name==='financeiro') renderFinanc();
   if(name==='fluxo') renderFluxo();
   if(name==='despesas') renderDespesas();
@@ -996,13 +960,7 @@ function renderDashboard(){
   var onlineCount = ativas.filter(function(l){ return l.online; }).length;
   var porFuncao = function(f){ return users.filter(function(u){ return u.funcao===f && u.ativo; }).length; };
 
-  $('#dash-kpis').innerHTML =
-    kpi('Lojas cadastradas', state.lojas.length, ativas.length+' ativas · '+onlineCount+' online', onlineCount?'ok':'alert') +
-    kpi('Operadores', users.filter(function(u){return u.ativo;}).length, users.length+' cadastrados', 'ok') +
-    kpi('Vendedoras', porFuncao('vendedor'), 'logam no kiosk', 'ok') +
-    kpi('Fotógrafos', porFuncao('fotografo'), 'equipe de produção', 'ok') +
-    kpi('Gestão', porFuncao('admin')+porFuncao('gerente'), 'acessam este portal', 'ok') +
-    kpi('Lojas inativas', lojas.length-ativas.length, 'não aparecem no login', (lojas.length-ativas.length)?'alert':'ok');
+  $('#dash-kpis').innerHTML = baseKpisHTML(lojas, users, ativas, onlineCount, porFuncao);
 
   $('#dash-stores').innerHTML = lojas.length ? lojas.map(function(l){
     var qtd = users.filter(function(u){ return u.lojaId===l.id; }).length;
@@ -1015,35 +973,19 @@ function renderDashboard(){
       '</div>';
   }).join('') : '<div class="card"><div class="empty">Nenhuma loja cadastrada ainda.</div></div>';
 
-  var alerts = [];
-  if(!lojas.length) alerts.push(alertItem('🏪','info','Nenhuma loja cadastrada','Crie sua primeira loja em Lojas.'));
-  if(!users.filter(function(u){return u.ativo;}).length) alerts.push(alertItem('👥','warn','Nenhum operador','Os kiosks não terão ninguém para logar.'));
-  lojas.forEach(function(l){
-    var eq = users.filter(function(u){ return u.lojaId===l.id && u.ativo; });
-    if(l.ativo && !eq.length) alerts.push(alertItem('⚠️','warn','Loja sem equipe', esc(l.nome)+' está ativa mas não tem operadores cadastrados.'));
-  });
-  if(!alerts.length) alerts.push(alertItem('✅','info','Sistema operacional','Nenhum alerta no momento.'));
-  $('#dash-alerts').innerHTML = alerts.slice(0,5).join('');
-
-  $('#dash-equipe').innerHTML = '<tr><th>Loja</th><th>Vendedoras</th><th>Fotógrafos</th><th>Gestão</th></tr>' +
-    (lojas.length ? lojas.map(function(l){
-      var eq = users.filter(function(u){ return u.lojaId===l.id; });
-      return '<tr><td>'+esc(l.nome)+'</td>'+
-        '<td>'+eq.filter(function(u){return u.funcao==='vendedor';}).length+'</td>'+
-        '<td>'+eq.filter(function(u){return u.funcao==='fotografo';}).length+'</td>'+
-        '<td>'+eq.filter(function(u){return u.funcao==='admin'||u.funcao==='gerente';}).length+'</td></tr>';
-    }).join('') : '<tr><td colspan="4" class="empty">Sem lojas</td></tr>');
-
   renderDashSales();
+}
+function baseKpisHTML(lojas, users, ativas, onlineCount, porFuncao){
+  return kpi('Lojas cadastradas', state.lojas.length, ativas.length+' ativas · '+onlineCount+' online', onlineCount?'ok':'alert') +
+    kpi('Operadores', users.filter(function(u){return u.ativo;}).length, users.length+' cadastrados', 'ok') +
+    kpi('Vendedoras', porFuncao('vendedor'), 'logam no kiosk', 'ok') +
+    kpi('Fotógrafos', porFuncao('fotografo'), 'equipe de produção', 'ok') +
+    kpi('Gestão', porFuncao('admin')+porFuncao('gerente'), 'acessam este portal', 'ok') +
+    kpi('Lojas inativas', lojas.length-ativas.length, 'não aparecem no login', (lojas.length-ativas.length)?'alert':'ok');
 }
 function kpi(label, val, sub, cls){
   return '<div class="kpi"><div class="k-label">'+esc(label)+'</div><div class="k-val">'+val+'</div>'+
     '<div class="k-sub">'+esc(sub)+'</div><div class="k-delta '+(cls==='ok'?'ok':'alert')+'"></div></div>';
-}
-function alertItem(ico, tipo, titulo, sub, tempo){
-  return '<div class="alert-item '+tipo+'"><span class="alert-ico">'+ico+'</span>'+
-    '<div class="alert-body"><div class="a-title">'+esc(titulo)+'</div><div class="a-sub">'+esc(sub)+'</div></div>'+
-    '<span class="alert-time">'+esc(tempo||'agora')+'</span></div>';
 }
 
 // ——— VENDAS & BI ———
@@ -1176,152 +1118,117 @@ function typeVal(v, period){
   var m = { hoje:'hoje', '7d':'7 dias', mes:'este mês', temporada:'período' };
   return m[period] || 'período';
 }
-async function renderVendas(){
-  var raw = await getVendas();
-  var period = state.vendasPeriod;
-  var cut = periodCutoff(period);
-  var rows = raw.filter(function(v){
-    return cut ? ((v.data||'') >= dayStr(cut)) : true;
-  });
-  var a = aggVendas(rows);
-  var label = typeVal(null, period);
 
-  // ——— KPI ———
-  var ticket = a.pedidos ? a.total/a.pedidos : 0;
-  var conv = a.sc ? (a.sv/a.sc*100) : 0;
-  $('#vendas-kpis').innerHTML =
-    kpi('Receita ('+label+')', fmtBRL(a.total), a.pedidos+' pedido(s)', a.pedidos?'ok':'alert') +
-    kpi('Pedidos ('+label+')', fmtInt(a.pedidos), 'pagamentos registrados no PDV', 'ok') +
-    kpi('Ticket médio', fmtBRL(ticket), 'receita ÷ pedidos', a.pedidos?'ok':'alert') +
-    kpi('Conversão de sessões', a.sc?conv.toFixed(1)+'%':'—', a.sv+' vendidas de '+a.sc+' sessões criadas', a.sc?'ok':'alert') +
-    kpi('Taxa de combo', a.tcn?(a.tc/a.tcn).toFixed(0)+'%':'—', 'média dos snapshots do período', a.tcn?'ok':'alert');
-
-  // ——— Gráfico de vendas por dia ———
-  var ch = $('#chart-vendas-diarias');
-  var byDay = {};
-  rows.forEach(function(v){ byDay[v.data||''] = (byDay[v.data||'']||0) + toNum(v.totalVendido); });
-  var days = [];
-  if(cut){
-    var hoje = dayStr(new Date());
-    var cur = new Date(cut.getTime());
-    while(dayStr(cur) <= hoje){
-      days.push(dayStr(cur));
-      cur = new Date(cur.getTime() + 86400000);
-    }
-  } else {
-    days = Object.keys(byDay).sort();
-  }
-  var hoje = dayStr(new Date());
-  if(days.length){
-    var max = Math.max.apply(null, days.map(function(d){ return byDay[d]||0; })) || 1;
-    ch.innerHTML = days.map(function(d){
-      var val = byDay[d]||0;
-      var h = val ? Math.max(6, Math.round((val/max)*78)) : 3;
-      return '<div class="bar-col"><div class="bar'+(d===hoje?' today':(val?'':' empty'))+'" style="height:'+h+'px;'+(d===hoje?'':' ')+'"></div>'+
-        '<div class="blabel">'+d.slice(8,10)+'/'+d.slice(5,7)+'</div></div>';
-    }).join('');
-  } else {
-    ch.innerHTML = '<div class="empty" style="width:100%;">Sem vendas no período — os kiosks enviam o snapshot diário automaticamente.</div>';
-  }
-
-  // ——— Donut de formas de pagamento ———
-  var pmtTotal = PAY_META.reduce(function(s,pm){ return s + a.meios[pm.k]; }, 0);
-  var svg = $('#donut-pagamento');
-  var legend = $('#donut-pagamento-legend');
-  if(pmtTotal > 0){
-    var C = 2*Math.PI*36;
-    var acc = 0;
-    var segs = [];
-    var legendHtml = '';
-    PAY_META.forEach(function(pm, i){
-      var frac = a.meios[pm.k]/pmtTotal;
-      var colors = ['#d4a24c','#4fae7f','#6b9ab4','#e8a83c'];
-      segs.push('<circle cx="45" cy="45" r="36" fill="none" stroke="'+colors[i]+'" stroke-width="13" '+
-        'stroke-dasharray="'+(frac*C)+' '+(C - frac*C)+'" stroke-dashoffset="'+(25 - acc*C)+'" stroke-linecap="round"/>');
-      acc += frac;
-      legendHtml += '<div class="donut-item"><span class="donut-dot" style="background:'+colors[i]+'"></span>'+
-        esc(pm.label)+' — <b>'+(frac*100).toFixed(0)+'%</b> ('+fmtBRL(a.meios[pm.k])+')</div>';
-    });
-    svg.innerHTML = '<circle cx="45" cy="45" r="36" fill="none" stroke="var(--navy-800)" stroke-width="13"/>' + segs.join('');
-    legend.innerHTML = legendHtml;
-  } else {
-    svg.innerHTML = '';
-    legend.innerHTML = '<div style="color:var(--slate-500);font-style:italic;font-size:12px;">Sem pagamentos no período.</div>';
-  }
-
-  // ——— Totais por forma ———
-  var tot = 0;
-  $('#vendas-pagamentos').innerHTML = PAY_META.map(function(pm){
-    var v = a.meios[pm.k];
-    tot += v;
-    var pct = pmtTotal ? (v/pmtTotal*100).toFixed(1) : '0,0';
-    return '<div class="pay-total-box"><div class="pt-ico">'+pm.ico+'</div>'+
-      '<div class="pt-label">'+pm.label+'</div><div class="pt-val">'+fmtBRL(v)+'</div>'+
-      '<div class="pt-pct">'+pct+'% do período</div></div>';
-  }).join('');
-  $('#vendas-total-rodape').textContent = 'Total do período: '+fmtBRL(tot)+' · '+
-    (rows.length ? rows.length+' snapshot(s) de '+(Array.from ? new Set(rows.map(function(r){return r.lojaId;})).size : 0)+' loja(s)' : 'nenhum snapshot enviado ainda');
-
-  // ——— Tabela por loja ———
-  var porLoja = {};
-  rows.forEach(function(v){
-    var key = v.lojaId || v.lojaNome || '?';
-    var L = porLoja[key] = porLoja[key] || { lojaId:v.lojaId, nome:v.lojaNome||key, pdv:v.pdvNome||'—', total:0, pedidos:0, sc:0, sv:0, tc:0, tcn:0, ultima:null };
-    L.total += toNum(v.totalVendido);
-    L.pedidos += toNum(v.pedidos);
-    L.sc += toNum(v.sessoesCriadas);
-    L.sv += toNum(v.sessoesVendidas);
-    var tc = toNum(v.taxacombo);
-    if(tc > 0){ L.tc += tc; L.tcn++; }
-    var uv = v.ultimaVenda || v.enviadoEm;
-    if(uv && (!L.ultima || uv > L.ultima)) L.ultima = uv;
-  });
-  var lojas = Object.keys(porLoja).map(function(k){ return porLoja[k]; })
-    .sort(function(x,y){ return y.total - x.total; });
-  var tb = $('#tabela-vendas');
-  if(lojas.length){
-    tb.innerHTML =
-      '<tr><th>Loja</th><th>PDV</th><th>Receita</th><th>Pedidos</th><th>Ticket médio</th><th>Taxa combo</th><th>Conv. sessão</th><th>Última atividade</th></tr>' +
-      lojas.map(function(l){
-        var tic = l.pedidos ? l.total/l.pedidos : 0;
-        var cv = l.sc ? (l.sv/l.sc*100).toFixed(0)+'%' : '—';
-        var tc = l.tcn ? (l.tc/l.tcn).toFixed(0)+'%' : '—';
-        var ua = l.ultima ? (function(){
-          var dt = new Date(l.ultima);
-          return isNaN(dt) ? l.ultima : dt.toLocaleDateString('pt-BR')+' '+dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-        })() : '—';
-        return '<tr><td><b>'+esc(l.nome)+'</b></td><td>'+esc(l.pdv)+'</td>'+
-          '<td>'+fmtBRL(l.total)+'</td><td>'+fmtInt(l.pedidos)+'</td><td>'+fmtBRL(tic)+'</td>'+
-          '<td>'+tc+'</td><td>'+cv+'</td><td style="color:var(--slate-400);font-size:11px;">'+esc(ua)+'</td></tr>';
-      }).join('');
-  } else {
-    tb.innerHTML = '<tr><td class="empty" colspan="8">Nenhum snapshot de vendas no período. Assim que um kiosk emparelhado registrar vendas, elas aparecem aqui automaticamente (o PDV envia o resumo a cada 5 min e a cada venda).</td></tr>';
-  }
-}
-$$('#vendas-periodo .period-tab').forEach(function(btn){
-  btn.addEventListener('click', function(){
-    $$('#vendas-periodo .period-tab').forEach(function(b){ b.classList.toggle('active', b===btn); });
-    state.vendasPeriod = btn.dataset.period;
-    renderVendas();
-  });
-});
-
-// ——— DASHBOARD → vendas de hoje ———
+// ——— DASHBOARD → vendas + pagamentos + lojas ———
 function renderDashSales(){
   var el = $('#dash-kpis');
-  if(!el || el._incVendas) return;
+  if(!el) return;
+  var lojas = state.lojas;
+  var users = state.usuarios;
+  var ativas = lojas.filter(function(l){ return l.ativo; });
+  var onlineCount = ativas.filter(function(l){ return l.online; }).length;
+  var porFuncao = function(f){ return users.filter(function(u){ return u.funcao===f && u.ativo; }).length; };
   getVendas().then(function(){
-    var hoje = dayStr(new Date());
-    var rows = state.vendasRaw.filter(function(v){ return v.data===hoje; });
+    var period = state.vendasPeriod;
+    var cut = periodCutoff(period);
+    var rows = state.vendasRaw.filter(function(v){
+      return cut ? ((v.data||'') >= dayStr(cut)) : true;
+    });
     var a = aggVendas(rows);
+    var label = typeVal(null, period);
+
+    // ——— KPIs (base + vendas) ———
     var ticket = a.pedidos ? a.total/a.pedidos : 0;
-    if(el._incVendas) return;
-    el._incVendas = true;
-    el.innerHTML +=
-      kpi('Vendas hoje', fmtBRL(a.total), a.pedidos+' pedido(s) · ticket '+fmtBRL(ticket), a.pedidos?'ok':'alert') +
-      kpi('Sessões hoje', a.sc, a.sv+' vendidas ('+(a.sc?(a.sv/a.sc*100).toFixed(0):0)+'% conv.)', a.sc?'ok':'alert');
+    var conv = a.sc ? (a.sv/a.sc*100) : 0;
+    el.innerHTML = baseKpisHTML(lojas, users, ativas, onlineCount, porFuncao) +
+      kpi('Receita ('+label+')', fmtBRL(a.total), a.pedidos+' pedido(s)', a.pedidos?'ok':'alert') +
+      kpi('Pedidos ('+label+')', fmtInt(a.pedidos), 'pagamentos registrados no PDV', 'ok') +
+      kpi('Ticket médio', fmtBRL(ticket), 'receita ÷ pedidos', a.pedidos?'ok':'alert') +
+      kpi('Conversão de sessões', a.sc?conv.toFixed(1)+'%':'—', a.sv+' vendidas de '+a.sc+' sessões criadas', a.sc?'ok':'alert') +
+      kpi('Taxa de combo', a.tcn?(a.tc/a.tcn).toFixed(0)+'%':'—', 'média dos snapshots do período', a.tcn?'ok':'alert');
+
+    // ——— Donut de formas de pagamento ———
+    var pmtTotal = PAY_META.reduce(function(s,pm){ return s + a.meios[pm.k]; }, 0);
+    var svg = $('#donut-pagamento');
+    var legend = $('#donut-pagamento-legend');
+    if(pmtTotal > 0){
+      var C = 2*Math.PI*36;
+      var acc = 0;
+      var segs = [];
+      var legendHtml = '';
+      PAY_META.forEach(function(pm, i){
+        var frac = a.meios[pm.k]/pmtTotal;
+        var colors = ['#d4a24c','#4fae7f','#6b9ab4','#e8a83c'];
+        segs.push('<circle cx="45" cy="45" r="36" fill="none" stroke="'+colors[i]+'" stroke-width="13" '+
+          'stroke-dasharray="'+(frac*C)+' '+(C - frac*C)+'" stroke-dashoffset="'+(25 - acc*C)+'" stroke-linecap="round"/>');
+        acc += frac;
+        legendHtml += '<div class="donut-item"><span class="donut-dot" style="background:'+colors[i]+'"></span>'+
+          esc(pm.label)+' — <b>'+(frac*100).toFixed(0)+'%</b> ('+fmtBRL(a.meios[pm.k])+')</div>';
+      });
+      svg.innerHTML = '<circle cx="45" cy="45" r="36" fill="none" stroke="var(--navy-800)" stroke-width="13"/>' + segs.join('');
+      legend.innerHTML = legendHtml;
+    } else {
+      svg.innerHTML = '';
+      legend.innerHTML = '<div style="color:var(--slate-500);font-style:italic;font-size:12px;">Sem pagamentos no período.</div>';
+    }
+
+    // ——— Totais por forma ———
+    var tot = 0;
+    $('#dash-pagamentos').innerHTML = PAY_META.map(function(pm){
+      var v = a.meios[pm.k];
+      tot += v;
+      var pct = pmtTotal ? (v/pmtTotal*100).toFixed(1) : '0,0';
+      return '<div class="pay-total-box"><div class="pt-ico">'+pm.ico+'</div>'+
+        '<div class="pt-label">'+pm.label+'</div><div class="pt-val">'+fmtBRL(v)+'</div>'+
+        '<div class="pt-pct">'+pct+'% do período</div></div>';
+    }).join('');
+    $('#dash-pag-rodape').textContent = 'Total do período: '+fmtBRL(tot)+' · '+
+      (rows.length ? rows.length+' snapshot(s) de '+(Array.from ? new Set(rows.map(function(r){return r.lojaId;})).size : 0)+' loja(s)' : 'nenhum snapshot enviado ainda');
+
+    // ——— Tabela por loja ———
+    var porLoja = {};
+    rows.forEach(function(v){
+      var key = v.lojaId || v.lojaNome || '?';
+      var L = porLoja[key] = porLoja[key] || { lojaId:v.lojaId, nome:v.lojaNome||key, pdv:v.pdvNome||'—', total:0, pedidos:0, sc:0, sv:0, tc:0, tcn:0, ultima:null };
+      L.total += toNum(v.totalVendido);
+      L.pedidos += toNum(v.pedidos);
+      L.sc += toNum(v.sessoesCriadas);
+      L.sv += toNum(v.sessoesVendidas);
+      var tc = toNum(v.taxacombo);
+      if(tc > 0){ L.tc += tc; L.tcn++; }
+      var uv = v.ultimaVenda || v.enviadoEm;
+      if(uv && (!L.ultima || uv > L.ultima)) L.ultima = uv;
+    });
+    var lojas = Object.keys(porLoja).map(function(k){ return porLoja[k]; })
+      .sort(function(x,y){ return y.total - x.total; });
+    var tb = $('#dash-tabela-vendas');
+    if(lojas.length){
+      tb.innerHTML =
+        '<tr><th>Loja</th><th>PDV</th><th>Receita</th><th>Pedidos</th><th>Ticket médio</th><th>Taxa combo</th><th>Conv. sessão</th><th>Última atividade</th></tr>' +
+        lojas.map(function(l){
+          var tic = l.pedidos ? l.total/l.pedidos : 0;
+          var cv = l.sc ? (l.sv/l.sc*100).toFixed(0)+'%' : '—';
+          var tc = l.tcn ? (l.tc/l.tcn).toFixed(0)+'%' : '—';
+          var ua = l.ultima ? (function(){
+            var dt = new Date(l.ultima);
+            return isNaN(dt) ? l.ultima : dt.toLocaleDateString('pt-BR')+' '+dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+          })() : '—';
+          return '<tr><td><b>'+esc(l.nome)+'</b></td><td>'+esc(l.pdv)+'</td>'+
+            '<td>'+fmtBRL(l.total)+'</td><td>'+fmtInt(l.pedidos)+'</td><td>'+fmtBRL(tic)+'</td>'+
+            '<td>'+tc+'</td><td>'+cv+'</td><td style="color:var(--slate-400);font-size:11px;">'+esc(ua)+'</td></tr>';
+        }).join('');
+    } else {
+      tb.innerHTML = '<tr><td class="empty" colspan="8">Nenhum snapshot de vendas no período. Assim que um kiosk emparelhado registrar vendas, elas aparecem aqui automaticamente (o PDV envia o resumo a cada 5 min e a cada venda).</td></tr>';
+    }
   });
 }
+$$('#dash-periodo .period-tab').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    $$('#dash-periodo .period-tab').forEach(function(b){ b.classList.toggle('active', b===btn); });
+    state.vendasPeriod = btn.dataset.period;
+    renderDashSales();
+  });
+});
 
 // ——— HELPERS DE AGRUPAMENTO (Financeiro / Fluxo de Caixa) ———
 function aggPorLoja(rows){
