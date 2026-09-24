@@ -13,14 +13,24 @@ export default function LoginScreen({ onLogin, showToast }) {
   const [full, setFull] = useState(false);
   const [kioskPar, setKioskPar] = useState(() => (typeof window !== 'undefined' ? window.kioskPair : null) || null);
   const [kioskCode, setKioskCode] = useState('');
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     garantirIdentidade().then((ident) => {
       if (ident && ident.kioskCode) setKioskCode(formatarCodigoKiosk(ident.kioskCode));
     }).catch(() => {});
     const onPair = () => setKioskPar(window.kioskPair || null);
+    const reload = () => setTick((t) => t + 1);
     window.addEventListener('kiosk:pair', onPair);
-    return () => window.removeEventListener('kiosk:pair', onPair);
+    // Equipe/preços chegam do portal no boot e a cada emparelhamento (App.jsx) —
+    // força re-render para a lista de usuários/cards refletir.
+    window.addEventListener('equipe:atualizado', reload);
+    window.addEventListener('precos:atualizado', reload);
+    return () => {
+      window.removeEventListener('kiosk:pair', onPair);
+      window.removeEventListener('equipe:atualizado', reload);
+      window.removeEventListener('precos:atualizado', reload);
+    };
   }, []);
 
   const toggleFullscreen = () => {

@@ -32,6 +32,52 @@
     --radius-lg:16px;
     --shadow-lift:0 12px 30px rgba(0,0,0,.35);
   }
+  /* ── Tema claro: sobrescreve a paleta. navy-950 continua escuro (é a "tinta"
+     usada em botões dourados); as superfícies viraram claras. ── */
+  html[data-theme="light"]{
+    --navy-900:#eef1f7;
+    --navy-850:#e1e8f1;
+    --navy-800:#ffffff;
+    --navy-700:#d2dce8;
+    --navy-line:#c4d0de;
+    --gold-500:#b8801f;
+    --gold-400:#c4912f;
+    --gold-300:#a4741d;
+    --gold-050:#7c5c16;
+    --cream-100:#1f2836;
+    --slate-300:#5b6a7d;
+    --slate-400:#45546a;
+    --slate-500:#7a8aa0;
+    --green-500:#3c9a6f;
+    --green-300:#2c8a63;
+    --amber-500:#a8741c;
+    --red-400:#b3453f;
+    --blue-400:#5b86b8;
+    --shadow-lift:0 12px 30px rgba(18,32,52,.18);
+  }
+  html[data-theme="light"] body{background:#e8edf5;}
+  html[data-theme="light"] .login-overlay{
+    background:
+      radial-gradient(circle at 30% 20%, rgba(212,162,76,.10), transparent 45%),
+      radial-gradient(circle at 75% 80%, rgba(108,155,209,.08), transparent 40%),
+      #e8edf5;
+  }
+  html[data-theme="light"] .idle-area{
+    background:
+      radial-gradient(circle at 30% 20%, rgba(212,162,76,.08), transparent 45%),
+      radial-gradient(circle at 75% 80%, rgba(108,155,209,.07), transparent 40%),
+      #e8edf5;
+  }
+  /* recebido/recibo segue "papel" claro, e o botão dourado da ASK-400 continua claro */
+  html[data-theme="light"] .receipt{background:#fff;}
+  html[data-theme="light"] .caixa-fechado-destaque{color:#b3453f;}
+  html[data-theme="light"] .ribbon-banner{color:var(--red-400);}
+  html[data-theme="light"] .op-chip.ribbon-alert .rb-p .rb-n{color:var(--amber-500);}
+  /* campos do modal ⚙ têm fundo navy-950 no default (inline) → senão ficariam escuros no claro */
+  html[data-theme="light"] #cfg-folder,
+  html[data-theme="light"] #cfg-logo{background:#fff !important;color:var(--cream-100) !important;}
+  /* botão dourado da ASK-400 (gradiente claro no default, não pode escurecer junto com o gold) */
+  html[data-theme="light"] #btn-print-fotos{background:linear-gradient(135deg,#e8c787,#f7ecd4) !important;color:var(--navy-950) !important;}
   *{box-sizing:border-box;}
   html,body{height:100%;}
   body{
@@ -764,6 +810,7 @@
     color:var(--navy-950);font-weight:800;font-size:14px;
   }
   .btn-primary:disabled{opacity:.3;cursor:not-allowed;}
+  .btn-primary.resumo-action{margin-top:10px;}
   .btn-secondary{
     width:100%;padding:11px;border-radius:10px;margin-top:10px;
     background:none;border:1px solid var(--navy-line);color:var(--slate-300);font-size:13px;
@@ -816,6 +863,7 @@
   }
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 </style>
+<script>try{if(localStorage.getItem('natal-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch{}</script>
 </head>
 <body>
 
@@ -861,6 +909,7 @@
     <div class="op-chip" id="ribbon-chip">🖨️ Ribbon: — un.</div>
     <button class="op-chip op-chip-btn" id="user-chip">👤 —</button>
     <button class="op-chip op-chip-btn" id="btn-config" title="Configurações">⚙</button>
+    <button class="op-chip op-chip-btn" id="btn-tema" title="Alternar tema claro/escuro">🌗</button>
     <button class="op-chip op-chip-btn" id="btn-fullscreen" title="Sair da tela cheia">⛶</button>
     <div class="clock" id="clock">--:--:--</div>
   </div>
@@ -1331,6 +1380,11 @@ function mapearPedido(p){
   const horario = new Date(p.criadoEm);
   const sessaoId = p.sessaoId || null;
   const senhaSessao = sessaoId ? numeroSessao(sessaoId) : '—';
+  // Multi-sessão: o sidecar guarda TODAS as sessões do pedido (sessoes). Usa
+  // essa lista na hora de montar o push; o campo sessaoId continua sendo a 1ª.
+  const sessoesOrigem = (Array.isArray(p.sessoes) && p.sessoes.length)
+    ? p.sessoes.map(s => ({ id: s.id, senha: numeroSessao(s.id) }))
+    : (sessaoId ? [{ id: sessaoId, senha: senhaSessao }] : []);
   const itens = [
     ...(p.itens || []).map(it => ({
       cartId: 'ped-f-' + p.id + '-' + (it.filename || '') + '-' + it.key,
@@ -1353,9 +1407,9 @@ function mapearPedido(p){
     _realId: p.id, numero: p.numero, horario,
     pagoEm: p.pagoEm ? new Date(p.pagoEm) : null,
     desconto: (p.desconto && Number(p.desconto.valor) > 0)
-      ? { nome: p.desconto.nome || 'Desconto', valor: Number(p.desconto.valor) }
+      ? { nome: p.desconto.nome || 'Desconto', valor: Number(p.desconto.valor), tipo: p.desconto.tipo || 'manual' }
       : null,
-    sessoes: sessaoId ? [{ id: sessaoId, senha: senhaSessao }] : [],
+    sessoes: sessoesOrigem,
     itens, total: p.total || 0,
     pagamentosEfetivos: (p.pagamentos || []).map(pg => ({
       forma: formaDeMeio(pg.meio, pg.parcelas), valor: pg.valor || 0, meio: pg.meio, parcelas: pg.parcelas,
@@ -1364,6 +1418,8 @@ function mapearPedido(p){
       : (p.status === 'CANCELADO' ? 'cancelado' : String(p.status || 'pago').toLowerCase()),
     operador: p.operador || '—',
     origemPedidoId: p.origemPedidoId || null,
+    guiaImpressa: !!p.guiaImpressa,
+    canceladoEm: p.canceladoEm ? new Date(p.canceladoEm) : null,
   };
 }
 
@@ -1437,6 +1493,7 @@ async function carregarCaixasHistorico(){
 /* funcao que o portal devolve (lowercase) -> rótulo exibido no PDV */
 const FUNCAO_EXIBICAO = {
   admin:     { funcao: 'Administrador', isAdmin: true  },
+  gerente:   { funcao: 'Gerente',       isAdmin: true  },
   vendedor:  { funcao: 'Vendedora',     isAdmin: false },
   vendedora: { funcao: 'Vendedora',     isAdmin: false },
   fotografo: { funcao: 'Fotógrafo',     isAdmin: false },
@@ -1615,8 +1672,12 @@ async function enviarSnapshotVendas(){
   }));
   const sessoesHoje = sessions.filter(s => s.data === hojeIso);
   const vendidasHoje = sessoesHoje.filter(s => ['VENDIDA', 'FINALIZADA'].includes(s.estado)).length;
-  const comExtra = pagos.filter(p => (p.itens || []).some(i => i.tipo === 'extra')).length;
-  const ultima = pagos.length ? pagos.reduce((a, b) => (a.horario > b.horario ? a : b)).horario : null;
+  const comCombo = pagos.filter(p => p.desconto && p.desconto.tipo === 'combo').length;
+  // Última venda do dia usa a hora REAL do pagamento (pagoEm); o horario (criação)
+  // só serve de fallback quando o sidecar ainda não gravou o pagoEm.
+  const instantePagamento = p => (p.pagoEm instanceof Date && !isNaN(p.pagoEm)) ? p.pagoEm : p.horario;
+  const ultima = pagos.length ? pagos.reduce((a, b) => (instantePagamento(b) > instantePagamento(a) ? b : a)) : null;
+  const ultimaHora = ultima ? instantePagamento(ultima) : null;
   const snap = {
     lojaId: par.loja.id,
     machineId: par.pareamento.machineId || '',
@@ -1626,13 +1687,15 @@ async function enviarSnapshotVendas(){
     pedidos: pagos.length,
     sessoesCriadas: sessoesHoje.length,
     sessoesVendidas: vendidasHoje,
-    taxacombo: pagos.length ? +((100 * comExtra) / pagos.length).toFixed(1) : 0,
+    taxacombo: pagos.length ? +((100 * comCombo) / pagos.length).toFixed(1) : 0,
     meios,
-    ribbonRestante: Number.isFinite(+ribbonBalanceBase) ? +ribbonBalanceBase : 0,
+    // null quando o contador de ribbon não está disponível (portal não força 0)
+    ribbonRestante: Number.isFinite(+ribbonBalanceBase) ? +ribbonBalanceBase : null,
     papel10x15: (printerReal && printerReal.connected !== false && Number.isFinite(+printerReal.paper10x15)) ? +printerReal.paper10x15 : null,
     papel15x20: (printerReal && printerReal.connected !== false && Number.isFinite(+printerReal.paper15x20)) ? +printerReal.paper15x20 : null,
-    ultimaVenda: ultima ? ultima.toISOString() : null,
-    caixa: { numero: (caixaReal && caixaReal.id) || '', aberto: !!caixaAberto },
+    ultimaVenda: ultimaHora instanceof Date && !isNaN(ultimaHora) ? ultimaHora.toISOString() : null,
+    // número sequencial do caixa (não o id CX-...) — volta ao id se o numero não existir
+    caixa: { numero: (caixaReal && (caixaReal.numero || caixaReal.id)) || '', aberto: !!caixaAberto },
   };
   try{
     const res = await portalApi.vendasPush(snap);
@@ -1658,17 +1721,27 @@ function unidadesItemPortal(item){
   return t ? (t.unidades || 0) * (item.qtd || 1) : 0;
 }
 
+// Tipos que representam desconto/ajuste no carrinho (nunca contam como tamanho).
+const TIPOS_DESCONTO_CARRINHO = new Set([
+  'combo-desconto', 'desconto-catalogo', 'desconto-senha-master',
+  'desconto-falha-operacional', 'desconto-comercial',
+]);
+
 function montarPedidoPortal(p){
   const par = window.kioskPair && window.kioskPair.ok ? window.kioskPair : null;
   const pagamentos = (p.pagamentosEfetivos || []).map(r => ({
     meio: r.meio || '', forma: r.forma || '', valor: +(r.valor || 0), parcelas: r.parcelas || 0,
   }));
-  const itens = (p.itens || []).map(it => ({
-    tipo: (it.tipo === 'extra' || it.tipo === 'ajuste') ? it.tipo : 'tamanho',
-    produtoId: it.produtoId || '', label: it.label || '',
-    qtd: it.qtd || 1, unidades: unidadesItemPortal(it),
-    precoUnit: +(it.precoUnit || 0), subtotal: +(it.preco || 0),
-  }));
+  const itens = (p.itens || []).map(it => {
+    let tipo = 'tamanho';
+    if (it.tipo === 'extra') tipo = 'extra';
+    else if (it.tipo === 'ajuste' || TIPOS_DESCONTO_CARRINHO.has(it.tipo)) tipo = 'ajuste';
+    return {
+      tipo, produtoId: it.produtoId || '', label: it.label || '',
+      qtd: it.qtd || 1, unidades: unidadesItemPortal(it),
+      precoUnit: +(it.precoUnit || 0), subtotal: +(it.preco || 0),
+    };
+  });
   // Desconto (combo/falha/comercial) vem separado no pedido — manda como linha
   // de ajuste negativa para a soma dos itens fechar com o total (base do DRE).
   const descontoValor = p.desconto ? +(Number(p.desconto.valor) || 0).toFixed(2) : 0;
@@ -1686,7 +1759,9 @@ function montarPedidoPortal(p){
     pdvNome: (par && par.pareamento && par.pareamento.pdvNome) || '',
     data: horario instanceof Date && !isNaN(horario) ? isoDataLocal(horario) : '',
     criadoEm: (horario instanceof Date && !isNaN(horario) ? horario : new Date()).toISOString(),
-    pagoEm: p.status === 'pago' && pagoAt instanceof Date && !isNaN(pagoAt) ? pagoAt.toISOString() : '',
+    // pagoEm é o momento real do pagamento; preserva no reenvio de cancelado
+    // (edição cancela o original, mas mantém o registro de quando foi pago).
+    pagoEm: pagoAt instanceof Date && !isNaN(pagoAt) ? pagoAt.toISOString() : '',
     total: +(p.total || 0),
     status: p.status === 'cancelado' ? 'cancelado' : 'pago',
     operador: p.operador || '—',
@@ -1696,7 +1771,7 @@ function montarPedidoPortal(p){
     desconto: +descontoValor.toFixed(2),
     caixaId: typeof caixaReal === 'object' && caixaReal && caixaReal.id ? caixaReal.id : '',
     origemPedidoId: p.origemPedidoId || null,
-    guiaImpressa: false,
+    guiaImpressa: !!p.guiaImpressa,
   };
 }
 
@@ -1720,7 +1795,9 @@ async function enviarPedidosDia(){
       if(res && res.ok) ok++; else { falhas++; if(res && res.error) console.warn('[sync] pedido nao aceito:', res.error); }
     }catch{ falhas++; }
   }
-  _pushHistoricoPedidos = true; // primeiro envio incluiu todo o histórico
+  // Só considera o histórico enviado se TUDO subiu. Com falhas, mantém false
+  // para o próximo tick reenviar todo o histórico (pedidos que falharam).
+  if(!falhas) _pushHistoricoPedidos = true;
   if(ok) console.log(`[sync] ${ok} pedido(s) enviado(s) ao portal${falhas ? ` (${falhas} falha(s))` : ''}`);
 }
 
@@ -1746,6 +1823,7 @@ async function enviarAuditoriaPendente(){
     try{
       const res = await portalApi.auditoriaPush({
         id: u.id,
+        pdvNome: (par && par.pareamento && par.pareamento.pdvNome) || '',
         titulo: u.titulo,
         operador: u.operador,
         motivo: u.motivo,
@@ -1818,16 +1896,19 @@ async function tentarLogin(getSelecionado){
   try{
     const res = await portalApi.login(u.usuario || u.nome, senha);
     if(res && res.ok) autenticado = true;
-    else if(res && res.offline) offline = true;
-    else { document.getElementById('login-error').textContent = 'Senha incorreta.'; return; }
+    else if(res && (res.offline || res.error === 'LOJA_INVALIDA' || /^HTTP \d+/.test(res.error || ''))) offline = true;
+    else if(res && res.ok === false){ document.getElementById('login-error').textContent = 'Senha incorreta.'; return; }
+    else offline = true;
   }catch{ offline = true; }
   if(!autenticado && offline){
+    // Portal fora do ar/falhando ou loja não configurada nele → valida localmente
+    // (usuário local ou senha master do PDV) para o quiosque nunca travar.
     if(!(senha === u.senha || senha === SENHA_MASTER_PDV)){
       document.getElementById('login-error').textContent = 'Senha incorreta.'; return;
     }
   }
   currentUser = u;
-  document.getElementById('user-chip').textContent = '👤 ' + u.nome + ' (' + u.funcao + ')';
+  document.getElementById('user-chip').textContent = '👤 ' + u.nome;
   document.getElementById('login-overlay').classList.add('hidden');
   applyRoleVisibility();
   if(!caixaAberto && u.funcao !== 'Fotógrafo') askAbrirCaixa();
@@ -1842,6 +1923,7 @@ async function criarPedidoReal(itens, total, origemPedidoId){
   const descontoValor = +(-descontos.reduce((s, c) => s + (c.preco || 0), 0)).toFixed(2);
   const payload = {
     sessaoId: sessoesIds[0] || null,
+    sessoes: sessoesIds.map(id => ({ id })), // multi-sessão: todas as sessões do pedido
     itens: fotos.map(c => ({
       // filename pro backend é o nome simples (o seed tem sessaoId/nome para exibição)
       key: c.produtoId, qty: c.qtd || 1, filename: (c.fotoSeed || '').includes('/') ? String(c.fotoSeed).split('/').pop() : (c.fotoSeed || null),
@@ -1853,7 +1935,10 @@ async function criarPedidoReal(itens, total, origemPedidoId){
     origemPedidoId: origemPedidoId || null,
     operador: currentUser ? currentUser.nome : null,
     desconto: descontoValor > 0.005
-      ? { nome: descontos.map(d => d.label).filter(Boolean).join('; '), valor: descontoValor, tipo: 'manual', motivo: null }
+      ? { nome: descontos.map(d => d.label).filter(Boolean).join('; '), valor: descontoValor,
+          // tipo 'combo' preserve que o desconto veio de um combo do catálogo (KPI taxacombo);
+          // 'manual' = desconto-catalogo/master/falha/comercial digitado pela operadora.
+          tipo: descontos.some(d => d.tipo === 'combo-desconto') ? 'combo' : 'manual', motivo: null }
       : null,
   };
   const criado = await natalApi.criarPedido(payload);
@@ -1914,6 +1999,10 @@ async function iniciarImpressaoFotos(pedidoId, itens){
     etapa = 'início da impressão';
     const res = await natalApi.imprimirPedido(pedidoId, lista.map(f => ({ key: f.key, filename: f.filename, qty: f.qty })));
     if(!res.success) throw new Error(res.error || 'Falha ao iniciar impressão');
+    /* enfileirou: o estado real chega por SSE (print-start se a impressora estiver
+       ligada, print-waiting se estiver desligada). Não trava o chip em "Imprimindo". */
+    printando = false;
+    _printProgress = null;
     toast('🖨️ Impressão iniciada — aguardando terminar...');
     renderRibbonChip();
   }catch(e){
@@ -1941,6 +2030,20 @@ async function finalizarVenda(){
   const pagamentos = efetivoRows.map(r => r.forma + ': ' + fmt(r.valor)).join(' · ');
   const senhasResumo = [...new Set(cart.map(c => c.sessionSenha))];
 
+  /* ---- MODO EDIÇÃO: o pedido original é CANCELADO (substituído pelo novo).
+       Persiste no sidecar (pra não "des-cancelar" no reboot) e o reenvio ao
+       portal (idempotente pelo id) marca 'cancelado' no registro original —
+       sem isso, o DRE/Ranking do portal contabilizam 2x. ---- */
+  if(editingPedidoId){
+    const editado = pedidosRealizados.find(x => x.id === editingPedidoId);
+    if(editado && editado.status !== 'cancelado'){
+      editado.status = 'cancelado';
+      editado.canceladoEm = new Date();
+      try{ natalApi.atualizarPedido(editado._realId || editado.id, { status: 'cancelado' }); }catch{ }
+    }
+    if(editado) editado.pedidoGeradoId = pedidoId;
+  }
+
   cart.forEach(c => { const s = sessions.find(x => x.id === c.sessionId); if(s){ s.temVenda = true; s.status = 'vendida'; } });
   ribbonBalanceBase -= unidadesNoCarrinho();
   pedidosRealizados.push(novoPedido);
@@ -1952,7 +2055,7 @@ async function finalizarVenda(){
   /* ---- MODO EDIÇÃO: pedido novo vinculado ao original ---- */
   if(editingPedidoId){
     const original = pedidosRealizados.find(x => x.id === editingPedidoId);
-    if(original) original.pedidoGeradoId = pedidoId;
+    if(original && original.pedidoGeradoId !== pedidoId) original.pedidoGeradoId = pedidoId;
     const pidOrigem = editingPedidoId;
     editingPedidoId = null;
     cart = [];
@@ -2000,16 +2103,18 @@ async function finalizarVenda(){
       <div class="rc-total"><span>Total</span><span>${fmt(total)}</span></div>
       <div class="rc-pay">Pago: ${pagamentos}</div>
     </div>
-    <button class="btn-secondary" id="btn-print-summary">🖨 Imprimir resumo</button>
-    ${temFoto ? `<button class="btn-secondary" id="btn-print-fotos" style="border-color:var(--gold-400);color:var(--gold-300);">🖨️ Imprimir fotos na ASK-400</button>` : ''}
-    <button class="btn-primary" id="btn-nova-venda">Continuar vendendo nesta sessão</button>
-    <button class="btn-secondary" id="btn-ir-painel">Voltar para o painel de sessões</button>
+    <button class="btn-primary resumo-action" id="btn-print-summary">🖨 Imprimir resumo</button>
+    ${temFoto ? `<button id="btn-print-fotos" style="width:100%;margin-top:10px;padding:13px;border-radius:10px;border:1px solid var(--gold-400);background:linear-gradient(135deg,var(--gold-300),var(--gold-050));color:var(--navy-950);font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 3px 12px rgba(212,162,76,.35);">🖨️ Imprimir fotos na ASK-400</button>` : ''}
+    <button class="btn-primary resumo-action" id="btn-nova-venda">Continuar vendendo nesta sessão</button>
+    <button class="btn-primary resumo-action" id="btn-ir-painel">Voltar para o painel de sessões</button>
   `);
 
   const continuarVendendo = () => { closeModal(); renderCart(); renderThumbs(); renderRibbonChip(); };
-  document.getElementById('btn-print-summary').addEventListener('click', ()=>{
+  document.getElementById('btn-print-summary').addEventListener('click', async ()=>{
     const r = receiptHtmlAtivo();
-    if(r) imprimirThermal('<div class="receipt">' + r.innerHTML + '</div>', 'Resumo do pedido ' + pedidoId + ' enviado');
+    if(r && await imprimirThermal('<div class="receipt">' + r.innerHTML + '</div>', 'Resumo do pedido ' + pedidoId + ' enviado')){
+      marcarGuiaImpressa(pedidoId);
+    }
   });
   if(temFoto) document.getElementById('btn-print-fotos').addEventListener('click', ()=>{
     if(printando){ toast('🖨️ Impressão já em andamento — aguarde...'); return; }
@@ -2105,6 +2210,16 @@ async function imprimirThermal(conteudoHtml, rotulo){
   }
 }
 function receiptHtmlAtivo(){ return document.querySelector('#modal-box .receipt'); }
+
+// Marca que a guia/resumo do pedido foi impressa (no sidecar e no portal) —
+// idempotente pelo pedido.id, o portal apenas sobrescreve guiaImpressa.
+async function marcarGuiaImpressa(pedidoId){
+  const ped = pedidosRealizados.find(x => x.id === pedidoId);
+  if(ped) ped.guiaImpressa = true;
+  try{ await natalApi.atualizarPedido(pedidoId, { guiaImpressa: true }); }
+  catch(e){ console.warn('Falha ao marcar guiaImpressa no sidecar', e); }
+  agendarPedidosPortal(800);
+}
 
 function tagInfo(s){
   if(s.status==='finalizada') return {cls:'tag-concluida', label:'Concluída'};
@@ -2860,10 +2975,22 @@ function renderRibbonChip(){
     return;
   }
   /* impressora sem resposta ou desconectada → estado crítico em vermelho */
-  const saldoTxt = (saldo === null) ? '' : ` · Ribbon: ${saldo} un.`;
-  const err = (printerReal && printerReal.lastError && printerReal.lastError !== 'Sem erros') ? ` <small>(${printerReal.lastError})</small>` : '';
-  chip.innerHTML = `<span class="dot"></span>🖨️ <b style="color:var(--red-400);">Impressora não conectada!</b>${saldoTxt}${err}`;
+  chip.innerHTML = `<span class="dot"></span>🖨️ <b style="color:var(--red-400);">Impressora não conectada!</b>`;
   chip.classList.add('ribbon-critical');
+}
+
+// Sincroniza o estado do chip a partir da fila REAL do sidecar (usado após
+// limpar a fila e no boot) — destrava "Imprimindo"/"na fila" fantasmas.
+async function _sincronizarEstadoFila(){
+  const f = await natalApi.filaImpressao().catch(()=>({}));
+  const jobs = (f && Array.isArray(f.fila)) ? f.fila : [];
+  const pend = jobs.filter(j => j.estado === 'PENDENTE').length;
+  const emImpressao = jobs.some(j => j.estado === 'IMPRIMINDO');
+  printando = emImpressao;
+  if(!emImpressao) _printProgress = null;
+  _printFila = pend;
+  _printFilaUltimoAviso = 0;
+  renderRibbonChip();
 }
 
 function addToCart(tipo, produtoId, label, precoUnit, qtd=1){
@@ -3289,10 +3416,13 @@ document.getElementById('modal-overlay').addEventListener('click', e=>{
 /* ---------------- CONFIGURAÇÕES (modal) ---------------- */
 async function showConfigModal(){
   await garantirIdentidade(); // garante o código do kiosk para exibir aqui
-  const [cfg, printer] = await Promise.all([
+  const [cfg, printer, fila] = await Promise.all([
     natalApi.getConfig().catch(()=>({})),
     natalApi.printerStatus().catch(()=>({})),
+    natalApi.filaImpressao().catch(()=>({ success:false, fila: [] })),
   ]);
+  const filaJobs = (fila && Array.isArray(fila.fila)) ? fila.fila : [];
+  const filaLimpar = filaJobs.filter(j => j.estado !== 'IMPRIMINDO');
   const folder = cfg.photosFolder || '';
   const logoTextoCfg = String(cfg.logoTexto || '').trim() || 'SHOPPING PALLADIUM';
   const logoTextoEsc = logoTextoCfg.replace(/"/g, '&quot;');
@@ -3357,6 +3487,30 @@ async function showConfigModal(){
     </div>
 
     <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Fila de impressão</div>
+      ${filaJobs.length===0
+        ? `<div style="font-size:12px;color:var(--slate-500);">Nenhuma impressão pendente.</div>`
+        : `<div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;padding-right:4px;">
+            ${filaJobs.map(j=>{
+              const estCor = j.estado==='IMPRIMINDO' ? 'var(--green-400)' : j.estado==='FALHOU' ? 'var(--red-400)' : 'var(--amber-500)';
+              const estLabel = j.estado==='IMPRIMINDO' ? 'Imprimindo' : j.estado==='FALHOU' ? 'Falhou' : 'Pendente';
+              return `<div style="display:flex;align-items:center;gap:8px;background:var(--navy-800);border:1px solid var(--navy-line);border-radius:8px;padding:6px 10px;font-size:12px;">
+                <span style="font-weight:700;color:var(--gold-300);white-space:nowrap;">${j.numero||j.pedidoId}</span>
+                <span style="color:var(--slate-400);white-space:nowrap;">${j.fotos} foto(s)</span>
+                <span style="color:${estCor};font-weight:600;white-space:nowrap;">${estLabel}${j.tries>0 && j.estado!=='IMPRIMINDO' ? ` (${j.tries} tent.)`:''}</span>
+                ${j.estado!=='IMPRIMINDO' ? `<button data-limpa-fila="${j.pedidoId}" style="margin-left:auto;padding:4px 10px;border:1px solid var(--navy-line);border-radius:6px;background:var(--navy-950);color:var(--red-400);font-size:11px;cursor:pointer;font-family:'Inter',sans-serif;">Limpar</button>` : ''}
+              </div>`;
+            }).join('')}
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+            <span style="font-size:11px;color:var(--slate-500);">${filaLimpar.length} podendo ser limpos</span>
+            ${filaLimpar.length>0 ? `<button id="cfg-fila-clear-all" style="padding:6px 14px;border:1px solid var(--red-400);border-radius:8px;background:transparent;color:var(--red-400);font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;">Limpar todos</button>` : ''}
+          </div>`
+      }
+      <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Impressões aguardando a impressora ficam nesta fila e retomam sozinhas. Limpar remove o pedido da fila (não cancela a venda).</div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Emparelhamento com o portal</div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span style="font-size:16px;font-weight:800;color:var(--gold-300);font-family:ui-monospace,Consolas,monospace;letter-spacing:3px;">${kk}</span>
@@ -3414,6 +3568,32 @@ async function showConfigModal(){
       toast('Erro ao gerar código: ' + (e && e.message ? e.message : ''));
       cfgNewCodeBtn.disabled = false;
     }
+  };
+
+  document.querySelectorAll('[data-limpa-fila]').forEach(btn => {
+    btn.onclick = async ()=>{
+      const pedidoId = btn.getAttribute('data-limpa-fila');
+      const ok = window.confirm('Remover este pedido da fila de impressão?\n\nAs fotos dele deixarão de ser impressas (a venda não é afetada).');
+      if(!ok) return;
+      btn.disabled = true;
+      try{
+const r = await natalApi.limparFila({ pedidoId });
+      if(r && r.success){ toast('Impressão removida da fila'); await _sincronizarEstadoFila(); closeModal(); }
+        else toast('⚠ ' + ((r && r.error) || 'Erro ao limpar'));
+      }catch(e){ toast('⚠ ' + (e && e.message ? e.message : 'Erro ao limpar')); btn.disabled = false; }
+    };
+  });
+
+  const cfgClearAllBtn = document.getElementById('cfg-fila-clear-all');
+  if(cfgClearAllBtn) cfgClearAllBtn.onclick = async ()=>{
+    const ok = window.confirm('Limpar TODAS as impressões pendentes da fila?\n\nNenhuma das fotos aguardando será impressa (as vendas não são afetadas).');
+    if(!ok) return;
+    cfgClearAllBtn.disabled = true;
+    try{
+      const r = await natalApi.limparFila({ todos: true });
+      if(r && r.success){ toast('Fila de impressão limpa'); await _sincronizarEstadoFila(); closeModal(); }
+      else toast('⚠ ' + ((r && r.error) || 'Erro ao limpar'));
+    }catch(e){ toast('⚠ ' + (e && e.message ? e.message : 'Erro ao limpar')); cfgClearAllBtn.disabled = false; }
   };
 
   {
@@ -3645,135 +3825,6 @@ function showPaymentPickerModal(total, rowsIniciais, titulo, subtitulo, onConfir
   render();
 }
 
-function _finalizarVendaLegado(){
-  const total = cartTotal();
-
-  /* ---- MODO EDIÇÃO: gera um PEDIDO NOVO vinculado ao original (nunca edita o original) ---- */
-  if(editingPedidoId){
-    const original = pedidosRealizados.find(x=>x.id===editingPedidoId);
-    const itens = [...cart];
-    const sessoesEnvolvidas = [...new Set(cart.map(c=>c.sessionId))].map(sid=>{
-      const s = sessions.find(x=>x.id===sid) || {senha: sid};
-      return {id:sid, senha:s.senha};
-    });
-    const novoPedidoId = 'PED-' + String(pedidosRealizados.length+1).padStart(4,'0');
-    const novoPedido = {
-      id: novoPedidoId,
-      horario: new Date(),
-      sessoes: sessoesEnvolvidas.length ? sessoesEnvolvidas : original.sessoes,
-      itens: itens.map(c=>({...c})),
-      total,
-      pagamentosEfetivos: efetivoRows.map(r=>({...r})),
-      status: 'pago',
-      operador: currentUser ? currentUser.nome : '—',
-      origemPedidoId: original.id,
-      observacao: `Pedido originado do pedido nº ${original.id}`
-    };
-    pedidosRealizados.push(novoPedido);
-    original.pedidoGeradoId = novoPedidoId; // vínculo bidirecional pra auditoria
-    agendarPedidosPortal(600); // sobe o pedido completo ao portal
-    vendasHojeTotal += total; // é uma venda nova de verdade (comprovante/impressão novos), soma cheio
-    registrarUsoSenhaContexto(editingPedidoId, novoPedidoId); // liga os usos de senha desta edição ao pedido novo/origem
-
-    const pidOrigem = editingPedidoId;
-    editingPedidoId = null;
-    cart = [];
-
-    openModal(`
-      <div class="modal-head">
-        <div><div class="modal-step-label">Novo pedido gerado</div><h3>${novoPedidoId}</h3></div>
-        <button class="modal-close" onclick="closeModal()">×</button>
-      </div>
-      <div class="success-box" style="padding-top:0;">
-        <div class="success-check">✓</div>
-        <p>${fmt(total)} · originado do pedido ${pidOrigem}</p>
-      </div>
-      <button class="btn-primary" id="btn-voltar-apos-edicao">Voltar para Pedidos</button>
-    `);
-    document.getElementById('btn-voltar-apos-edicao').addEventListener('click', ()=>{
-      closeModal();
-      document.getElementById('screen-venda').classList.remove('active');
-      document.getElementById('screen-pedidos').classList.add('active');
-      renderPedidosScreen();
-      renderGlobalCart();
-    });
-    return;
-  }
-
-  /* ---- MODO NORMAL: cria pedido novo ---- */
-  const senhas = [...new Set(cart.map(c=>c.sessionSenha))];
-  const itens = [...cart]; // cópia para o resumo, antes de limpar
-  const pagamentos = efetivoRows.map(r=>`${r.forma}: ${fmt(r.valor)}`).join(' · ');
-
-  cart.forEach(c=>{
-    const s = sessions.find(x=>x.id===c.sessionId);
-    if(s) s.temVenda = true;
-  });
-  ribbonBalanceBase -= unidadesNoCarrinho(); // consumo só é debitado de verdade agora
-  vendasHojeTotal += total; // olhinho de vendas do dia (topbar) reflete isso na próxima consulta
-
-  const sessoesEnvolvidas = [...new Set(cart.map(c=>c.sessionId))].map(sid=>{
-    const s = sessions.find(x=>x.id===sid);
-    return {id:sid, senha:s.senha};
-  });
-  const pedidoId = 'PED-' + String(pedidosRealizados.length+1).padStart(4,'0');
-  pedidosRealizados.push({
-    id: pedidoId,
-    horario: new Date(),
-    sessoes: sessoesEnvolvidas,
-    itens: itens.map(c=>({...c})),
-    total,
-    pagamentosEfetivos: efetivoRows.map(r=>({...r})),
-    status: 'pago',
-    operador: currentUser ? currentUser.nome : '—'
-  });
-  agendarPedidosPortal(600); // sobe o pedido completo ao portal
-
-  const linhasResumo = itens.map(c=>`
-    <div class="rc-line"><span>${c.qtd>1?c.qtd+'x ':''}${c.label} · #${c.sessionSenha}</span><span>${fmt(c.preco)}</span></div>
-  `).join('');
-
-  openModal(`
-    <div class="modal-head">
-      <div><div class="modal-step-label">Resumo da venda</div><h3>Pedido ${pedidoId}</h3></div>
-      <button class="modal-close" id="btn-close-summary">×</button>
-    </div>
-    <div class="success-box" style="padding-top:0;">
-      <div class="success-check">✓</div>
-      <p style="margin-bottom:14px;">${fmt(total)} confirmados · sessão(ões) #${senhas.join(', #')} atualizada(s) para "Vendida"</p>
-    </div>
-    <div class="receipt">
-      <h4>Resumo do pedido</h4>
-      <div class="rc-sub">${itens.length} iten${itens.length===1?'':'s'}</div>
-      ${linhasResumo}
-      <div class="rc-total"><span>Total</span><span>${fmt(total)}</span></div>
-      <div class="rc-pay">Pago: ${pagamentos}</div>
-    </div>
-    <button class="btn-primary" id="btn-nova-venda">Continuar vendendo nesta sessão</button>
-    <button class="btn-secondary" id="btn-ir-painel">Voltar para o painel de sessões</button>
-  `);
-
-  const continuarVendendo = ()=>{
-    cart = [];
-    closeModal();
-    renderCart(); renderThumbs();
-    renderRibbonChip();
-  };
-  const voltarPainel = ()=>{
-    cart = [];
-    closeModal();
-    document.getElementById('screen-venda').classList.remove('active');
-    document.getElementById('screen-painel').classList.add('active');
-    renderPainel();
-    renderRibbonChip();
-    renderGlobalCart();
-  };
-
-  document.getElementById('btn-nova-venda').addEventListener('click', continuarVendendo);
-  document.getElementById('btn-ir-painel').addEventListener('click', voltarPainel);
-  document.getElementById('btn-close-summary').addEventListener('click', continuarVendendo);
-}
-
 /* ---------------- VITRINE DE FOTOS (tela de espera) ---------------- */
 function renderIdleMarquee(){
   const track = document.getElementById('idle-marquee-track');
@@ -3861,7 +3912,7 @@ function _tentarLoginLegado(getSelecionado){
   if(!u){ document.getElementById('login-error').textContent='Selecione um usuário.'; return; }
   if(senha !== u.senha){ document.getElementById('login-error').textContent='Senha incorreta.'; return; }
   currentUser = u;
-  document.getElementById('user-chip').textContent = `👤 ${u.nome} (${u.funcao})`;
+  document.getElementById('user-chip').textContent = `👤 ${u.nome}`;
   document.getElementById('login-overlay').classList.add('hidden');
   applyRoleVisibility();
 
@@ -5008,6 +5059,13 @@ async function INIT(){
     btnFullscreen.title = isFullscreen ? 'Sair da tela cheia' : 'Tela cheia';
   });
   document.getElementById('btn-config').addEventListener('click', showConfigModal);
+  const btnTema = document.getElementById('btn-tema');
+  btnTema.addEventListener('click', ()=>{
+    const light = document.documentElement.getAttribute('data-theme') === 'light';
+    if(light) document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', 'light');
+    try{ localStorage.setItem('natal-theme', light ? 'dark' : 'light'); }catch{}
+  });
   setTimeout(emparelharKiosk, 0); // identifica o kiosk no portal (não bloqueia o boot)
   setTimeout(carregarPrecosPortal, 0); // preços da loja vêm do portal (fallback: catálogo local)
   setInterval(() => {
@@ -5032,6 +5090,7 @@ async function INIT(){
   });
   try{ await Promise.all([carregarSessoes(), carregarPedidos(), carregarCaixa(), carregarRibbon(), carregarAuditoria()]); }
   catch{ /* logs no console do sidecar */ }
+  try{ await _sincronizarEstadoFila(); }catch{} // fila persistida de boot anterior → chip correto
   agendarSnapshotVendas(4000); // snapshot inicial após o boot (se já emparelhado)
   agendarPedidosPortal(3000);  // histórico pedido-a-pedido → portal
   renderPainel();
@@ -5071,6 +5130,7 @@ async function INIT(){
       renderRibbonChip();
     }
     if(key==='printer:progress'){ if(data && data.total) _printProgress = { current: Math.min(data.current || 0, data.total), total: data.total }; renderRibbonChip(); }
+    if(key==='print-fila:atualizada'){ _sincronizarEstadoFila(); }
     if(key==='print-complete'){
       printando = false; _printProgress = null; _printFila = 0; _printFilaUltimoAviso = 0;
       if(data && data.success === false){ mostrarFalhaImpressao('Falha na impressão', data.error || 'Falha na impressão ASK-400'); }

@@ -54,6 +54,7 @@ const env = resolveConfig();
 // ─── Formatos de foto (impressos na ASK-400) ──────────────
 // Cada formato tem: frame do editor (px), resolução de impressão (px, 300 DPI),
 // papel físico (10x15 ou 15x20), preço base/bulk e overlay (opcional).
+// `unidades` = unidades de ribbon consumidas por foto (para o portal).
 const FOTO_FORMATS = {
   '10x15': {
     label: 'Foto 10x15',
@@ -61,6 +62,7 @@ const FOTO_FORMATS = {
     printRes: { width: 1864, height: 1228 },
     paper: '10x15',
     pricing: '10x15',
+    unidades: 1,
     overlay: {
       image: './overlays/10x15.png',
       grid: { rows: 1, cols: 1 },
@@ -72,6 +74,7 @@ const FOTO_FORMATS = {
     printRes: { width: 2422, height: 1864 },
     paper: '15x20',
     pricing: '15x20',
+    unidades: 2,
     overlay: {
       image: './overlays/15x20.png',
       grid: { rows: 1, cols: 1 },
@@ -83,33 +86,77 @@ const FOTO_FORMATS = {
     printRes: { width: 1864, height: 1228 },
     paper: '10x15',
     pricing: 'bolinha',
+    unidades: 1,
     overlay: {
       image: './overlays/bolinha.png',
       grid: { rows: 1, cols: 1 },
     },
   },
+  polaroide: {
+    label: 'Polaroide 2 poses',
+    editorFrame: { width: 540, height: 360 },
+    printRes: { width: 1864, height: 1228 },
+    paper: '10x15',
+    pricing: 'polaroide',
+    unidades: 1,
+    polaroid: true,
+    overlay: null,
+  },
 };
 
 // ─── Produtos físicos (não impressos — estoque/contagem) ──
+// Chaves canônicas do portal (PRECOS_DEFAULT do api.php) — o overlay que o
+// admin altera em "Catálogo de produtos" cai aqui via aplicarPrecos().
 const PRODUTOS = {
-  'porta-foto': { label: 'Porta-foto', pricing: 'porta-foto' },
-  ima: { label: 'Ímã', pricing: 'ima' },
-  encarte: { label: 'Encarte', pricing: 'encarte' },
-  'bolinha-natal': { label: 'Bolinha de Natal', pricing: 'bolinha-natal' },
+  'porta-retrato-10x15': { label: 'Porta-retrato 10x15', pricing: 'porta-retrato-10x15' },
+  'porta-retrato-15x20': { label: 'Porta-retrato 15x20', pricing: 'porta-retrato-15x20' },
+  ima: { label: 'Ímã de geladeira', pricing: 'ima' },
+  'item-encarte': { label: 'Item Encarte', pricing: 'item-encarte' },
+  'porta-cartao-postal': { label: 'Porta-cartão postal', pricing: 'porta-cartao-postal' },
 };
 
 // ─── Preços (R$) — valores oficiais do evento ────────────────────
 // O portal (api.php, ação 'precos') é a fonte de verdade; o PDV busca os
-// preços da loja no boot. Estes são o fallback local (catálogo do PDV).
+// preços da loja no boot e a cada emparelhamento. Estes são o fallback local
+// (catálogo do PDV) — as 15 chaves canônicas do portal.
 const PRICING = {
+  // formatos (tamanhos de foto)
   '10x15': { base: 15.0, bulk: null, bulkThreshold: null },
   '15x20': { base: 25.0, bulk: null, bulkThreshold: null },
   bolinha: { base: 12.0, bulk: null, bulkThreshold: null },
-  'porta-foto': { base: 35.0, bulk: null, bulkThreshold: null },
+  polaroide: { base: 20.0, bulk: null, bulkThreshold: null },
+  // extras (produtos físicos)
+  'porta-retrato-10x15': { base: 35.0, bulk: null, bulkThreshold: null },
+  'porta-retrato-15x20': { base: 50.0, bulk: null, bulkThreshold: null },
   ima: { base: 10.0, bulk: null, bulkThreshold: null },
-  encarte: { base: 15.0, bulk: null, bulkThreshold: null },
-  'bolinha-natal': { base: 12.0, bulk: null, bulkThreshold: null },
+  'item-encarte': { base: 15.0, bulk: null, bulkThreshold: null },
+  'porta-cartao-postal': { base: 12.0, bulk: null, bulkThreshold: null },
+  // combos
+  combo1: { base: 45.0, bulk: null, bulkThreshold: null },
+  combo2: { base: 65.0, bulk: null, bulkThreshold: null },
+  combo3: { base: 80.0, bulk: null, bulkThreshold: null },
+  combo4: { base: 52.0, bulk: null, bulkThreshold: null },
+  combo5: { base: 38.0, bulk: null, bulkThreshold: null },
+  combo6: { base: 38.0, bulk: null, bulkThreshold: null },
 };
+
+// Catálogo de combos (preço fechado < soma dos itens) — mesmas chaves e
+// valores do portal/vendas.html. O React ainda não renderiza combos no PDV,
+// mas o catálogo vive aqui para o preço vir do portal (aplicarPrecos).
+const COMBOS = [
+  { id: 'combo1', nome: 'Foto + Porta-retrato 10x15', valorCombo: 45,
+    itens: [{ produtoId: '10x15', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-retrato-10x15', tipoProduto: 'extra', qtd: 1 }] },
+  { id: 'combo2', nome: 'Foto + Porta-retrato 15x20', valorCombo: 65,
+    itens: [{ produtoId: '15x20', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-retrato-15x20', tipoProduto: 'extra', qtd: 1 }] },
+  { id: 'combo3', nome: 'Encarte (2 fotos 15x20)', valorCombo: 80,
+    itens: [{ produtoId: '15x20', tipoProduto: 'tamanho', qtd: 2 }, { produtoId: 'item-encarte', tipoProduto: 'extra', qtd: 1 }] },
+  { id: 'combo4', nome: 'Foto 10x15 + Porta-retrato + Bolinha', valorCombo: 52,
+    itens: [{ produtoId: '10x15', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-retrato-10x15', tipoProduto: 'extra', qtd: 1 }, { produtoId: 'bolinha', tipoProduto: 'tamanho', qtd: 1 }] },
+  { id: 'combo5', nome: 'Cartão de Natal — Layout 1', valorCombo: 38,
+    itens: [{ produtoId: '10x15', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-cartao-postal', tipoProduto: 'extra', qtd: 1 }] },
+  { id: 'combo6', nome: 'Cartão de Natal — Layout 2', valorCombo: 38,
+    itens: [{ produtoId: '10x15', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-cartao-postal', tipoProduto: 'extra', qtd: 1 }] },
+];
 
 // ─── Overlays ──────────────────────────────────────────────
 const OVERLAYS = {
@@ -135,6 +182,7 @@ const config = {
   fotoFormats: FOTO_FORMATS,
   produtos: PRODUTOS,
   pricing: PRICING,
+  combos: COMBOS,
   overlays: OVERLAYS,
 
   // Lista ordenada de chaves de formatos (exibição nos seletores)
@@ -155,6 +203,7 @@ const config = {
         bulk: p.bulk ?? p.base ?? 0,
         bulkThreshold: p.bulkThreshold,
         ratio: f.printRes.width / f.printRes.height,
+        unidades: f.unidades || 1,
       };
     });
   },
@@ -194,6 +243,49 @@ const config = {
 
   getPreco(key) {
     return (PRICING[key] || {}).base ?? 0;
+  },
+
+  // Unidades de ribbon que uma foto desse formato consome (portal/unidadesTotal).
+  getUnidades(key) {
+    const f = FOTO_FORMATS[key];
+    return f ? (f.unidades || 1) : 0;
+  },
+
+  comboList() {
+    return COMBOS.map((c) => ({
+      id: c.id,
+      nome: c.nome,
+      valorCombo: c.valorCombo ?? PRICING[c.id]?.base ?? 0,
+      itens: c.itens,
+    }));
+  },
+
+  getCombo(key) {
+    return COMBOS.find((c) => c.id === key) || null;
+  },
+
+  // ─── Preços vindos do portal (ação 'precos') ──────────────
+  // O portal é a fonte de verdade: sobrescreve os `base` de formatos/extras/
+  // combos com o overlay da loja (valores inválidos são ignorados → default).
+  // Retorna `true` se algo mudou (para a UI re-renderizar).
+  aplicarPrecos(precos) {
+    if (!precos || typeof precos !== 'object') return false;
+    let mudou = false;
+    for (const key of Object.keys(PRICING)) {
+      const v = precos[key];
+      if (v != null && Number.isFinite(+v) && +v >= 0) {
+        PRICING[key].base = +(+v).toFixed(2);
+        mudou = true;
+      }
+    }
+    for (const c of COMBOS) {
+      const v = precos[c.id];
+      if (v != null && Number.isFinite(+v) && +v >= 0) {
+        c.valorCombo = +(+v).toFixed(2);
+        mudou = true;
+      }
+    }
+    return mudou;
   },
 
   // ─── Qualidade de imagem / previews ─────────────────────

@@ -268,6 +268,16 @@ function precosEfetivos(string $lojaId): array
     return $out;
 }
 
+// Nome do PDV que aparece no portal: usa o valor enviado pelo PDV; se vier
+// vazio (o PDV sempre envia a chave, mesmo sem configurar pdvNome), cai no
+// nome 'pdv' da loja cadastrada no portal em vez de gravar string vazia.
+function resolverPdvNome($pdv, array $loja): string
+{
+    $v = trim((string) ($pdv ?? ''));
+    if ($v === '') $v = trim((string) ($loja['pdv'] ?? ''));
+    return $v;
+}
+
 // Parâmetros globais da operação (Portal define, DRE/Estoque consomem).
 // custoRibbonUnitario = custo real por unidade de ribbon (impressa) — usado
 // no DRE em vez do 18% fixo do protótipo; comissaoVendedor/Fotografo = % sobre
@@ -453,7 +463,7 @@ try {
             $snap = [
                 'lojaId' => $lojaId,
                 'lojaNome' => (string) ($loja['nome'] ?? $lojaId),
-                'pdvNome' => trim((string) ($p['pdvNome'] ?? ($loja['pdv'] ?? ''))),
+                'pdvNome' => resolverPdvNome($p['pdvNome'], $loja),
                 'machineId' => $machineId,
                 'data' => $data,
                 'totalVendido' => round(max(0, (float) ($p['totalVendido'] ?? 0)), 2),
@@ -461,7 +471,8 @@ try {
                 'sessoesCriadas' => max(0, (int) ($p['sessoesCriadas'] ?? 0)),
                 'sessoesVendidas' => max(0, (int) ($p['sessoesVendidas'] ?? 0)),
                 'taxacombo' => round(min(100, max(0, (float) ($p['taxacombo'] ?? 0))), 1),
-                'ribbonRestante' => max(0, (int) ($p['ribbonRestante'] ?? 0)),
+                'ribbonRestante' => (isset($p['ribbonRestante']) && $p['ribbonRestante'] !== '' && $p['ribbonRestante'] !== null)
+                    ? max(0, (int) $p['ribbonRestante']) : null,
                 'papel10x15' => (isset($p['papel10x15']) && $p['papel10x15'] !== '' && $p['papel10x15'] !== null)
                     ? max(0, (int) $p['papel10x15']) : null,
                 'papel15x20' => (isset($p['papel15x20']) && $p['papel15x20'] !== '' && $p['papel15x20'] !== null)
@@ -525,7 +536,7 @@ try {
                 'numero' => (string) ($pd['numero'] ?? $id),
                 'lojaId' => $loja['id'],
                 'lojaNome' => (string) ($loja['nome'] ?? $loja['id']),
-                'pdvNome' => trim((string) ($pd['pdvNome'] ?? ($loja['pdv'] ?? ''))),
+                'pdvNome' => resolverPdvNome($pd['pdvNome'], $loja),
                 'machineId' => trim((string) ($p['machineId'] ?? '')),
                 'data' => trim((string) ($pd['data'] ?? '')),
                 'criadoEm' => (string) ($pd['criadoEm'] ?? gmdate('c')),
@@ -714,6 +725,14 @@ try {
             $dados[$lojaId] = $sanitizado; // vazio = resetar para os defaults oficiais
             saveJson('precos.json', $dados);
             respond(['ok' => true, 'precos' => precosEfetivos($lojaId)]);
+        }
+
+        // Overlay bruto de preços por loja (admin) — usado no backup/restauração
+        // da gestão. Sem token não é exposto (o público só vê precosEfetivos).
+        case 'precos.list': {
+            $dados = loadJson('precos.json', []);
+            if (!is_array($dados)) $dados = [];
+            respond(['ok' => true, 'precos' => $dados, 'defaults' => PRECOS_DEFAULT]);
         }
 
         case 'vendas.resumo': {

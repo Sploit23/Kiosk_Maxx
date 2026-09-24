@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { ShoppingCart } from 'lucide-react';
 import natalApi from '@shared/api/natalApi';
+import portalApi from '@shared/api/portalApi';
+import portalSync from '@shared/api/portalSync';
 import { connectSSE } from '@shared/api/sse';
 import { emparelharKiosk } from '@shared/api/kiosk';
 import { calculateCart } from '@shared/utils/pricing';
 import { formatBRL } from '@shared/utils/imageUtils';
-import { numeroSessao } from './catalog';
+import config from '@shared/config';
+import { numeroSessao, aplicarUsuariosPortal } from './catalog';
 import LoginScreen from './screens/LoginScreen';
 import CaixaScreen from './screens/CaixaScreen';
 import PainelScreen from './screens/PainelScreen';
@@ -83,11 +86,52 @@ export default function App() {
     return () => clearInterval(i);
   }, []);
 
+  // Preços e equipe vêm do portal (fonte de verdade): busca no boot e a cada
+  // emparelhamento. "mudou o preço no admin → muda no PDV" em até 60s (o
+  // admin salva e o próximo poll da tela de gestão + boot/pair atualiza aqui).
+  useEffect(() => {
+    const carregarPrecosEquipe = async () => {
+      try {
+        const [pre, eq] = await Promise.all([
+          portalApi.precos().catch(() => null),
+          portalApi.equipe().catch(() => null),
+        ]);
+        if (pre && pre.ok && pre.precos) {
+          if (config.aplicarPrecos(pre.precos)) {
+            showToast('Catálogo de preços atualizado pelo portal');
+            window.dispatchEvent(new CustomEvent('precos:atualizado'));
+          }
+        }
+        if (eq && eq.ok && aplicarUsuariosPortal(eq.usuarios || eq.equipe || [])) {
+          window.dispatchEvent(new CustomEvent('equipe:atualizado'));
+        }
+      } catch { /* portal indisponível — mantém catálogo/equipe locais */ }
+    };
+    carregarPrecosEquipe();
+    const onPair = () => carregarPrecosEquipe();
+    window.addEventListener('kiosk:pair', onPair);
+    return () => window.removeEventListener('kiosk:pair', onPair);
+  }, [showToast]);
+
+  // Sync PDV → portal: pedidos do dia + snapshot. No boot (4s) e a cada 5 min,
+  // igual ao vendas.html. As vendas novas disparam via SSE (pedido:pago).
+  useEffect(() => {
+    const tick = () => {
+      if (!window.kioskPair || !window.kioskPair.ok) return;
+      portalSync.enviarPedidosDia();
+      portalSync.enviarSnapshotVendas();
+    };
+    const boot = setTimeout(tick, 4000);
+    const i = setInterval(tick, 300000);
+    return () => { clearTimeout(boot); clearInterval(i); };
+  }, []);
+
   useEffect(() => {
     connectSSE((evt, data) => {
       if (evt === 'sessao:status' || evt === 'sessao:criada' || evt === 'sessao:concluida') refreshSessoes();
-      if (evt === 'caixa:aberto' || evt === 'caixa:fechado') refreshCaixa();
+      if (evt === 'caixa:aberto' || evt === 'caixa:fechado') { refreshCaixa(); portalSync.agendarSnapshotVendas(2500); }
       if (evt === 'pedido:criado' || evt === 'pedido:pago') refreshSessoes();
+      if (evt === 'pedido:pago') { portalSync.agendarPedidosPortal(800); portalSync.agendarSnapshotVendas(2500); }
       if (evt === 'print-start') setPrintState({ current: 0, total: data.total || 0, status: 'starting' });
       if (evt === 'printer:progress') setPrintState((p) => ({ ...(p || {}), current: data.current, total: data.total, status: 'printing' }));
       if (evt === 'print-complete') setPrintState((p) => ({ ...(p || {}), done: true, success: data.success, error: data.error }));

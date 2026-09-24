@@ -1006,6 +1006,15 @@ function getParametros(){
   }
   return state._paramProm;
 }
+function getPrecos(){
+  if(!state._precosProm){
+    state._precosProm = call('precos.list', {}).then(function(res){
+      state.precos = (res && res.ok && res.precos) ? res.precos : {};
+      return state.precos;
+    }).catch(function(){ state.precos = {}; return state.precos; });
+  }
+  return state._precosProm;
+}
 var MEIO_LABEL = { dinheiro:'Dinheiro', debito:'Débito', credito:'Crédito', pix:'PIX' };
 function fmtDt(s){
   if(!s) return '—';
@@ -2007,7 +2016,7 @@ $('#btn-trocar-senha').addEventListener('click', function(){
 // ——— EXPORTAÇÃO DE DADOS ———
 function exportarTudo(){
   return Promise.all([
-    getVendas(), getPedidos(), getAuditoria(), getParametros(), loadDespesas()
+    getVendas(), getPedidos(), getAuditoria(), getParametros(), loadDespesas(), getPrecos()
   ]).catch(function(){});
 }
 function expTabela(headers, rows, emptyMsg){
@@ -2132,7 +2141,8 @@ function exportarJSON(){
       pedidos: state.pedidos,
       despesas: state.despesas,
       auditoria: state.auditoria,
-      parametros: state.parametros
+      parametros: state.parametros,
+      precos: state.precos || {}
     };
     var blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json;charset=utf-8' });
     var a = document.createElement('a');
@@ -2185,7 +2195,7 @@ async function renderPrecos(){
     if(v == null) v = '';
     var sub = pp[2] ? '<small>'+esc(pp[2])+'</small>' : '';
     return '<label class="preco-item"><div class="preco-nome">'+esc(pp[1])+sub+'</div>'+
-      '<div class="preco-val"><span>R$</span><input type="number" min="0" step="0.5" class="form-input" id="preco-'+escAttr(pp[0])+'" value="'+escAttr(v)+'"></div></label>';
+      '<div class="preco-val"><span>R$</span><input type="number" min="0" step="0.1" class="form-input" id="preco-'+escAttr(pp[0])+'" value="'+escAttr(v)+'"></div></label>';
   }).join('');
 }
 function salvarPrecos(){
@@ -2197,12 +2207,12 @@ function salvarPrecos(){
     var str = (el ? el.value : '').trim();
     if(str === '') return; // campo vazio = volta ao preço oficial (backend reseta o default)
     var num = parseFloat(str.replace(',', '.'));
-    precos[pp[0]] = isNaN(num) ? 0 : num;
+    if(!isNaN(num)) precos[pp[0]] = num; // texto inválido = volta ao default (nunca vira R$ 0)
   });
   call('precos.save', { lojaId: lojaId, precos: precos }).then(function(res){
     if(res && res.ok){
       precosCarregados = res.precos || precosCarregados;
-      toast('Preços salvos — o PDV busca no próximo boot');
+      toast('Preços salvos — o PDV atualiza sozinho em até 60s');
     } else {
       toast((res && res.error) || 'Falha ao salvar', true);
     }

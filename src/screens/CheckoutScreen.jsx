@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Printer, CreditCard, PlayCircle, CheckCircle2, AlertTriangle, Loader, Banknote, QrCode, Landmark, X, Plus, Trash2 } from 'lucide-react';
 import config from '@shared/config';
 import natalApi from '@shared/api/natalApi';
+import portalSync from '@shared/api/portalSync';
 import { calculateCart } from '@shared/utils/pricing';
 import { composePrintImage } from '@shared/utils/printUtils';
 import { formatBRL } from '@shared/utils/imageUtils';
@@ -117,8 +118,17 @@ export default function CheckoutScreen({
     });
     setBusy(false);
     if (!pago.success) { showToast(pago.error || 'Erro ao registrar pagamento', 'error'); return; }
-    setPedido(pago.pedido);
-    showToast(`Pedido ${String(pago.pedido.numero).padStart(4, '0')} registrado como PAGO`);
+    // Guia impressa antes do pagamento → carimba no pedido (sidecar + portal).
+    const novoPedido = pago.pedido;
+    if (guiaOk) {
+      novoPedido.guiaImpressa = true;
+      try { await natalApi.atualizarPedido(novoPedido.id, { guiaImpressa: true }); } catch { /* best-effort */ }
+    }
+    setPedido(novoPedido);
+    showToast(`Pedido ${String(novoPedido.numero).padStart(4, '0')} registrado como PAGO`);
+    // Sobe o pedido completo ao portal (idempotente por id) + snapshot do dia.
+    portalSync.pushPedidoPortal(novoPedido);
+    portalSync.agendarSnapshotVendas(2500);
   };
 
   const pagamentosTxt = (pedido?.pagamentos || []).map((pg) => `${pg.meio}${pg.parcelas ? ' ' + pg.parcelas + 'x' : ''}: ${formatBRL(pg.valor)}`).join(' · ');

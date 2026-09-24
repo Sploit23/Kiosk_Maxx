@@ -13,11 +13,44 @@ export const LOJA = {
 
 // Operadores com acesso ao painel de vendas.
 // Fonte oficial: cadastro do portal (portalApi / lojaId). Esta lista é o
-// FALLBACK offline — usada quando o kiosk não alcança o portal.
+// FALLBACK offline — usada quando o kiosk não alcança o portal. A lista em
+// memória é substituída pela equipe do portal assim que o kiosk emparelha
+// (aplicarUsuariosPortal), mantendo a referência exportada (USERS.splice).
 export const USERS = [
   { user: 'admin', pass: '1234', nome: 'ADMINISTRADOR' },
   { user: 'vendedor', pass: '1234', nome: 'VENDEDOR' },
 ];
+
+const FUNCAO_LABEL = {
+  admin: 'Administrador',
+  gerente: 'Gerente',
+  vendedor: 'Vendedor(a)',
+  vendedora: 'Vendedor(a)',
+  fotografo: 'Fotógrafo',
+};
+
+// Substitui a lista local pela equipe ativa da loja vinda do portal
+// (contato equivalente ao carregarEquipe do vendas.html). Retorna true se
+// mudou algo; `USERS` continua sendo a MESMA array (referência estável p/ os
+// componentes que a importam).
+export function aplicarUsuariosPortal(lista) {
+  if (!Array.isArray(lista) || !lista.length) return false;
+  const novos = lista
+    .filter((u) => u.ativo !== false)
+    .map((u) => ({
+      user: u.usuario || u.id || u.login || u.nome || '',
+      pass: null, // portal valida a senha (login); offline usa cadastro local
+      nome: String(u.nome || 'Operador').trim(),
+      funcao: FUNCAO_LABEL[u.funcao] || u.funcao || 'Operador',
+      isAdmin: u.funcao === 'admin' || u.funcao === 'gerente',
+      portalId: u.id || null,
+      origem: 'portal',
+    }))
+    .filter((u) => u.user);
+  if (!novos.length) return false;
+  USERS.splice(0, USERS.length, ...novos);
+  return true;
+}
 
 // Senha master usada em casos excepcionais (descontos fora do catálogo,
 // cancelamentos). Mantenha igual à do administrador e troque quando necessário.

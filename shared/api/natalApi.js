@@ -72,6 +72,9 @@ const natalApi = {
   configPdv: () => api('GET', '/api/config'),
   // Status real da impressora ASK-400 (proxy do sidecar Java na 8080)
   printerStatus: () => api('GET', '/api/printer/status'),
+  // Fila de impressão (lista + limpeza de 1 pedido ou de tudo)
+  filaImpressao: () => api('GET', '/api/printer/fila'),
+  limparFila: (opts) => api('POST', '/api/printer/fila/limpar', opts),
   // Config da máquina (salva no sidecar)
   getConfig: () => api('GET', '/api/config'),
   saveConfig: (partial) => api('POST', '/api/config', partial),

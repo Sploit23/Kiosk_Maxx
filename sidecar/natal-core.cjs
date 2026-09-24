@@ -701,6 +701,40 @@ async function processarFila() {
 function kickFila() { setImmediate(() => processarFila().catch(() => {})); }
 setInterval(() => { processarFila().catch(() => {}); }, FILA_SCAN_MS);
 
+// Lista resumida da fila pro modal ⚙ do PDV (limpeza de impressão).
+function filaParaUI() {
+  return filaImpressao.map((j) => ({
+    pedidoId: j.pedidoId,
+    numero: j.numero,
+    sessaoId: j.sessaoId,
+    fotos: (j.fotos || []).length,
+    estado: j.estado,
+    tries: j.tries || 0,
+    criadoEm: j.criadoEm || null,
+  }));
+}
+// Limpa 1 job ou todos os jobs da fila. Jobs IMPRIMINDO (saindo agora) NÃO são
+// removidos — evita foto pela metade. Remove também a pasta de fotos do print-queue.
+function limparFila(opts = {}) {
+  const alvo = String(opts.pedidoId || '').trim();
+  const todos = opts.todos === true;
+  const removidos = [];
+  filaImpressao = filaImpressao.filter((j) => {
+    if (j.estado === 'IMPRIMINDO') return true; // nunca remove o que está saindo
+    if (todos) { removidos.push(j); return false; }
+    if (alvo && (j.pedidoId === alvo || String(j.numero) === alvo)) { removidos.push(j); return false; }
+    return true;
+  });
+  saveFila();
+  for (const j of removidos) {
+    const dir = path.join(PRINT_QUEUE_DIR, sanitizeSegment(j.pedidoId));
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+  const pendentes = filaImpressao.filter((j) => j.estado === 'PENDENTE').length;
+  emit('print-fila:atualizada', { qtd: pendentes, removidos: removidos.length });
+  return { success: true, removidos: removidos.map((j) => j.pedidoId), qtd: pendentes };
+}
+
 // ─── Roteador ────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -750,7 +784,7 @@ const server = http.createServer(async (req, res) => {
               lastError: info.lastError || null,
             };
           } else {
-            status.lastError = JSON.stringify(json);
+            status.lastError = 'Impressora sem resposta (desligada ou sem papel)';
           }
         } else {
           status.lastError = 'HTTP ' + resp.status;
@@ -760,6 +794,17 @@ const server = http.createServer(async (req, res) => {
       }
       if (status.connected && filaImpressao.some((j) => j.estado === 'PENDENTE')) kickFila(); // impressora voltou → retoma a fila já
       return sendJson(res, 200, { success: true, ...status, source: 'ask400' });
+    }
+    // Fila de impressão: listar (pro modal ⚙) e limpar (1 pedido ou todos).
+    if (method === 'GET' && p === '/api/printer/fila') {
+      return sendJson(res, 200, { success: true, fila: filaParaUI() });
+    }
+    if (method === 'POST' && p === '/api/printer/fila/limpar') {
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      if (!body.todos && !String(body.pedidoId || '').trim()) {
+        return sendJson(res, 400, { success: false, error: 'Informe pedidoId ou todos:true' });
+      }
+      return sendJson(res, 200, limparFila(body));
     }
     if (method === 'POST' && p === '/api/config') {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
@@ -884,6 +929,11 @@ const server = http.createServer(async (req, res) => {
         id: `PED-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
         numero,
         sessaoId: sessao.id,
+        // Multi-sessão: todas as sessões que participaram do pedido (a 1ª é a
+        // sessaoId). O PDV usa essa lista no push ao portal (pedido.push).
+        sessoes: (Array.isArray(body.sessoes) && body.sessoes.length)
+          ? body.sessoes.map((s) => ({ id: String((s && s.id) || s) }))
+          : [{ id: sessao.id }],
         itens: body.itens || [],       // fotos: [{ key, qty }]
         produtos: body.produtos || [], // produtos físicos
         total: Number(body.total || 0),
@@ -980,6 +1030,10 @@ const server = http.createServer(async (req, res) => {
       if (Array.isArray(body.itens)) pedido.itens = body.itens;
       if (Array.isArray(body.produtos)) pedido.produtos = body.produtos;
       if (body.desconto !== undefined) pedido.desconto = body.desconto || null;
+      if (typeof body.guiaImpressa === 'boolean') pedido.guiaImpressa = body.guiaImpressa;
+      if (Array.isArray(body.sessoes) && body.sessoes.length) {
+        pedido.sessoes = body.sessoes.map((s) => ({ id: String((s && s.id) || s) }));
+      }
       if (typeof body.status === 'string') {
         const st = body.status.toUpperCase();
         if (['AGUARDANDO', 'PAGO', 'IMPRESSO', 'CANCELADO'].includes(st)) {

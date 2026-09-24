@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Plus, Pencil, ShoppingCart, BadgePercent, Camera, RotateCw, X } from 'lucide-react';
 import config from '@shared/config';
 import natalApi from '@shared/api/natalApi';
+import portalSync from '@shared/api/portalSync';
 import { calculateCart } from '@shared/utils/pricing';
 import { formatBRL } from '@shared/utils/imageUtils';
 import AdjustFraming from '@shared/components/AdjustFraming';
@@ -132,6 +133,14 @@ export default function VendaScreen({
     setMaster({ senha: '', motivo: '', valor: '' });
     setMasterErr('');
     showToast(`Desconto fora do catálogo aplicado — motivo registrado (${user?.nome || '—'})`);
+    // Auditoria no portal (uso de senha master, idempotente por id).
+    portalSync.pushAuditoria({
+      id: `AUD-${Date.now().toString(36).toUpperCase()}`,
+      titulo: 'desconto',
+      operador: user?.nome || '—',
+      motivo: master.motivo.trim(),
+      data: new Date(),
+    });
   };
 
   const clickFoto = (foto) => {
