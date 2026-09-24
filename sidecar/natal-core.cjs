@@ -64,6 +64,7 @@ function bindPaths(dataDir) {
   RIBBON_FILE = path.join(DB_DIR, 'ribbon-counter.txt');
   CONFIG_FILE = path.join(DB_DIR, 'config.json');
   PASTA_IMPORTADAS_FILE = path.join(DB_DIR, 'pasta-importadas.json');
+  FILA_IMPRESSAO_FILE = path.join(DB_DIR, 'fila-impressao.json');
 }
 
 // Move dados do diretório antigo para o novo (1º boot na pasta centralizada
@@ -100,7 +101,7 @@ function persistFolderPointer(folder) {
 
 let DATA_DIR = computeDataDir(readBootstrapPhotosFolder());
 let DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR;
-let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE;
+let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE, FILA_IMPRESSAO_FILE;
 bindPaths(DATA_DIR);
 moverDados(LEGACY_BOOT_DIR, DATA_DIR);
 
@@ -413,6 +414,10 @@ function recarregarEstadoLocal() {
   caixa = readJson(CAIXA_FILE, null);
   caixas = readJson(CAIXAS_FILE, []);
   pastaImportadas = readJson(PASTA_IMPORTADAS_FILE, {});
+  filaImpressao = (() => {
+    const arr = readJson(FILA_IMPRESSAO_FILE, []);
+    return Array.isArray(arr) ? arr.filter((j) => j && j.pedidoId) : [];
+  })();
 }
 
 // ─── Ribbon (contagem de papel) ──────────────────────────────
@@ -506,7 +511,14 @@ function readBody(req, maxBytes = 200 * 1024 * 1024) {
 }
 
 // ─── Impressão ASK-400 ───────────────────────────────────────
+// FILA PERSISTENTE de impressão: quando a impressora está desligada, o pedido
+// PAGO fica enfileirado (fila-impressao.json) e um worker (a cada 15s + kick no
+// enfileiramento e no /api/printer/status) retoma SOZINHO assim que a impressora
+// voltar — inclusive depois de reiniciar o app. Nada mais fica dependendo de
+// modal/clique do operador para a foto sair.
 const JAVA_PRINTER_URL = 'http://localhost:8080/kws/v1/printer/print2';
+const JAVA_CHECK_URL = 'http://localhost:8080/kws/v1/kiosk/checkPrinter';
+const FILA_SCAN_MS = 15000;
 
 function mediaForPaper(paper) {
   return paper === '15x20' ? '6x8' : '6x4';
@@ -517,6 +529,23 @@ function ribbonUnitsFor(items) {
     const paper = it.key === '15x20' ? '15x20' : '10x15';
     return acc + (paper === '10x15' ? 1 : 2) * (it.qty || 1);
   }, 0);
+}
+let filaImpressao = (() => {
+  const arr = readJson(FILA_IMPRESSAO_FILE, []);
+  return Array.isArray(arr) ? arr.filter((j) => j && j.pedidoId) : [];
+})();
+let _workerRodando = false;
+function saveFila() {
+  try { writeJson(FILA_IMPRESSAO_FILE, filaImpressao); } catch (e) { console.warn('[natal-core] falha ao salvar fila:', e.message); }
+}
+// Impressora REAL respondendo (Java sidecar porta 8080 → checkPrinter).
+async function impressoraOnline() {
+  try {
+    const resp = await fetch(JAVA_CHECK_URL, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(4000) });
+    if (!resp.ok) return false;
+    const json = await resp.json();
+    return !!(json && json.status === 'OK' && Array.isArray(json.retorno) && json.retorno.length);
+  } catch { return false; }
 }
 async function callPrinter(url) {
   const ctrl = new AbortController();
@@ -550,6 +579,10 @@ function buildPrintList(items, pedidoId) {
   return list;
 }
 
+// Roda o pipeline de impressão de um pedido. Retorna true se TODAS as fotos
+// saíram (ribbon consumido, pedido IMPRESSO, sessão FINALIZADA). Retorna false
+// se falhou NO MEIO (erro real de hardware/ribbon — o worker NÃO re-tenta sozinho
+// pra não imprimir foto duplicada; o modal de erro continua no PDV).
 async function runPrintPipeline(pedido) {
   const pedidoId = String(pedido.id);
   const tmpRoot = path.join(os.tmpdir(), 'natal-print', sanitizeSegment(pedidoId));
@@ -590,11 +623,83 @@ async function runPrintPipeline(pedido) {
     fs.rmSync(queueDir, { recursive: true, force: true });
     fs.rmSync(tmpRoot, { recursive: true, force: true });
     console.log(`[natal-core] Pedido ${pedido.numero} impresso (ribbon: ${ribbon.remaining})`);
+    return true;
   } catch (e) {
     console.error(`[natal-core] Falha na impressao do pedido ${pedidoId}: ${e.message}`);
     emit('print-complete', { pedidoId, success: false, error: `Falha Java sidecar: ${e.message}` });
+    return false;
   }
 }
+
+// Enfileira um pedido PAGO pra impressão (upsert por pedidoId — idempotente).
+function enfileirarImpressao(pedido, fotos) {
+  const pedidoId = String(pedido.id);
+  let job = filaImpressao.find((j) => j.pedidoId === pedidoId);
+  if (job) {
+    job.fotos = fotos;
+    job.estado = 'PENDENTE'; // reenviado manualmente → volta pra fila
+    job.tentadoEm = null;
+  } else {
+    filaImpressao.push({
+      pedidoId,
+      numero: pedido.numero,
+      sessaoId: pedido.sessaoId || null,
+      fotos,
+      estado: 'PENDENTE',
+      tries: 0,
+      criadoEm: Date.now(),
+      tentadoEm: null,
+    });
+  }
+  saveFila();
+}
+
+// Worker da fila: pega o PENDENTE mais antigo. Impressora offline → mantém na
+// fila (emite print-waiting pro PDV mostrar "na fila", sem modal). Online →
+// imprime e, no sucesso, remove o job. Falha no meio → job FALHOU (não re-tenta).
+async function processarFila() {
+  if (_workerRodando) return;
+  _workerRodando = true;
+  try {
+    const job = filaImpressao.find((j) => j.estado === 'PENDENTE');
+    if (!job) return;
+    if (pedidosImprimindo.has(job.pedidoId)) return;
+    const pendentes = filaImpressao.filter((j) => j.estado === 'PENDENTE').length;
+    if (!(await impressoraOnline())) {
+      emit('print-waiting', { qtd: pendentes });
+      return;
+    }
+    const pedido = pedidos.find((p) => p.id === job.pedidoId || String(p.numero) === job.pedidoId);
+    if (!pedido || pedido.status !== 'PAGO') {
+      filaImpressao = filaImpressao.filter((j) => j !== job);
+      saveFila();
+      return;
+    }
+    pedido.fotos = job.fotos;
+    savePedidos();
+    job.estado = 'IMPRIMINDO';
+    job.tentadoEm = Date.now();
+    job.tries++;
+    saveFila();
+    pedidosImprimindo.add(job.pedidoId);
+    try {
+      const ok = await runPrintPipeline(pedido);
+      if (ok) {
+        filaImpressao = filaImpressao.filter((j) => j !== job);
+        saveFila();
+      } else {
+        job.estado = 'FALHOU';
+        saveFila();
+      }
+    } finally {
+      pedidosImprimindo.delete(job.pedidoId);
+    }
+  } finally {
+    _workerRodando = false;
+  }
+}
+function kickFila() { setImmediate(() => processarFila().catch(() => {})); }
+setInterval(() => { processarFila().catch(() => {}); }, FILA_SCAN_MS);
 
 // ─── Roteador ────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
@@ -653,6 +758,7 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         status.lastError = e.message || String(e);
       }
+      if (status.connected && filaImpressao.some((j) => j.estado === 'PENDENTE')) kickFila(); // impressora voltou → retoma a fila já
       return sendJson(res, 200, { success: true, ...status, source: 'ask400' });
     }
     if (method === 'POST' && p === '/api/config') {
@@ -917,25 +1023,23 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { success: true, filename });
     }
 
-    // Iniciar impressão de um pedido PAGO
+    // Iniciar impressão de um pedido PAGO (enfileira na fila persistente)
     const imprimirMatch = p.match(/^\/api\/pedidos\/([^/]+)\/imprimir$/);
     if (method === 'POST' && imprimirMatch) {
       const body = JSON.parse((await readBody(req, 5 * 1024 * 1024)).toString() || '{}');
       const pedido = pedidos.find((x) => x.id === imprimirMatch[1] || String(x.numero) === imprimirMatch[1]);
       if (!pedido) return sendJson(res, 404, { success: false, error: 'Pedido nao encontrado' });
       if (pedido.status !== 'PAGO') return sendJson(res, 400, { success: false, error: 'Pedido nao pago' });
-      if (pedidosImprimindo.has(pedido.id)) return sendJson(res, 409, { success: false, error: 'Pedido ja esta em impressao' });
       const fotos = Array.isArray(body.fotos) ? body.fotos : [];
       if (!fotos.length) return sendJson(res, 400, { success: false, error: 'Nenhuma foto para imprimir' });
       pedido.fotos = fotos;
       savePedidos();
-      pedidosImprimindo.add(pedido.id);
-      setTimeout(() => pedidosImprimindo.delete(pedido.id), 1000 * 60 * 60); // libera o lock em caso de trave
-      emit('print-start', { pedidoId: pedido.id, total: fotos.length });
-      setImmediate(() => runPrintPipeline(pedido).finally(() => {
-        pedidosImprimindo.delete(pedido.id);
-      }));
-      return sendJson(res, 200, { success: true });
+      // Se já está IMPRIMINDO agora, ignora (não duplica); se está aguardando,
+      // atualiza as fotos e mantém. O worker resolve o resto.
+      const jaAtivo = pedidosImprimindo.has(pedido.id);
+      if (!jaAtivo) enfileirarImpressao(pedido, fotos);
+      kickFila(); // online → imprime já; offline → fica na fila e o worker retoma
+      return sendJson(res, 200, { success: true, enfileirado: !jaAtivo });
     }
 
     // ── Caixa ──
@@ -1020,6 +1124,7 @@ server.listen(PORT, HOST, () => {
     console.log(`[natal-core] Importador de pasta ativo: ${machineConfig.photosFolder}`);
   }
   ensurePhotosWatcher();
+  kickFila(); // fila persistente do disco → retoma impressões que ficaram pra trás
 });
 
 server.on('error', (e) => {

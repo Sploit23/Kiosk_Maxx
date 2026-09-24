@@ -2789,6 +2789,8 @@ function saldoRibbonProjetado(){ return ribbonBalanceBase === null ? null : ribb
 let printerReal = null; // { connected, paper10x15, paper15x20, lastError } vindo do Java ASK-400 (via proxy do sidecar)
 let printando = false; // true entre print-start e print-complete (feedback no chip de papel)
 let _printProgress = null; // { current, total } — progresso exibido no chip ("Imprimindo X/Y")
+let _printFila = 0; // trabalhos aguardando a impressora voltar (worker do sidecar)
+let _printFilaUltimoAviso = 0; // evita repetir o mesmo toast de "na fila" a cada tick
 let _cargandoRibbon = false;
 
 async function carregarRibbon(){
@@ -2820,6 +2822,11 @@ function renderRibbonChip(){
     const texto = (p && p.total > 1) ? `Imprimindo ${Math.min(p.current || 0, p.total)}/${p.total}...` : 'Imprimindo...';
     chip.innerHTML = `<span class="dot"></span>🖨️ <b>${texto}</b>`;
     chip.classList.add('ribbon-printing');
+    return;
+  }
+  if(_printFila > 0){ // trabalhos na fila da impressora (impressora desligada — sem modal)
+    chip.innerHTML = `<span class="dot"></span>🖨️ <b style="color:var(--amber-500);">${_printFila} trabalho(s) na fila</b> · imprimem quando a impressora voltar`;
+    chip.classList.add('ribbon-alert');
     return;
   }
   if(!chip.querySelector('.dot')){
@@ -5051,12 +5058,24 @@ async function INIT(){
   /* eventos em tempo real: mudança em sessão/pedido/caixa re-renderiza a tela ativa */
   connectSSE((key, data) => {
     carregarSessoes().then(()=> renderDateSelect()); // mantém o seletor por dia sincronizado
-    if(key==='print-start'){ printando = true; if(data && data.total) _printProgress = { current: 0, total: data.total }; toast('🖨️ Impressão iniciada — aguardando terminar...'); }
+    if(key==='print-start'){ printando = true; _printFila = 0; _printFilaUltimoAviso = 0; if(data && data.total) _printProgress = { current: 0, total: data.total }; toast('🖨️ Impressão iniciada — aguardando terminar...'); }
+    if(key==='print-waiting'){
+      /* impressora desligada: trabalho fica na fila persistente do sidecar e
+         volta a imprimir sozinha quando a impressora voltar. Sem modal. */
+      const q = (data && data.qtd) || 0;
+      printando = false; _printProgress = null; _printFila = q;
+      if(q > 0 && q !== _printFilaUltimoAviso){
+        _printFilaUltimoAviso = q;
+        toast(`🖨️ ${q} trabalho(s) na fila — serão impressos quando a impressora voltar`);
+      }
+      renderRibbonChip();
+    }
     if(key==='printer:progress'){ if(data && data.total) _printProgress = { current: Math.min(data.current || 0, data.total), total: data.total }; renderRibbonChip(); }
     if(key==='print-complete'){
-      printando = false; _printProgress = null; renderRibbonChip();
+      printando = false; _printProgress = null; _printFila = 0; _printFilaUltimoAviso = 0;
       if(data && data.success === false){ mostrarFalhaImpressao('Falha na impressão', data.error || 'Falha na impressão ASK-400'); }
       else if(data && data.success){ toast('✅ Impressão concluída!'); }
+      renderRibbonChip();
     }
     if(['pedido:criado','pedido:pago','pedido:impresso','caixa:aberto','caixa:fechado','print-complete'].includes(key)) carregarPedidos();
     if(['caixa:aberto','caixa:fechado'].includes(key)) carregarCaixa();
