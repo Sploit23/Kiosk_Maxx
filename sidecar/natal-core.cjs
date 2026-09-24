@@ -156,7 +156,19 @@ let machineConfig = { ...MACHINE_DEFAULTS, ...readJson(CONFIG_FILE, {}) };
 persistFolderPointer(machineConfig.photosFolder);
 function getMachineConfig() { return machineConfig; }
 function setMachineConfig(partial) {
-  const novo = { ...MACHINE_DEFAULTS, ...machineConfig, ...partial };
+  const entrada = { ...partial };
+  // Guarda de identidade: machineId/kioskCode já existentes NUNCA são
+  // sobrescritos pelo POST /api/config genérico. Isso impede que um código
+  // fantasma (gerado por bug de boot) substitua o código real persistido e
+  // "desemparelhe" a máquina sozinha. Só a flag explícita _forceIdentity:true
+  // (botão "Gerar novo código" do ⚙) permite trocar deliberadamente.
+  const forcar = entrada._forceIdentity === true;
+  delete entrada._forceIdentity;
+  if (!forcar) {
+    if (machineConfig.machineId && entrada.machineId) delete entrada.machineId;
+    if (machineConfig.kioskCode && entrada.kioskCode) delete entrada.kioskCode;
+  }
+  const novo = { ...MACHINE_DEFAULTS, ...machineConfig, ...entrada };
   const novoFolder = String(novo.photosFolder || '').trim();
   const atualFolder = String(machineConfig.photosFolder || '').trim();
   machineConfig = novo;

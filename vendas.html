@@ -1490,25 +1490,44 @@ function gerarCodigoKiosk(){
   for(let i = 0; i < 8; i++) s += KIOSK_ALFA[Math.floor(Math.random() * KIOSK_ALFA.length)];
   return s;
 }
+function gerarMachineId(){
+  return (crypto.randomUUID && crypto.randomUUID()) || ('mk-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+}
 function formatarCodigoKiosk(code){ return String(code || '').replace(/(.{4})/g, '$1-').replace(/-$/, ''); }
 let _identidade = null;
-async function garantirIdentidade(){
-  if(_identidade) return _identidade;
-  let cfg = {};
-  try{ cfg = await natalApi.getConfig() || {}; }catch{ }
+let _identidadeProm = null;
+async function lerConfigComRetry(){
+  // Evita o bug de boot: se o sidecar ainda não escutou, NÃO trata a falha como
+  // "config vazia" (senão geraria um código fantasma novo a cada boot atrasado e
+  // o pareamento feito ontem se perderia). Espera o /api/config responder.
+  let cfg = null;
+  for(let i = 0; i < 10 && !cfg; i++){
+    try{ const c = await natalApi.getConfig(); if(c && typeof c === 'object') cfg = c; }catch{ }
+    if(!cfg) await new Promise(r => setTimeout(r, 250));
+  }
+  return cfg;
+}
+async function resolverIdentidade(){
+  const cfg = await lerConfigComRetry();
+  if(!cfg) return null; // sidecar ainda fora — loop de 30s re-tenta; NUNCA fabrica código
   const changes = {};
-  if(!cfg.machineId){
-    changes.machineId = (crypto.randomUUID && crypto.randomUUID()) || ('mk-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
-  }
-  if(!cfg.kioskCode){
-    changes.kioskCode = gerarCodigoKiosk();
-  }
+  if(!cfg.machineId) changes.machineId = gerarMachineId();
+  if(!cfg.kioskCode) changes.kioskCode = gerarCodigoKiosk();
   if(Object.keys(changes).length){
     try{ await natalApi.saveConfig(changes); }catch{ }
-    cfg = { ...cfg, ...changes };
+    Object.assign(cfg, changes);
   }
   _identidade = { machineId: cfg.machineId || '', kioskCode: cfg.kioskCode || '', lojaNome: cfg.lojaNome || '' };
   return _identidade;
+}
+// Single-flight: chamadas concorrentes (módulo + INIT + loop) compartilham UMA
+// resolução em vez de gerar códigos fantasmas diferentes no mesmo boot.
+function garantirIdentidade(){
+  if(_identidade) return Promise.resolve(_identidade);
+  if(!_identidadeProm){
+    _identidadeProm = resolverIdentidade().finally(() => { _identidadeProm = null; });
+  }
+  return _identidadeProm;
 }
 function atualizarKioskUI(){
   const id = _identidade || {};
@@ -1541,6 +1560,7 @@ function atualizarLojaHeader(){
 async function emparelharKiosk(){
   try{
     const ident = await garantirIdentidade();
+    if(!ident || !ident.kioskCode || !ident.machineId) return; // sidecar ainda subindo — re-tenta no próximo tick
     const res = await portalApi.pair({ kioskCode: ident.kioskCode, machineId: ident.machineId });
     if(res && res.ok){
       window.kioskPair = res;
@@ -3335,6 +3355,7 @@ async function showConfigModal(){
         <span style="font-size:16px;font-weight:800;color:var(--gold-300);font-family:ui-monospace,Consolas,monospace;letter-spacing:3px;">${kk}</span>
         <span style="font-size:11.5px;color:${parOk?'var(--green-400)':'var(--amber-500)'};font-weight:600;">${parOk ? '✔ Emparelhado — ' + (par.loja?par.loja.nome:'') : 'Não emparelhado'}</span>
         <button id="cfg-pair" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;">Emparelhar agora</button>
+        <button id="cfg-new-code" style="padding:8px 14px;border:1px solid var(--slate-600);border-radius:8px;background:transparent;color:var(--slate-400);font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;" title="Gera um código novo e desemparelha — só use em PDV novo, código perdido ou troca de loja">Gerar novo código</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Informe este código na loja do portal de gestão (campo "código do kiosk"). O PDV reconhece sozinho a cada 30s.</div>
     </div>
@@ -3367,6 +3388,25 @@ async function showConfigModal(){
     cfgPairBtn.disabled = true;
     await emparelharKiosk();
     closeModal();
+  };
+
+  const cfgNewCodeBtn = document.getElementById('cfg-new-code');
+  if(cfgNewCodeBtn) cfgNewCodeBtn.onclick = async ()=>{
+    const ok = window.confirm('Gerar um código novo de emparelhamento?\n\nO código exibido na tela vai mudar e o PDV vai desemparelhar. Você precisará informar o NOVO código no portal de gestão (campo "código do kiosk") para emparelhar de novo.\n\nSó use em PDV novo, código perdido ou troca de loja.');
+    if(!ok) return;
+    cfgNewCodeBtn.disabled = true;
+    try{
+      const novoCodigo = gerarCodigoKiosk();
+      await natalApi.saveConfig({ kioskCode: novoCodigo, _forceIdentity: true });
+      window.kioskPair = null;
+      if(_identidade) _identidade.kioskCode = novoCodigo;
+      atualizarKioskUI();
+      toast('Novo código gerado: ' + formatarCodigoKiosk(novoCodigo));
+      closeModal();
+    }catch(e){
+      toast('Erro ao gerar código: ' + (e && e.message ? e.message : ''));
+      cfgNewCodeBtn.disabled = false;
+    }
   };
 
   {

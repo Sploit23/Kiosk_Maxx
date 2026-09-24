@@ -15,7 +15,9 @@ export default function LoginScreen({ onLogin, showToast }) {
   const [kioskCode, setKioskCode] = useState('');
 
   useEffect(() => {
-    garantirIdentidade().then(({ kioskCode: code }) => setKioskCode(formatarCodigoKiosk(code))).catch(() => {});
+    garantirIdentidade().then((ident) => {
+      if (ident && ident.kioskCode) setKioskCode(formatarCodigoKiosk(ident.kioskCode));
+    }).catch(() => {});
     const onPair = () => setKioskPar(window.kioskPair || null);
     window.addEventListener('kiosk:pair', onPair);
     return () => window.removeEventListener('kiosk:pair', onPair);

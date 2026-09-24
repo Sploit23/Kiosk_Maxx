@@ -15,27 +15,51 @@ export function gerarCodigoKiosk() {
   return s;
 }
 
+function gerarMachineId() {
+  return (typeof crypto?.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : 'mk-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+}
+
 export function formatarCodigoKiosk(code) {
   return String(code || '').replace(/(.{4})/g, '$1-').replace(/-$/, '');
 }
 
-// Garante que a config do sidecar tem machineId + kioskCode (gerados no
-// primeiro boot e persistidos por máquina — não dependem de arquivos do
-// instalador, então clones de imagem geram códigos diferentes).
-export async function garantirIdentidade() {
-  const cfg = (await natalApi.getConfig().catch(() => null)) || {};
-  const changes = {};
-  if (!cfg.machineId) {
-    changes.machineId = (typeof crypto?.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : 'mk-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+let _identidade = null;
+let _identidadeProm = null;
+
+async function lerConfigComRetry() {
+  // Se o sidecar ainda não escutou, NÃO trata a falha como config vazia
+  // (evita gerar código fantasma novo a cada boot atrasado e desemparelhar).
+  let cfg = null;
+  for (let i = 0; i < 10 && !cfg; i++) {
+    try { const c = await natalApi.getConfig(); if (c && typeof c === 'object') cfg = c; } catch { /* retry */ }
+    if (!cfg) await new Promise((r) => setTimeout(r, 250));
   }
+  return cfg;
+}
+
+async function resolverIdentidade() {
+  const cfg = await lerConfigComRetry();
+  if (!cfg) return null; // nunca fabrica código com leitura falha
+  const changes = {};
+  if (!cfg.machineId) changes.machineId = gerarMachineId();
   if (!cfg.kioskCode) changes.kioskCode = gerarCodigoKiosk();
   if (Object.keys(changes).length) {
     try { await natalApi.saveConfig(changes); } catch { /* best-effort */ }
     Object.assign(cfg, changes);
   }
-  return { machineId: cfg.machineId || '', kioskCode: cfg.kioskCode || '' };
+  _identidade = { machineId: cfg.machineId || '', kioskCode: cfg.kioskCode || '' };
+  return _identidade;
+}
+
+// Single-flight: chamadas concorrentes compartilham UMA resolução.
+export function garantirIdentidade() {
+  if (_identidade) return Promise.resolve(_identidade);
+  if (!_identidadeProm) {
+    _identidadeProm = resolverIdentidade().finally(() => { _identidadeProm = null; });
+  }
+  return _identidadeProm;
 }
 
 // Emparelha com o portal e, no sucesso, carimba o lojaId canônico no
@@ -43,6 +67,7 @@ export async function garantirIdentidade() {
 export async function emparelharKiosk() {
   let ident;
   try { ident = await garantirIdentidade(); } catch { return null; }
+  if (!ident || !ident.kioskCode || !ident.machineId) return null; // sidecar ainda subindo
   try {
     const res = await portalApi.pair({ kioskCode: ident.kioskCode, machineId: ident.machineId });
     if (res && res.ok) {
