@@ -63,6 +63,7 @@ const FOTO_FORMATS = {
     paper: '10x15',
     pricing: '10x15',
     unidades: 1,
+    allowLogo: true,
     overlay: {
       image: './overlays/10x15.png',
       grid: { rows: 1, cols: 1 },
@@ -75,6 +76,7 @@ const FOTO_FORMATS = {
     paper: '15x20',
     pricing: '15x20',
     unidades: 2,
+    allowLogo: true,
     overlay: {
       image: './overlays/15x20.png',
       grid: { rows: 1, cols: 1 },
@@ -82,25 +84,41 @@ const FOTO_FORMATS = {
   },
   bolinha: {
     label: 'Bolinha',
-    editorFrame: { width: 1100, height: 1100 },
+    // 2 bolinhas por folha 10x15, igual à polaroide: o PNG do molde é UMA
+    // CÉLULA (o cartão redondo com a arte) repetida 2x na folha.
+    // O editorFrame é o tamanho da célula e o PNG tem exatamente essa
+    // medida (932x1228) — assim o px do editor É o px da impressão (S2 = 1),
+    // então o que aparece na tela sai igual no papel.
+    editorFrame: { width: 932, height: 1228 },
     printRes: { width: 1864, height: 1228 },
     paper: '10x15',
     pricing: 'bolinha',
     unidades: 1,
+    // Sem `allowLogo`: não entra logo do shopping (mesma regra da polaroide).
     overlay: {
-      image: './overlays/bolinha.png',
-      grid: { rows: 1, cols: 1 },
+      image: './overlays/bolinha-celula.png',
+      grid: { rows: 1, cols: 2 },
     },
   },
   polaroide: {
     label: 'Polaroide 2 poses',
-    editorFrame: { width: 540, height: 360 },
+    // 2 polaroids por folha 10x15 (folha paisagem dividida em 2 colunas).
+    // O editorFrame é o tamanho da CÉLULA, que é exatamente o tamanho do PNG do
+    // molde — assim o px do editor É o px da impressão (fator S = 1) e o que
+    // aparece na tela sai igual no papel, sem nenhuma compensação.
+    editorFrame: { width: 932, height: 1228 },
     printRes: { width: 1864, height: 1228 },
     paper: '10x15',
     pricing: 'polaroide',
     unidades: 1,
     polaroid: true,
-    overlay: null,
+    // Sem `allowLogo`: a polaroide NÃO leva a logo do shopping. O card já tem
+    // área própria reservada pela arte do molde e a escrito entraria em cima da
+    // foto. A bolinha segue a mesma regra (também é um recorte com moldura).
+    overlay: {
+      image: './overlays/polaroide.png',
+      grid: { rows: 1, cols: 2 },
+    },
   },
 };
 
@@ -163,7 +181,48 @@ const OVERLAYS = {
   '10x15': FOTO_FORMATS['10x15'].overlay,
   '15x20': FOTO_FORMATS['15x20'].overlay,
   bolinha: FOTO_FORMATS.bolinha.overlay,
+  polaroide: FOTO_FORMATS.polaroide.overlay,
 };
+
+// ─── Box de enquadramento na tela (PDV) ───────────────────
+// Altura em px de tela por formato; a largura sai do ratio do `editorFrame`.
+// Formatos com molde usam o ratio da CÉLULA (que é o do PNG do molde), então o
+// que aparece na tela tem exatamente o formato do recorte que sai no papel.
+// Fonte ÚNICA: o `printUtils` usa o mesmo box para converter o zoom/offset da
+// tela em px de impressão — se os dois divergirem, o enquadramento da tela
+// para de bater com a impressão.
+const EDITOR_BOX_H = {
+  '10x15': 460,
+  '15x20': 460,
+  bolinha: 480,
+  polaroide: 480,
+};
+
+// ─── Janela da foto dentro do molde ─────────────────────────
+// O retângulo TRANSPARENTE do PNG do molde — a área onde a foto realmente
+// aparece. Medido do canal alpha de cada PNG (bolinha: y 194..850; polaroide:
+// y 89..1012). O enquadramento automático usa ISTO como alvo em vez da célula
+// inteira: a foto já nasce preenchendo a janela, então o operador não precisa
+// dar zoom para "achatar" o fundo e o que ele vê já é o que sai no papel.
+// Coordenadas em px da CÉLULA (= do PNG do molde, 300 DPI).
+const OVERLAY_WINDOW = {
+  bolinha: { x: 63, y: 194, w: 829, h: 657 },
+  polaroide: { x: 85, y: 89, w: 762, h: 924 },
+};
+
+// ─── Calibração de Moldes ──────────────────────────────────
+// Compensa a margem que a ASK-400 corta. Os offsets são em px da CÉLULA a
+// 300 DPI: `cellX` é POR CÉLULA (ordem linha-por-linha: [foto1, foto2, ...]),
+// `rowY` é POR LINHA (cada linha de fotos empilhadas) e `scale` é única por
+// formato (reduzir a escala abre uma margem branca entre a foto e o corte).
+// Esta é a baseline embutida; o ajuste fino desta máquina fica em
+// localStorage como DELTA (chave abaixo), então atualizar o app nunca perde a
+// calibração — só a baseline pode mudar, e o delta continua valendo.
+const OVERLAY_CALIBRATION = {
+  polaroide: { cellX: [8, -8], rowY: [2], scale: 98 },
+  bolinha: { cellX: [8, -8], rowY: [2], scale: 98 },
+};
+const OVERLAY_TWEAK_KEY = 'natal-overlay-tweak-v1';
 
 const config = {
   serverUrl: env.serverUrl,
@@ -224,9 +283,93 @@ const config = {
     return this.getFormat(key).paper;
   },
 
+  // A logo do shopping só sai nos formatos de FOTO PURA (10x15/15x20). Nos
+  // formatos com recorte/moldura (polaroide, bolinha) ela não entra. Lê o
+  // formato DIRETO (sem o fallback do getFormat) e devolve false por padrão:
+  // assim uma chave desconhecida nunca ganha logo por acidente.
+  allowsLogo(key) {
+    return !!(FOTO_FORMATS[key] && FOTO_FORMATS[key].allowLogo);
+  },
+
+  // Retângulo que a foto deve preencher dentro do molde (janela transparente).
+  // Sem molde, ou sem janela medida, cai na célula inteira — que é o
+  // comportamento antigo e continua correto para 10x15/15x20.
+  // As coordenadas são em px da CÉLULA (= px do PNG do molde, 300 DPI), que é
+  // a MESMA unidade que a composição de impressão usa. Quem trabalha em px de
+  // tela (o editor do PDV) converte pelo box — ver `windowInBox`.
+  getOverlayWindow(key) {
+    const ef = this.getEditorFrame(key);
+    const w = OVERLAY_WINDOW[key];
+    if (!w) return { x: 0, y: 0, w: ef.width, h: ef.height };
+    return { x: w.x, y: w.y, w: w.w, h: w.h };
+  },
+
+  // A mesma janela, convertida para px do box de tela (o editor do PDV).
+  windowInBox(key) {
+    const win = this.getOverlayWindow(key);
+    const ef = this.getEditorFrame(key);
+    const box = this.getEditorBox(key);
+    const kx = box.W / ef.width;
+    const ky = box.H / ef.height;
+    return { x: win.x * kx, y: win.y * ky, w: win.w * kx, h: win.h * ky };
+  },
+
   getOverlay(key) {
     const f = FOTO_FORMATS[key];
     return f?.overlay || null;
+  },
+
+  // Box de enquadramento na tela, em px de CSS. Ver EDITOR_BOX_H acima.
+  getEditorBox(key) {
+    const f = FOTO_FORMATS[key] || FOTO_FORMATS['10x15'];
+    const H = EDITOR_BOX_H[key] || 460;
+    const W = Math.round((H * f.editorFrame.width) / f.editorFrame.height);
+    return { W, H };
+  },
+
+  // ─── Calibração de molde ─────────────────────────────────
+  // Ajuste fino por máquina, guardado como DELTA sobre a baseline de
+  // OVERLAY_CALIBRATION. Sobrevive a atualização do app e a mudanças de
+  // baseline, porque é só a diferença.
+  overlayTweak: {},
+
+  _loadOverlayTweak() {
+    try {
+      const raw = localStorage.getItem(OVERLAY_TWEAK_KEY);
+      if (raw) this.overlayTweak = JSON.parse(raw) || {};
+    } catch { /* localStorage indisponível */ }
+  },
+
+  getOverlayCalibration(key) {
+    return OVERLAY_CALIBRATION[key] || { cellX: [0], rowY: [0], scale: 100 };
+  },
+
+  getOverlayTweak(key) {
+    return this.overlayTweak[key] || {}; // { cellXDelta, rowYDelta, scaleDelta }
+  },
+
+  saveOverlayTweak(key, tweak) {
+    this.overlayTweak[key] = tweak;
+    try {
+      localStorage.setItem(OVERLAY_TWEAK_KEY, JSON.stringify(this.overlayTweak));
+    } catch { /* localStorage indisponível */ }
+  },
+
+  // Calibração EFETIVA de uma célula = baseline + delta local. É o que a
+  // impressão, as miniaturas e os previews usam — por isso os três batem.
+  getCellCalibration(key, r, c) {
+    const cal = this.getOverlayCalibration(key);
+    const grid = FOTO_FORMATS[key]?.overlay?.grid || { rows: 1, cols: 1 };
+    const tweak = this.getOverlayTweak(key);
+    const idx = r * grid.cols + c;
+    const cellX = Array.isArray(cal.cellX) ? cal.cellX : [];
+    const rowY = Array.isArray(cal.rowY) ? cal.rowY : [];
+    const dx = Array.isArray(tweak.cellXDelta) ? tweak.cellXDelta : [];
+    const dy = Array.isArray(tweak.rowYDelta) ? tweak.rowYDelta : [];
+    const offX = (Number(cellX[idx]) || 0) + (Number(dx[idx]) || 0);
+    const offY = (Number(rowY[r]) || 0) + (Number(dy[r]) || 0);
+    const scale = (Number(cal.scale) || 100) + (Number(tweak.scaleDelta) || 0);
+    return { offX, offY, scale: scale > 0 ? scale : 100 };
   },
 
   produtoList() {
@@ -327,5 +470,7 @@ const config = {
     printDelayNext: 12000,
   },
 };
+
+config._loadOverlayTweak();
 
 export default config;

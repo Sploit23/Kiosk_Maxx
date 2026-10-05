@@ -523,7 +523,10 @@
   }
   .frame-box:active{cursor:grabbing;}
   .frame-box.no-frame{background:transparent;box-shadow:none;cursor:default;}
-  .frame-box img{
+  /* a foto do enquadramento. `:not(.mold-overlay)` é obrigatório: sem isso esta
+     regra (especificidade 0,1,1) vence o `.mold-overlay` (0,1,0) e joga
+     top/left:50% no molde também — que deve ficar em inset:0, cobrindo o box. */
+  .frame-box img:not(.mold-overlay){
     position:absolute;top:50%;left:50%;
     max-width:none;
     user-select:none;-webkit-user-drag:none;
@@ -554,25 +557,7 @@
     pointer-events:none;
   }
 
-  /* card estilo Polaroid: quadrado de foto dentro de um cartão maior, com borda */
-  .polaroid-square{
-    position:relative;overflow:hidden;background:#fff;
-    border-radius:2px;
-    flex-shrink:0;
-  }
-  .polaroid-square img{
-    position:absolute;top:50%;left:50%;max-width:none;
-    user-select:none;-webkit-user-drag:none;transform-origin:center center;
-    z-index:1;
-  }
-  /* moldura overlay — sempre por cima da foto, não corre risco de "corte" na borda
-     independente de como a pessoa arrastar/der zoom por trás dela */
-  .polaroid-frame-overlay{
-    position:absolute;inset:0;pointer-events:none;z-index:3;
-    border:9px solid #fff;
-    box-shadow:0 2px 10px rgba(0,0,0,.3);
-    box-sizing:border-box;
-  }
+  /* guias de composição (regra de terços) por cima do enquadramento */
   .polaroid-grid{position:absolute;inset:0;pointer-events:none;z-index:2;}
   .polaroid-grid.hidden{display:none;}
   .polaroid-grid .gl{position:absolute;background:rgba(212,162,76,.55);}
@@ -580,6 +565,11 @@
   .polaroid-grid .gv2{left:66.66%;top:0;bottom:0;width:1px;}
   .polaroid-grid .gh1{top:33.33%;left:0;right:0;height:1px;}
   .polaroid-grid .gh2{top:66.66%;left:0;right:0;height:1px;}
+
+  /* molde real (PNG) por cima da foto — o mesmo arquivo que vai na impressão.
+     A janela transparente do PNG é o que aparece da foto. */
+  .mold-overlay{position:absolute;inset:0;width:100%;height:100%;
+    pointer-events:none;z-index:3;user-select:none;-webkit-user-drag:none;}
 
   /* handle de canto — arrastar para dar zoom mantendo proporção */
   .resize-handle{
@@ -1167,8 +1157,8 @@ const HORARIO_FECHAMENTO_QUIOSQUE = 22; // hora cheia, mock — regra 3.1 do doc
 const TAMANHOS = [
   {id:'10x15', label:'10x15', preco:15, ratio:'2/3', unidades:1},
   {id:'15x20', label:'15x20', preco:25, ratio:'3/4', unidades:2},
-  {id:'bolinha', label:'Bolinha 7,5x7,5', preco:12, ratio:'1/1', circle:true, unidades:1, nota:'usa 1 bolinha de acrílico + 1 foto 10x15'},
-  {id:'polaroide', label:'Polaroide 2 poses', preco:20, ratio:'7.5/10', polaroid:true, unidades:1, nota:'2 poses iguais por folha 10x15 (rotacionada), com marca de corte — edição mostra 1, o sistema duplica ao gerar a impressão'},
+  {id:'bolinha', label:'Bolinha 7,5x7,5', preco:12, ratio:'932/1228', unidades:1, nota:'2 bolinhas iguais por folha 10x15, lado a lado — a edição mostra 1 e a folha sai com as 2'},
+  {id:'polaroide', label:'Polaroide 2 poses', preco:20, ratio:'932/1228', polaroid:true, unidades:1, nota:'2 poses iguais por folha 10x15, lado a lado, sem marca de corte — a edição mostra 1 e a folha sai com as 2'},
 ];
 const EXTRAS = [
   {id:'porta-retrato-10x15', label:'Porta-retrato 10x15', preco:35},
@@ -1393,7 +1383,8 @@ function mapearPedido(p){
       tipo: 'tamanho', produtoId: it.key, label: labelProduto(it.key, 'tamanho'),
       qtd: it.qty || 1, precoUnit: it.unitPrice || 0, preco: it.subtotal || 0,
       zoom: it.scale || 100, offX: it.diffx || 0, offY: it.diffy || 0,
-      orientation: it.orientation || 'retrato', logo: true, pdv: true,
+      orientation: it.orientation || 'retrato',
+      logo: config.allowsLogo(it.key), pdv: true,
     })),
     ...(p.produtos || []).map(it => ({
       cartId: 'ped-p-' + p.id + '-' + it.key,
@@ -2667,11 +2658,27 @@ function applyTransform(){
   im.style.transform = `translate(calc(-50% + ${offX}px), calc(-50% + ${offY}px)) scale(${scale})`;
 }
 
-function setupCover(im, boxW, boxH){
+// `target` (opcional) = a janela da foto dentro do molde, em px do box de tela.
+// Sem ele, cover na célula inteira (comportamento antigo, p/ 10x15 e 15x20).
+// Com ele (bolinha/polaroide), a foto já nasce preenchendo a JANELA — que é a
+// parte que aparece no papel — em vez de cobrir o cartão inteiro e deixar o
+// operador ter que dar zoom pra acertar. O offset inicial centraliza nessa
+// janela, então o enquadramento abrejá no lugar certo.
+function setupCover(im, boxW, boxH, target){
   const compute = ()=>{
     const nw = im.naturalWidth, nh = im.naturalHeight;
     if(!nw || !nh) return;
-    baseScale = Math.max(boxW/nw, boxH/nh); // cover exato: cobre a moldura inteira, sem folga
+    const tw = target ? target.w : boxW;
+    const th = target ? target.h : boxH;
+    baseScale = Math.max(tw/nw, th/nh); // cover da janela (ou do box inteiro)
+    if(target){
+      // `applyTransform` posiciona a foto a partir do CENTRO do box
+      // (top/left:50% + translate(-50%,-50%)) e soma offX/offY. Então o
+      // deslocamento necessário é: centro da janela − centro do box.
+      // (NÃO subtrair metade da foto: isso já vem do translate(-50%).)
+      offX = (target.x + tw/2) - boxW/2;
+      offY = (target.y + th/2) - boxH/2;
+    }
     im.style.width = nw+'px';
     im.style.height = nh+'px';
     applyTransform();
@@ -2684,26 +2691,19 @@ function setupCover(im, boxW, boxH){
 // (mesma lógica do kiosk React em AdjustFraming: formatos com molde imprimem sempre
 // paisagem no ratio do editorFrame; você vê na tela exatamente o corte que sai no papel).
 function frameBoxDims(t){
-  const comMolde = !t.circle && !t.polaroid;
-  const ef = config.getEditorFrame(t.id);
-  let W, H;
-  if(t.polaroid){
-    H = 480;
-    W = Math.round(H * Number(String(t.ratio).split('/')[0]) / Number(String(t.ratio).split('/')[1]));
-  } else if(t.circle){
-    H = 620;
-    W = H;
-  } else if(comMolde){
-    H = 460; // 10x15 / 15x20: folha sempre paisagem, ratio do papel (editorFrame)
-    W = Math.round(H * ef.width / ef.height);
-  } else {
-    // formato sem molde (hipotético): respeita a orientação escolhida
-    let [rw, rh] = String(t.ratio).split('/').map(Number);
-    if(currentOrientation==='paisagem'){ [rw, rh] = [rh, rw]; }
-    H = (currentOrientation==='paisagem') ? 460 : 620;
-    W = Math.round(H * rw/rh);
-  }
-  return { W, H };
+  // Formatos com molde (10x15/15x20/bolinha/polaroide) imprimem sempre no ratio
+  // da CÉLULA, e `config.getEditorBox` é a FONTE ÚNICA desse box — a mesma que o
+  // composePrintImage usa para converter o zoom/offset da tela em px de
+  // impressão. Se os dois divergirem, o enquadramento da tela para de bater com
+  // o papel (é exatamente o que acontecia com a polaroide: o editor usava
+  // `t.ratio` e a impressão usava o editorFrame).
+  if(config.getOverlay(t.id)) return config.getEditorBox(t.id);
+
+  // formato sem molde (hipotético): respeita a orientação escolhida
+  let [rw, rh] = String(t.ratio).split('/').map(Number);
+  if(currentOrientation==='paisagem'){ [rw, rh] = [rh, rw]; }
+  const H = (currentOrientation==='paisagem') ? 460 : 620;
+  return { W: Math.round(H * rw/rh), H };
 }
 
 function renderFrame(){
@@ -2734,73 +2734,49 @@ function renderFrame(){
   badge.style.display='block';
   badge.textContent = `${t.label} · ${fmt(t.preco)}`;
 
-  // formatos com molde (10x15/15x20) imprimem sempre paisagem — igual ao kiosk React,
-  // o botão de orientação não existe para eles; bolinha (círculo) e polaroide são fixos.
-  document.getElementById('btn-orientacao').style.display = (t.circle || t.polaroid || config.getOverlay(t.id)) ? 'none' : 'inline-flex';
+  // formatos com molde imprimem sempre no ratio do molde/célula — igual ao kiosk
+  // React, o botão de orientação não existe para nenhum deles.
+  document.getElementById('btn-orientacao').style.display = config.getOverlay(t.id) ? 'none' : 'inline-flex';
+
+  // formato com molde de CÉLULA (mais de uma por folha): bolinha e polaroide.
+  // São os que mostram o PNG real por cima da foto e usam guias de terços.
+  const moldCelula = config.getOverlay(t.id);
+  const temMoldeCelula = !!(moldCelula && (moldCelula.grid.rows * moldCelula.grid.cols) > 1);
 
   box.className='frame-box';
   const { W, H } = frameBoxDims(t);
   box.style.width=W+'px'; box.style.height=H+'px';
-  box.style.borderRadius = t.circle ? '50%' : '4px';
+  // o contorno redondo/agora vem do PNG do molde, não de border-radius CSS
+  box.style.borderRadius = '4px';
 
   let im, cropContainer;
 
-  if(t.polaroid){
-    // card estilo Polaroid retrato: papel branco, moldura como overlay por cima da foto —
-    // a pessoa edita a foto "por trás" da moldura, então nunca corre risco de corte visível na borda
-    box.style.background = '#fff';
-    box.style.display = 'flex';
-    box.style.flexDirection = 'column';
-    box.style.alignItems = 'center';
-    box.style.justifyContent = 'flex-start';
-    box.style.paddingTop = Math.round(H*0.06)+'px';
+  // A foto cobre o box INTEIRO (setupCover faz cover exato) e o molde real vem
+  // POR CIMA: a janela transparente do PNG é o que aparece da foto. É
+  // exatamente o que a impressão faz (ladrilha a foto e só depois aplica o
+  // molde), então o que está na tela é o que sai no papel.
+  // Fundo preto nos formatos normais; branco onde o molde é um CARTÃO de papel
+  // (bolinha/polaroide) — se a pessoa der zoom para fora, o que sobra atrás é o cartão.
+  box.style.background = temMoldeCelula ? '#fff' : '#000';
+  box.style.display = '';
+  box.style.flexDirection = '';
+  box.style.paddingTop = '';
 
-    const squareSide = Math.round(W*0.86);
-    const square = document.createElement('div');
-    square.className = 'polaroid-square';
-    square.style.width = squareSide+'px';
-    square.style.height = squareSide+'px';
-    box.appendChild(square);
-    cropContainer = square;
+  im = document.createElement('img');
+  im.id='crop-img';
+  im.src = img(currentFoto.seed, 750, 950);
+  box.appendChild(im);
+  // com molde de célula, o alvo do cover é a JANELA da foto (não o cartão todo)
+  setupCover(im, W, H, temMoldeCelula ? config.windowInBox(t.id) : null);
+  cropContainer = box;
 
-    im = document.createElement('img');
-    im.id='crop-img';
-    im.src = img(currentFoto.seed, 750, 950);
-    square.appendChild(im);
-    setupCover(im, squareSide, squareSide);
-
+  if(temMoldeCelula){
+    // guias de composição (terços) sobre o cartão inteiro
     const grid = document.createElement('div');
     grid.className = 'polaroid-grid'+(showOverlay?'':' hidden');
     grid.innerHTML = '<i class="gl gv1"></i><i class="gl gv2"></i><i class="gl gh1"></i><i class="gl gh2"></i>';
-    square.appendChild(grid);
-
-    // moldura overlay branca — desenhada por cima da foto (z-index acima), então se a foto
-    // ficar menor que o quadro (zoom reduzido) o que aparece atrás é branco, igual o papel
-    const frameOverlay = document.createElement('div');
-    frameOverlay.className = 'polaroid-frame-overlay';
-    square.appendChild(frameOverlay);
-
-    if(includeLogo){
-      const logo=document.createElement('div');
-      logo.className='shop-logo';
-      logo.style.bottom='6px';
-      logo.style.zIndex='4';
-      logo.textContent=logoTexto;
-      square.appendChild(logo);
-    }
+    box.appendChild(grid);
   } else {
-    box.style.background = '#000';
-    box.style.display = '';
-    box.style.flexDirection = '';
-    box.style.paddingTop = '';
-
-    im = document.createElement('img');
-    im.id='crop-img';
-    im.src = img(currentFoto.seed, 750, 950);
-    box.appendChild(im);
-    setupCover(im, W, H);
-    cropContainer = box;
-
     const vf=document.createElement('div');
     vf.className='viewfinder'+(showOverlay?'':' hidden');
     vf.innerHTML='<i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i>';
@@ -2810,22 +2786,34 @@ function renderFrame(){
     // além dos cantos dourados, então a foto parece terminar exatamente no limite
     // dourado — sem recortar pixel nenhum dentro dos cantos (o que sai na impressora).
     // Espessura = --frame-inset (configurável no CSS).
-    if(!t.circle && showOverlay){
+    if(showOverlay){
       const mask=document.createElement('div');
       mask.className='frame-margin-mask';
       box.appendChild(mask);
     }
+  }
 
-    if(includeLogo){
-      const logo=document.createElement('div');
-      logo.className='shop-logo';
-      logo.textContent=logoTexto;
-      box.appendChild(logo);
-    }
+  // Molde real (o mesmo PNG que vai na impressão) por cima da foto. Só entra
+  // onde o PNG é uma CÉLULA (mais de uma por folha) — bolinha e polaroide.
+  if(temMoldeCelula){
+    const moldImg = document.createElement('img');
+    moldImg.className = 'mold-overlay';
+    moldImg.src = moldCelula.image;
+    moldImg.alt = '';
+    box.appendChild(moldImg);
+  }
+
+  // a logo do shopping só nos formatos que a aceitam (10x15/15x20) — mesma
+  // regra da impressão, pra tela e papel não divergirem
+  if(includeLogo && config.allowsLogo(t.id)){
+    const logo=document.createElement('div');
+    logo.className='shop-logo';
+    logo.textContent=logoTexto;
+    box.appendChild(logo);
   }
 
   // handle de canto — arrasta para dar zoom mantendo proporção (uso com mouse)
-  // fica ancorado no cropContainer (o quadrado, no caso do polaroide; o card inteiro, nos demais)
+  // ancorado no cropContainer (o card inteiro, em todos os formatos)
   const handle=document.createElement('div');
   handle.className='resize-handle br';
   cropContainer.appendChild(handle);
@@ -3008,7 +2996,9 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1){
     qtd, precoUnit, preco: +(precoUnit*qtd).toFixed(2),
     zoom: tipo==='tamanho'?zoom:100, offX: tipo==='tamanho'?offX:0, offY: tipo==='tamanho'?offY:0,
     orientation: tipo==='tamanho'?currentOrientation:null,
-    logo: tipo==='tamanho'?includeLogo:false,
+    // allowLogo do formato decide: a polaroide/bolinha nunca entram com logo,
+    // mesmo com o checkbox marcado (o printUtils também checa, por segurança)
+    logo: tipo==='tamanho' ? (includeLogo && config.allowsLogo(produtoId)) : false,
     pdv: true,
   });
   baixarEstoqueFisico(produtoId, qtd);
@@ -3150,64 +3140,64 @@ function renderEnquadramentoEstatico(wrap, c){
   if(!t){ wrap.innerHTML = `<img src="${img(c.fotoSeed,420,520)}" style="max-width:100%;border-radius:10px;">`; return; }
 
   const ed = frameBoxDims(t);
-  const H = t.polaroid ? 380 : (t.circle ? 340 : ((c.orientation==='paisagem' && !t.circle) ? 320 : 420));
-  const W = t.circle ? H : Math.round(H * ed.W / ed.H);
+  const moldCelula = config.getOverlay(t.id);
+  const temMoldeCelula = !!(moldCelula && (moldCelula.grid.rows * moldCelula.grid.cols) > 1);
+  const H = temMoldeCelula ? 340 : ((c.orientation==='paisagem') ? 320 : 420);
+  const W = Math.round(H * ed.W / ed.H);
 
   const card = document.createElement('div');
   card.style.position='relative';
   card.style.width=W+'px'; card.style.height=H+'px';
   card.style.boxShadow='var(--shadow-lift)';
-  card.style.borderRadius = t.circle ? '50%' : '4px';
+  // o contorno vem do PNG do molde (bolinha/polaroide), não de border-radius CSS
+  card.style.borderRadius = '4px';
   card.style.overflow='hidden';
+  // branco onde o molde é um CARTÃO de papel (bolinha/polaroide), preto nos demais
+  card.style.background = temMoldeCelula ? '#fff' : '#000';
 
-  let squareEl = card; // por padrão, a própria foto ocupa o card inteiro
-  if(t.polaroid){
-    card.style.background='#fff';
-    card.style.display='flex'; card.style.flexDirection='column';
-    card.style.alignItems='center'; card.style.justifyContent='flex-start';
-    card.style.paddingTop = Math.round(H*0.06)+'px';
-    const squareSide = Math.round(W*0.86);
-    const square = document.createElement('div');
-    square.style.position='relative'; square.style.overflow='hidden'; square.style.background='#fff';
-    square.style.width=squareSide+'px'; square.style.height=squareSide+'px'; square.style.borderRadius='2px';
-    card.appendChild(square);
-    squareEl = square;
-  } else {
-    card.style.background='#000';
-  }
-
+  // a foto cobre o card inteiro e o molde real vem por cima — mesma ordem da
+  // impressão, então a miniatura mostra o recorte que sai no papel
   const im = document.createElement('img');
   im.style.position='absolute'; im.style.top='50%'; im.style.left='50%';
   im.style.maxWidth='none'; im.style.transformOrigin='center center';
   im.src = img(c.fotoSeed, 750, 950);
-  squareEl.appendChild(im);
-  if(t.polaroid){
-    const frameOverlay = document.createElement('div');
-    frameOverlay.style.position='absolute'; frameOverlay.style.inset='0';
-    frameOverlay.style.border='7px solid #fff'; frameOverlay.style.boxSizing='border-box';
-    frameOverlay.style.zIndex='3'; frameOverlay.style.pointerEvents='none';
-    squareEl.appendChild(frameOverlay);
-  }
+  card.appendChild(im);
 
-  const targetSide = t.polaroid ? Math.round(W*0.86) : (t.circle ? H : null);
+  // O card é o box do editor reduzido (k), e `c.offX/offY` + `c.zoom` foram
+  // salvos na escala do editor. Espelha o setupCover: cover da JANELA do molde
+  // (não do card inteiro) e offset convertido para a escala do card — senão a
+  // miniatura mostra um enquadramento diferente do que a pessoa escolheu (na
+  // bolinha o card é 1.66x mais "aberto" que a janela). Sem janela
+  // (10x15/15x20) cai no cover do card inteiro, como antes.
+  const k = H / ed.H;
+  const wbox = config.windowInBox(t.id);
+  const tw = wbox.w * k, th = wbox.h * k;
+
   const applyFixedCover = ()=>{
     const nw=im.naturalWidth, nh=im.naturalHeight;
     if(!nw||!nh) return;
-    const cw = t.polaroid ? targetSide : (t.circle ? H : W);
-    const ch = t.polaroid ? targetSide : (t.circle ? H : H);
-    const base = Math.max(cw/nw, ch/nh);
+    const base = Math.max(tw/nw, th/nh);
     im.style.width=nw+'px'; im.style.height=nh+'px';
     const scale = base * ((c.zoom||100)/100);
-    im.style.transform = `translate(calc(-50% + ${c.offX||0}px), calc(-50% + ${c.offY||0}px)) scale(${scale})`;
+    im.style.transform = `translate(calc(-50% + ${(c.offX||0)*k}px), calc(-50% + ${(c.offY||0)*k}px)) scale(${scale})`;
   };
   if(im.complete && im.naturalWidth) applyFixedCover();
   else im.addEventListener('load', applyFixedCover);
 
-  if(c.logo){
+  const mold = config.getOverlay(t.id);
+  if(mold && (mold.grid.rows * mold.grid.cols) > 1){
+    const moldImg = document.createElement('img');
+    moldImg.src = mold.image;
+    moldImg.alt = '';
+    moldImg.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3;';
+    card.appendChild(moldImg);
+  }
+
+  if(c.logo && config.allowsLogo(t.id)){
     const logo=document.createElement('div');
     logo.className='shop-logo';
     logo.textContent=logoTexto;
-    squareEl.appendChild(logo);
+    card.appendChild(logo);
   }
 
   wrap.innerHTML='';

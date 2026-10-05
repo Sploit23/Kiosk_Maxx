@@ -5,16 +5,7 @@
 // ─────────────────────────────────────────────────────────────
 import config from '../config';
 import { computeAutoFit, loadImage } from './imageUtils';
-
-// Dimensões do box de enquadramento do PDV (vendas.html renderFrame) —
-// espelha EXATAMENTE o que a impressão mostra: formatos com molde usam
-// o ratio do editorFrame (self-consistente com S), escalados pela altura
-// real do box de exibição. Círculo (bolinha) é quadrado; polaroide tem card fixo.
-function pdvBoxDims(editorW, editorH, orientation, circle, polaroid) {
-  const H = polaroid ? 480 : (circle ? 620 : 460);
-  const W = circle ? H : Math.round(H * editorW / editorH);
-  return { W, H };
-}
+import { overlayRect } from './overlayCalibration';
 
 // Rotaciona um canvas 90° e retorna novo canvas (ccw=true → anti-horário).
 function rotateCanvas(src, ccw) {
@@ -84,6 +75,17 @@ export async function composePrintImage(photo) {
 
   const img = await loadImage(photo.url);
 
+  // ── Tipo de molde ──────────────────────────────────────
+  //  · grid multi-célula — o PNG é UMA CÉLULA, repetida rows x cols na folha.
+  //    É o caso da Bolinha e da Polaroide: 2 cartões por folha 10x15.
+  //  · wholeSheet — o PNG é a FOLHA INTEIRA (as janelas já desenhadas na folha
+  //    toda). Suportado, mas hoje nenhum formato usa: 10x15/15x20 têm PNG quase
+  //    100% transparente (só moldura decorativa) e a logo sai como escrita
+  //    configurável (drawLogoBadge), então não são compostos aqui.
+  const temMolde = !!overlayInfo?.grid
+    && (overlayInfo.wholeSheet || overlayInfo.grid.rows * overlayInfo.grid.cols > 1);
+  const multiCelula = temMolde && !overlayInfo.wholeSheet;
+
   if (!overlayInfo && photo.orientation) {
     const isNatLandscape = editorW > editorH;
     const swapTo = (photo.orientation === 'retrato' && isNatLandscape) || (photo.orientation === 'paisagem' && !isNatLandscape);
@@ -110,20 +112,35 @@ export async function composePrintImage(photo) {
   //    (mesma semântica do editor React), para o print sair igual à tela.
   let pdvScale, pdvDiffX, pdvDiffY;
   if (photo.pdv) {
-    const cover = Math.max(editorW / origW, editorH / origH) * 100;
+    // A tela (setupCover) faz cover da JANELA do molde quando o formato tem
+    // uma — então o cover aqui tem de ser o da MESMA janela, senão o papel sai
+    // com zoom diferente do que a vendedora ajustou. `getOverlayWindow` cai na
+    // célula inteira quando não há janela medida (10x15/15x20), o que preserva
+    // o comportamento antigo sem nenhum desvio.
+    const win = config.getOverlayWindow(photo.key);
+    const cover = Math.max(win.w / origW, win.h / origH) * 100;
     const sd = cover * ((photo.scale ?? 100) / 100);
     const dw = (origW * sd) / 100;
     const dh = (origH * sd) / 100;
-    const bd = pdvBoxDims(editorW, editorH, photo.orientation, photo.key === 'bolinha', photo.key === 'polaroide');
+    const bd = config.getEditorBox(photo.key);
     const kx = bd.W > 0 ? editorW / bd.W : 1;
     const ky = bd.H > 0 ? editorH / bd.H : 1;
     pdvScale = sd;
-    pdvDiffX = (editorW - dw) / 2 + (photo.diffx || 0) * kx;
-    pdvDiffY = (editorH - dh) / 2 + (photo.diffy || 0) * ky;
+    // `imgX`/`imgX2` desenham a foto pelo CANTO SUPERIOR, então diff = topo.
+    // O editor posiciona a foto pelo CENTRO do box (translate(-50%,-50%)) e
+    // soma offX/offY — então o canto superior na escala do compose é:
+    //   centro do box + offset − metade da foto.
+    // A posição da JANELA entra sozinha em offX/offY (calculado pelo
+    // setupCover na tela); aqui só se converte px de box -> px de célula.
+    // Sem janela (10x15/15x20) isto vira (editorW - dw)/2 + offX*kx,
+    // idêntico ao comportamento antigo.
+    pdvDiffX = editorW / 2 + (photo.diffx || 0) * kx - dw / 2;
+    pdvDiffY = editorH / 2 + (photo.diffy || 0) * ky - dh / 2;
     console.log('[compose:pdv]', photo.key, photo.orientation,
       'zoom=', photo.scale, 'off=', photo.diffx, photo.diffy,
       'orig=', origW, 'x', origH, 'ed=', editorW, 'x', editorH, 'S=', +S.toFixed(2),
-      'scale=', +pdvScale.toFixed(2), 'diff=', +pdvDiffX.toFixed(2), +pdvDiffY.toFixed(2),
+      'win=', win.w, 'x', win.h, 'scale=', +pdvScale.toFixed(2),
+      'diff=', +pdvDiffX.toFixed(2), +pdvDiffY.toFixed(2),
       'box=', bd.W, 'x', bd.H, 'url=', photo.url);
   } else {
     console.log('[compose:auto]', photo.key, 'scale=', (photo.scale ?? 'auto'),
@@ -140,31 +157,32 @@ export async function composePrintImage(photo) {
   const imgX = diffx * S;
   const imgY = diffy * S;
 
-  ctx.save();
-  const cx = imgX + dispW / 2;
-  const cy = imgY + dispH / 2;
-  ctx.translate(cx, cy);
-  ctx.rotate((angle * Math.PI) / 180);
-  ctx.translate(-cx, -cy);
-  ctx.drawImage(img, imgX, imgY, dispW, dispH);
-  ctx.restore();
+  // No caso multi-célula a foto é desenhada depois, já no tamanho da célula —
+  // aqui seria desenhada na folha inteira e jogada fora. Pula.
+  if (!multiCelula) {
+    ctx.save();
+    const cx = imgX + dispW / 2;
+    const cy = imgY + dispH / 2;
+    ctx.translate(cx, cy);
+    ctx.rotate((angle * Math.PI) / 180);
+    ctx.translate(-cx, -cy);
+    ctx.drawImage(img, imgX, imgY, dispW, dispH);
+    ctx.restore();
+  }
 
-  // Sobre o molde (ex.: Bolinha) no papel inteiro. Os formatos de foto pura
-  // (10x15/15x20) têm molde apenas transparente com a logo antiga embutida no
-  // canto — a logo sai agora como escrita configurável (drawLogoBadge), não do PNG.
-  const temMoldeReal = overlayInfo?.grid && (overlayInfo.grid.rows * overlayInfo.grid.cols > 1 || photo.key === 'bolinha');
-  if (temMoldeReal) {
+  // ── Molde (overlay) ──────────────────────────────────────
+  if (temMolde) {
     const overlayImg = await loadImage(overlayInfo.image);
     const { rows, cols } = overlayInfo.grid;
     const cellW = printW / cols;
     const cellH = printH / rows;
 
-    // Para grids multi-célula (polaroid/passaporte) o desenho da foto é por
-    // célula. No Natal só existe o grid 1x1 (molde ocupa o papel inteiro),
-    // então desenhamos a foto no papel e o molde por cima.
-    if (rows === 1 && cols === 1) {
+    if (overlayInfo.wholeSheet) {
       ctx.drawImage(overlayImg, 0, 0, printW, printH);
     } else {
+      // 1) a foto é desenhada UMA vez, no tamanho da célula. Como o
+      //    `editorFrame` do formato É o tamanho da célula, S2 dá 1 e o
+      //    enquadramento escolhido na tela vale aqui, px a px.
       const cellCanvas = document.createElement('canvas');
       cellCanvas.width = cellW;
       cellCanvas.height = cellH;
@@ -184,12 +202,27 @@ export async function composePrintImage(photo) {
       cellCtx.translate(-cx2, -cy2);
       cellCtx.drawImage(img, imgX2, imgY2, dispW2, dispH2);
       cellCtx.restore();
-      cellCtx.drawImage(overlayImg, 0, 0, cellW, cellH);
+
+      // 2) ladrilha a MESMA foto na folha inteira
       ctx.fillStyle = config.image.canvasBackground;
       ctx.fillRect(0, 0, printW, printH);
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           ctx.drawImage(cellCanvas, c * cellW, r * cellH, cellW, cellH);
+        }
+      }
+
+      // 3) e só ENTÃO cada molde, em coordenadas absolutas da folha e SEM clip
+      // por célula — assim ele pode vazar sobre a foto vizinha, igual à
+      // impressão real, em vez de ser cortado na borda da célula. A
+      // calibração (overlayRect) compensa a margem que a impressora corta.
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const rect = overlayRect(
+            cellW, cellH, config.getCellCalibration(photo.key, r, c),
+            c * cellW, r * cellH,
+          );
+          ctx.drawImage(overlayImg, rect.x, rect.y, rect.w, rect.h);
         }
       }
     }
@@ -199,7 +232,8 @@ export async function composePrintImage(photo) {
   // configurável na frente da foto, mesma posição do .shop-logo do editor.
   // Desenhada no canvas horizontal ANTES da rotação 15x20 — o driver da ASK-400
   // gira de volta na impressão, então a escrita sai em pé no rodapé da foto.
-  if (photo.logo) {
+  // Só nos formatos que aceitam (10x15/15x20) — ver config.allowsLogo.
+  if (photo.logo && config.allowsLogo(photo.key)) {
     const logoTexto = String(photo.logoTexto || config.logoTexto || 'SHOPPING PALLADIUM').trim();
     if (logoTexto) drawLogoBadge(ctx, printW, printH, logoTexto);
   }
