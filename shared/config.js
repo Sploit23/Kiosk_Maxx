@@ -194,8 +194,14 @@ const OVERLAYS = {
 const EDITOR_BOX_H = {
   '10x15': 460,
   '15x20': 460,
-  bolinha: 480,
-  polaroide: 480,
+  // Bolinha/polaroide são mais ALTOS que 10x15/15x20 (célula 932x1228 em vez de
+  // 540x360), e numa tela baixa o box transbordava por cima da barra de zoom:
+  // o `.frame-zone` sobra `alturaTela - 278` (topbar 56 + wa-top 56 + padding do
+  // wa-body 44 + badge/gaps/controles ~122), então num monitor 720p sobra só 442.
+  // 430 deixa folga em 720p e ainda é grande o bastante para enquadrar com
+  // precisão. Reduzir aqui NÃO afeta o WYSIWYG: kx/ky derivam desta medida.
+  bolinha: 430,
+  polaroide: 430,
 };
 
 // ─── Janela da foto dentro do molde ─────────────────────────

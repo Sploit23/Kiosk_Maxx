@@ -509,6 +509,11 @@
   .frame-zone{
     flex:1;display:flex;align-items:center;justify-content:center;
     position:relative;min-width:0;min-height:0;
+    /* rede de segurança: um box maior que o espaço disponível era recortado
+       e INVADIA a barra de zoom embaixo (que tem pointer-events), deixando o
+       enquadramento impossível de ajustar. Com o box do tamanho certo isto
+       nunca dispara — é só para não depender da altura do monitor. */
+    overflow:hidden;
   }
   .frame-box{
     --frame-inset-x: 9px;   /* laterais — mantém 100% c/ impressão */
@@ -1311,7 +1316,11 @@ function img(seed){ return URL_POR_FOTO[seed] || PLACEHOLDER_IMG; }
 const pad2 = n => String(n).padStart(2, '0');
 function isoDataLocal(d){ return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
 
-/* Forma (label do protótipo) <-> meio/parcelas (API do sidecar) */
+/* Forma (label do protótipo) <-> meio/parcelas (API do sidecar).
+   meioDeForma devolve uma STRING para dinheiro/débito/pix e um OBJETO para
+   crédito — ler `.meio` direto da string dava `undefined` e o pagamento era
+   gravado no sidecar SEM meio (virando '—' no PDV e "não informado" no portal).
+   Use sempre meioInfoDeForma(), que normaliza os dois casos em {meio, parcelas}. */
 function meioDeForma(forma){
   if(forma === 'Dinheiro') return 'dinheiro';
   if(forma === 'Débito') return 'debito';
@@ -1321,12 +1330,18 @@ function meioDeForma(forma){
   if(forma === 'Crédito à vista') return { meio: 'credito', parcelas: null };
   return forma;
 }
+function meioInfoDeForma(forma){
+  const m = meioDeForma(forma);
+  return (typeof m === 'string')
+    ? { meio: (m && m !== '—') ? m : '', parcelas: null }
+    : { meio: m.meio || '', parcelas: m.parcelas || null };
+}
 function formaDeMeio(meio, parcelas){
   if(meio === 'dinheiro') return 'Dinheiro';
   if(meio === 'debito') return 'Débito';
   if(meio === 'pix') return 'PIX';
   if(meio === 'credito') return parcelas ? 'Crédito ' + parcelas + 'x' : 'Crédito à vista';
-  return meio || '—';
+  return (meio && meio !== '—') ? meio : '—';
 }
 
 /* ---------------- LOADERS (sidecar -> estado do protótipo) ---------------- */
@@ -1402,9 +1417,14 @@ function mapearPedido(p){
       : null,
     sessoes: sessoesOrigem,
     itens, total: p.total || 0,
-    pagamentosEfetivos: (p.pagamentos || []).map(pg => ({
-      forma: formaDeMeio(pg.meio, pg.parcelas), valor: pg.valor || 0, meio: pg.meio, parcelas: pg.parcelas,
-    })),
+    pagamentosEfetivos: (p.pagamentos || []).map(pg => {
+      // Legado: pedidos gravados antes do fix vinham sem `meio` (o sidecar
+      // guardava ''), e a forma virava '—'. Recupera o meio pela forma para
+      // o snapshot e o push ao portal não perderem o pagamento.
+      const forma = (pg.forma && pg.forma !== '—') ? pg.forma : formaDeMeio(pg.meio, pg.parcelas);
+      const meio = (pg.meio && pg.meio !== '—') ? pg.meio : (meioInfoDeForma(forma).meio || '');
+      return { forma, valor: pg.valor || 0, meio, parcelas: pg.parcelas };
+    }),
     status: ['PAGO', 'IMPRESSO'].includes(p.status) ? 'pago'
       : (p.status === 'CANCELADO' ? 'cancelado' : String(p.status || 'pago').toLowerCase()),
     operador: p.operador || '—',
@@ -1647,18 +1667,25 @@ function agendarSnapshotVendas(msec = 8000){
 }
 async function enviarSnapshotVendas(){
   _snapTimer = null;
+  // Envolve TUDO: uma exceção em qualquer ponto (inclusive no push
+  // pedido-a-pedido) impedia o snapshot de ir ao portal e o Financeiro só
+  // corrigia no próximo tick de 5 min — sem log nenhum do motivo.
+  try{ await _montarEEnviarSnapshot(); }
+  catch(e){ console.warn('[sync] falha ao montar/enviar o snapshot:', e); }
+}
+async function _montarEEnviarSnapshot(){
   const par = window.kioskPair;
   if(!par || !par.ok || !par.loja || !par.pareamento) return; // sem loja canônica (ainda não emparelhado)
   try{ await Promise.all([carregarPedidos(), carregarSessoes(), carregarCaixa()]); }catch{ }
   try{ await carregarRibbon(); }catch{ } // papel REAL da impressora (10x15/15x20) — o que o chip do PDV mostra
-  enviarPedidosDia();          // pedido-a-pedido (fire-and-forget, idempotente)
-  enviarAuditoriaPendente();   // usos de senha master pendentes
+  try{ enviarPedidosDia(); }catch(e){ console.warn('[sync] falha no push dos pedidos:', e); }
+  try{ enviarAuditoriaPendente(); }catch(e){ console.warn('[sync] falha no push da auditoria:', e); }
   const hojeIso = isoDataLocal(new Date());
   const key = new Date().toDateString();
   const pagos = pedidosRealizados.filter(p => p.status === 'pago' && p.horario && p.horario.toDateString() === key);
   const meios = { dinheiro: 0, debito: 0, credito: 0, pix: 0 };
   pagos.forEach(p => (p.pagamentosEfetivos || []).forEach(pg => {
-    const m = String(pg.meio || '').toLowerCase();
+    const m = String(pg.meio || meioInfoDeForma(pg.forma).meio || '').toLowerCase();
     if(meios[m] != null) meios[m] += (+pg.valor || 0);
   }));
   const sessoesHoje = sessions.filter(s => s.data === hojeIso);
@@ -1721,7 +1748,8 @@ const TIPOS_DESCONTO_CARRINHO = new Set([
 function montarPedidoPortal(p){
   const par = window.kioskPair && window.kioskPair.ok ? window.kioskPair : null;
   const pagamentos = (p.pagamentosEfetivos || []).map(r => ({
-    meio: r.meio || '', forma: r.forma || '', valor: +(r.valor || 0), parcelas: r.parcelas || 0,
+    meio: String(r.meio || meioInfoDeForma(r.forma).meio || '').toLowerCase(),
+    forma: r.forma || '—', valor: +(r.valor || 0), parcelas: r.parcelas || 0,
   }));
   const itens = (p.itens || []).map(it => {
     let tipo = 'tamanho';
@@ -1936,7 +1964,7 @@ async function criarPedidoReal(itens, total, origemPedidoId){
   if(!criado || !criado.success) return { error: (criado && criado.error) || 'Erro ao criar pedido' };
   const pago = await natalApi.registrarPagamento(criado.pedido.id, {
     pagamentos: efetivoRows.filter(r => r.valor > 0).map(r => {
-      const m = meioDeForma(r.forma);
+      const m = meioInfoDeForma(r.forma);
       return { meio: m.meio, valor: r.valor, parcelas: m.parcelas || undefined };
     }),
   });
@@ -2039,6 +2067,9 @@ async function finalizarVenda(){
   ribbonBalanceBase -= unidadesNoCarrinho();
   pedidosRealizados.push(novoPedido);
   agendarPedidosPortal(600); // sobe o pedido completo ao portal
+  // O snapshot diário (vendas.push) também sai aqui, sem esperar o SSE de
+  // pedido:pago: se o stream cair, a venda aparecia no portal só 5 min depois.
+  agendarSnapshotVendas(2500);
   recalcularVendasHoje();
   renderRibbonChip();
   iniciarImpressaoFotos(pedidoId, itensResumo); // ASK-400: composição + upload + impressão (em background)
@@ -4304,11 +4335,12 @@ function showReopenOrder(pedidoId){
               natalApi.atualizarPedido(p._realId || p.id, {
                 total: p.total,
                 pagamentos: p.pagamentosEfetivos.filter(r=>r.valor>0).map(r=>{
-                  const m = meioDeForma(r.forma);
-                  return { meio: m.meio || (typeof m === 'string' ? m : ''), valor: r.valor, parcelas: m.parcelas || undefined };
+                  const m = meioInfoDeForma(r.forma);
+                  return { meio: m.meio, valor: r.valor, parcelas: m.parcelas || undefined };
                 }),
               });
               agendarPedidosPortal(500);
+              agendarSnapshotVendas(1200);
             }catch(e){ console.warn('[pdv] falha ao persistir diferença:', e); }
             toast(`Diferença de ${fmt(valor)} cobrada no ${p.id} — motivo registrado`);
             renderPedidosScreen();
@@ -4329,11 +4361,12 @@ function showReopenOrder(pedidoId){
             // persiste a correção no sidecar (senão reverte após restart e o portal guarda a forma antiga)
             natalApi.atualizarPedido(p._realId || p.id, {
               pagamentos: rows.filter(r=>r.valor>0).map(r=>{
-                const m = meioDeForma(r.forma);
-                return { meio: m.meio || (typeof m === 'string' ? m : ''), valor: r.valor, parcelas: m.parcelas || undefined };
+                const m = meioInfoDeForma(r.forma);
+                return { meio: m.meio, valor: r.valor, parcelas: m.parcelas || undefined };
               }),
             });
             agendarPedidosPortal(500);
+            agendarSnapshotVendas(1200);
           }catch(e){ console.warn('[pdv] falha ao persistir forma de pagamento:', e); }
           toast(`Forma de pagamento do ${p.id} corrigida`);
           renderPedidosScreen();
@@ -4847,8 +4880,7 @@ function abrirTelaFechamento(){
     /* PRODUÇÃO: concilia o caixa no sidecar (meios declarados) antes de registrar na tela */
     const meios = {};
     porFormaResultado.forEach(r=>{
-      const m = meioDeForma(r.forma);
-      const chave = typeof m === 'string' ? m : m.meio;
+      const chave = meioInfoDeForma(r.forma).meio || r.forma;
       meios[chave] = +((meios[chave]||0) + r.real).toFixed(2);
     });
     const fechado = await natalApi.caixaFechar({
