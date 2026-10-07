@@ -993,7 +993,9 @@ const server = http.createServer(async (req, res) => {
         'Content-Type': 'image/jpeg',
         'Content-Length': fs.statSync(file).size,
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'no-cache',
+        // nomes de arquivo são únicos por sessão e nunca mudam: cache longo evita
+        // revalidar/re-baixar o mesmo JPEG a cada render (perf com 1000+ fotos/dia)
+        'Cache-Control': 'public, max-age=604800, immutable',
       });
       fs.createReadStream(file).pipe(res);
       return;

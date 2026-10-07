@@ -419,14 +419,15 @@
   }
   .lp-back:hover{color:#0a1626;}
   .lp-senha{font-family:Arial,sans-serif;font-size:20px;color:#0a1626;}
-  .lp-meta{font-size:11px;color:#45546a;margin-top:2px;}
+  .lp-senha-line{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+  .lp-meta{font-size:11px;color:#45546a;}
 
   .thumb-strip{
-    padding:12px;
-    display:grid;grid-template-columns:1fr 1fr;
+    padding:10px;
+    display:grid;grid-template-columns:repeat(3,1fr);
     grid-auto-rows:min-content;
     align-items:start;
-    gap:10px;
+    gap:8px;
     overflow-y:auto;
     flex:1;min-height:0;
   }
@@ -1085,8 +1086,10 @@
   <div class="left-panel">
     <div class="lp-head">
       <button class="lp-back" id="btn-voltar">← Voltar para sessões</button>
-      <div class="lp-senha" id="venda-senha">Senha —</div>
-      <div class="lp-meta" id="venda-meta">—</div>
+      <div class="lp-senha-line">
+        <span class="lp-senha" id="venda-senha">Sessão —</span>
+        <span class="lp-meta" id="venda-meta">—</span>
+      </div>
     </div>
     <div class="lp-stage">
       <div class="thumb-strip" id="thumb-strip"></div>
@@ -1440,6 +1443,78 @@ let _recarregando = false;
 let _sessionsLoaded = false;
 
 function img(seed){ return URL_POR_FOTO[seed] || PLACEHOLDER_IMG; }
+
+/* ================= PERF: cache de imagens redimensionadas =================
+   As sessões guardam o JPEG full-res da câmera; decodificar tudo de novo a
+   cada render de miniatura/editor trava o kiosk quando há muitas fotos no
+   dia. Aqui cada foto é redimensionada UMA vez (o decoder JPEG do Chromium
+   já decodifica em menor resolução via createImageBitmap+resize) e o resultado
+   fica num LRU de objectURLs — depois disso todo render é instantâneo.
+   A IMPRESSÃO não usa isto: composePrintImage baixa o original full-res. */
+const _imgCaches = {
+  thumb:  { max: 500, m: new Map() },
+  medium: { max: 150, m: new Map() },
+};
+const _imgPending = { thumb: new Map(), medium: new Map() };
+function _imgGet(level, key){
+  const e = _imgCaches[level].m.get(key);
+  if(!e) return null;
+  e.at = Date.now(); // LRU touch
+  return e.url;
+}
+function _imgSet(level, key, url){
+  const L = _imgCaches[level];
+  L.m.set(key, { url, at: Date.now() });
+  if(L.m.size > L.max){
+    const olds = [...L.m.entries()].sort((a,b)=>a[1].at-b[1].at);
+    let i = 0;
+    while(L.m.size > L.max && i < olds.length){
+      const [k, v] = olds[i++];
+      L.m.delete(k);
+      try{ URL.revokeObjectURL(v.url); }catch{}
+    }
+  }
+}
+async function _imgResize(foto, level, maxSize){
+  const key = foto.seed;
+  const hit = _imgGet(level, key);
+  if(hit) return hit;
+  let p = _imgPending[level].get(key);
+  if(p) return p;
+  p = (async ()=>{
+    try{
+      const res = await fetch(img(foto.seed));
+      if(!res.ok) return img(foto.seed);
+      const blob = await res.blob();
+      const bmp = await createImageBitmap(blob, { resizeWidth: maxSize, resizeQuality: 'medium' });
+      try{
+        const c = document.createElement('canvas');
+        c.width = bmp.width; c.height = bmp.height;
+        c.getContext('2d').drawImage(bmp, 0, 0);
+        const out = await new Promise(r=>c.toBlob(r, 'image/jpeg', .78));
+        const url = URL.createObjectURL(out);
+        _imgSet(level, key, url);
+        return url;
+      } finally { bmp.close(); }
+    }catch{ return img(foto.seed); }
+  })();
+  _imgPending[level].set(key, p);
+  p.then(()=>_imgPending[level].delete(key), ()=>_imgPending[level].delete(key));
+  return p;
+}
+// miniatura pequena (grades) / média (editor e visualizador) — sempre em cache
+const thumbUrl = (foto) => _imgResize(foto, 'thumb', 240);
+const mediumUrl = (foto) => _imgResize(foto, 'medium', 1200);
+// mostra placeholder já e troca quando a imagem redimensionada chegar
+// (só se o elemento ainda estiver anexado na tela — evita troca obsoleta)
+function swapImg(im, srcPromise){
+  srcPromise.then(u=>{
+    if(im && im.isConnected && !im.dataset.pd){ im.dataset.pd='1'; im.src = u; }
+  }).catch(()=>{
+    if(im && im.isConnected && !im.dataset.pd){ im.dataset.pd='1'; }
+  });
+}
+let _slideToken = 0;
 
 const pad2 = n => String(n).padStart(2, '0');
 function isoDataLocal(d){ return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
@@ -2505,7 +2580,7 @@ function renderSlideFotos(s){
   s.fotos.forEach((f, i)=>{
     const thumb = document.createElement('img');
     thumb.className = 'isv-thumb' + (i===slideIndiceAtual ? ' active' : '');
-    thumb.src = img(f.seed, 270, 340);
+    thumb.src = PLACEHOLDER_IMG;
     thumb.loading = 'lazy';
     thumb.decoding = 'async';
     thumb.alt = '';
@@ -2514,13 +2589,17 @@ function renderSlideFotos(s){
       slideIndiceAtual = i;
       renderSlideFotos(s);
     });
+    swapImg(thumb, thumbUrl(f));
     thumbs.appendChild(thumb);
   });
 
   const foto = s.fotos[slideIndiceAtual];
   document.getElementById('isv-atual').textContent = slideIndiceAtual+1;
   document.getElementById('isv-total').textContent = s.fotos.length;
-  imagem.src = img(foto.seed, 420, 520);
+  imagem.src = PLACEHOLDER_IMG;
+  const tok = ++_slideToken;
+  imagem.dataset.tok = String(tok);
+  mediumUrl(foto).then(u=>{ if(imagem.dataset.tok===String(tok)) imagem.src = u; }).catch(()=>{});
 
   thumbs.scrollLeft = thumbParaScrollar(thumbs, slideIndiceAtual);
   document.getElementById('isv-fechar').onclick = fecharSlideFotosSessao;
@@ -2542,8 +2621,8 @@ function openVenda(sessionId){
   closeCartDrawer();
   document.getElementById('screen-painel').classList.remove('active');
   document.getElementById('screen-venda').classList.add('active');
-  document.getElementById('venda-senha').textContent = 'Senha #'+currentSession.senha;
-  document.getElementById('venda-meta').textContent = `${currentSession.fotos.length} fotos · ${fmtDateLabel(currentSession.data, TODAY_ISO)} às ${currentSession.hora}`;
+  document.getElementById('venda-senha').textContent = `Sessão #${currentSession.senha}`;
+  document.getElementById('venda-meta').textContent = `· ${currentSession.fotos.length} fotos · ${fmtDateLabel(currentSession.data, TODAY_ISO)} às ${currentSession.hora}`;
   renderThumbs();
   renderOptions();
   renderFrame();
@@ -2575,7 +2654,16 @@ function renderThumbs(){
     const inCart = cart.some(c=>c.fotoSeed===f.seed && c.sessionId===currentSession.id);
     const div = document.createElement('div');
     div.className='thumb'+(f.seed===currentFoto.seed?' selected':'');
-    div.innerHTML = `<img src="${img(f.seed,270,340)}" loading="lazy" decoding="async">${inCart?'<div class="in-cart-badge">✓</div>':''}`;
+    const im = document.createElement('img');
+    im.src = PLACEHOLDER_IMG; im.loading='lazy'; im.decoding='async';
+    div.appendChild(im);
+    if(inCart){
+      const badge = document.createElement('div');
+      badge.className='in-cart-badge';
+      badge.textContent='✓';
+      div.appendChild(badge);
+    }
+    swapImg(im, thumbUrl(f));
     div.addEventListener('click', ()=>{
       currentFoto=f; currentTamanho=null; resetCrop();
       renderThumbs(); renderOptions(); renderFrame();
@@ -2897,8 +2985,9 @@ function renderFrame(){
     box.style.width='560px'; box.style.height='640px';
 
     const im=document.createElement('img');
-    im.src = img(currentFoto.seed, 500, 600);
+    im.src = PLACEHOLDER_IMG;
     box.appendChild(im);
+    swapImg(im, mediumUrl(currentFoto));
 
     controls.classList.add('disabled');
     return;
@@ -2943,10 +3032,11 @@ function renderFrame(){
 
   im = document.createElement('img');
   im.id='crop-img';
-  im.src = img(currentFoto.seed, 750, 950);
+  im.src = PLACEHOLDER_IMG;
   box.appendChild(im);
   // com molde de célula, o alvo do cover é a JANELA da foto (não o cartão todo)
   setupCover(im, W, H, temMoldeCelula ? config.windowInBox(t.id) : null);
+  swapImg(im, mediumUrl(currentFoto));
   cropContainer = box;
 
   if(temMoldeCelula){
@@ -3316,7 +3406,11 @@ function showItemReviewModal(cartId){
    mesma lógica de card/quadrado/círculo usada no editor, só que "congelada" pra conferência */
 function renderEnquadramentoEstatico(wrap, c){
   const t = TAMANHOS.find(x=>x.id===c.produtoId);
-  if(!t){ wrap.innerHTML = `<img src="${img(c.fotoSeed,420,520)}" style="max-width:100%;border-radius:10px;">`; return; }
+  if(!t){
+    wrap.innerHTML = `<img src="${PLACEHOLDER_IMG}" style="max-width:100%;border-radius:10px;">`;
+    swapImg(wrap.querySelector('img'), mediumUrl({ seed: c.fotoSeed }));
+    return;
+  }
 
   const ed = frameBoxDims(t);
   const moldCelula = config.getOverlay(t.id);
@@ -3339,8 +3433,9 @@ function renderEnquadramentoEstatico(wrap, c){
   const im = document.createElement('img');
   im.style.position='absolute'; im.style.top='50%'; im.style.left='50%';
   im.style.maxWidth='none'; im.style.transformOrigin='center center';
-  im.src = img(c.fotoSeed, 750, 950);
+  im.src = PLACEHOLDER_IMG;
   card.appendChild(im);
+  swapImg(im, mediumUrl({ seed: c.fotoSeed }));
 
   // O card é o box do editor reduzido (k), e `c.offX/offY` + `c.zoom` foram
   // salvos na escala do editor. Espelha o setupCover: cover da JANELA do molde
@@ -3397,7 +3492,7 @@ function renderCart(){
       div.className='cart-item';
       div.innerHTML = `
         <div class="ci-top">
-          <img src="${img(c.fotoSeed,90,90)}" loading="lazy" decoding="async">
+          <img src="${PLACEHOLDER_IMG}" loading="lazy" decoding="async">
           <div class="ci-info">
             <div class="ci-label">${c.label} · #${c.sessionSenha}</div>
             <div class="ci-price">${isZeradoPorCombo
@@ -3413,6 +3508,7 @@ function renderCart(){
           <button class="ci-qty-plus">+</button>
         </div>`}
       `;
+      swapImg(div.querySelector('img'), thumbUrl({ seed: c.fotoSeed }));
       if(!semStepper){
         div.querySelector('.ci-qty-minus').addEventListener('click', ev=>{
           ev.stopPropagation();
@@ -3546,7 +3642,7 @@ function showUpsellModal(opcoes, next){
 function showConferenceModal(){
   const linhas = cart.map(c=>`
     <div class="conf-item" data-cartid="${c.cartId}" ondblclick="showItemReviewModal('${c.cartId}')">
-      <img src="${img(c.fotoSeed,220,270)}" loading="lazy" decoding="async">
+      <img src="${PLACEHOLDER_IMG}" loading="lazy" decoding="async" class="conf-img">
       <div class="conf-info">
         <div class="conf-label">${c.qtd>1?c.qtd+'x ':''}${c.label}</div>
         <div class="conf-sub">Sessão #${c.sessionSenha} · duplo clique para conferir</div>
@@ -3566,6 +3662,10 @@ function showConferenceModal(){
     </div>
     <button class="btn-primary" id="btn-conf-continuar">Confirmar e ir para pagamento</button>
   `);
+  document.querySelectorAll('.conf-img').forEach((gi, i)=>{
+    const c = cart[i];
+    if(gi && c) swapImg(gi, thumbUrl({ seed: c.fotoSeed }));
+  });
   document.getElementById('btn-conf-continuar').addEventListener('click', ()=>{
     closeModal();
     openCheckoutPretendido();
@@ -4126,8 +4226,9 @@ function renderIdleMarquee(){
   if(capped.length === 0){ track.innerHTML = ''; return; }
   const loop = [...capped, ...capped];
   track.innerHTML = loop.map(seed =>
-    `<img src="${img(seed,260,330)}" loading="lazy" decoding="async">`
+    `<img src="${PLACEHOLDER_IMG}" loading="lazy" decoding="async" data-seed="${seed}">`
   ).join('');
+  track.querySelectorAll('img').forEach(gi=> swapImg(gi, thumbUrl({ seed: gi.dataset.seed })));
 }
 
 /* ---------------- CARRINHO GLOBAL (flutuante) ---------------- */
@@ -4780,7 +4881,7 @@ function reabrirParaEdicao(pedidoId){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-venda').classList.add('active');
   document.getElementById('venda-senha').textContent = `Editando ${p.id}`;
-  document.getElementById('venda-meta').textContent = `${fotosCombinadas.length} fotos · sessões #${p.sessoes.map(s=>s.senha).join(', #')}`;
+  document.getElementById('venda-meta').textContent = `· ${fotosCombinadas.length} fotos · sessões #${p.sessoes.map(s=>s.senha).join(', #')}`;
   renderThumbs(); renderOptions(); renderFrame(); renderCart(); updateRibbonBanner();
   toast(`Editando ${p.id} — ajuste tamanhos/quantidade e finalize para salvar as mudanças`);
 }
