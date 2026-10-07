@@ -64,8 +64,7 @@
   html[data-theme="light"] .left-panel,
   html[data-theme="light"] .lp-head,
   html[data-theme="light"] .cart-dock,
-  html[data-theme="light"] .side-controls,
-  html[data-theme="light"] .wa-top{border-color:rgba(212,162,76,.55);}
+  html[data-theme="light"] .side-controls{border-color:rgba(212,162,76,.55);}
   /* recebido/recibo segue "papel" claro, e o botão dourado da ASK-400 continua claro */
   html[data-theme="light"] .receipt{background:#fff;}
   html[data-theme="light"] .caixa-fechado-destaque{color:#b3453f;}
@@ -119,6 +118,8 @@
   }
   body.tb-hidden .tb-tab{display:flex;}
   .tb-tab:hover{border-color:var(--gold-500);}
+  /* chip de papel ao lado da aba fixa — mesmo visual, um pouco mais compacto */
+  .tb-tab #ribbon-chip{padding:5px 11px;font-size:11.5px;}
   /* com a barra retraída, os cabeçalhos das telas começam abaixo da aba fixa */
   body.tb-hidden .sessions-col .col-head{padding-top:52px;}
   body.tb-hidden .lp-head{padding-top:52px;}
@@ -548,11 +549,6 @@
       radial-gradient(circle at 78% 82%, rgba(108,155,209,.22), transparent 48%),
       linear-gradient(155deg, #eaf5ff 0%, #dcebfd 52%, #cfe6fb 100%);
   }
-  .wa-top{
-    padding:16px 28px;display:flex;justify-content:space-between;align-items:center;
-    border-bottom:2px solid rgba(212,162,76,.4);
-  }
-  .wa-top h2{margin:0;font-size:14px;color:#45546a;font-family:Arial,sans-serif;font-weight:600;}
   .wa-body{flex:1;display:flex;gap:26px;padding:22px 28px;min-height:0;}
 
   .photo-column{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;gap:14px;}
@@ -653,7 +649,7 @@
     white-space:nowrap;
   }
 
-  /* instrução "sem tamanho" — chip acima da foto (fluxo, não cobre a imagem) */
+  /* instrução "sem tamanho"/"Ajustando enquadramento" — chip acima da foto (fluxo, não cobre a imagem) */
   .size-hint{
     align-self:center;flex-shrink:0;
     background:rgba(255,255,255,.94);
@@ -742,7 +738,7 @@
     box-shadow:0 2px 8px rgba(212,162,76,.28);
   }
   .side-controls .oc-main{
-    display:flex;align-items:center;gap:10px;width:100%;
+    display:flex;align-items:center;gap:10px;width:100%;min-height:48px;
     background:none;border:none;padding:2px;cursor:pointer;text-align:left;
     font-family:inherit;
   }
@@ -765,7 +761,7 @@
 
   /* miniaturas: mockups em CSS (papel com a proporção real, moldura, bolinha, polaroid, ímã) */
   .side-controls .oc-thumb{
-    position:relative;flex-shrink:0;width:44px;aspect-ratio:2/3;
+    position:relative;flex-shrink:0;height:44px;aspect-ratio:2/3;
     background:#fff;border:1px solid #d9e3ef;border-radius:4px;
     box-shadow:0 2px 6px rgba(10,22,38,.18);overflow:hidden;
   }
@@ -773,7 +769,7 @@
     position:absolute;inset:3px;width:calc(100% - 6px);height:calc(100% - 6px);
     object-fit:cover;border-radius:2px;display:block;
   }
-  .side-controls .oc-thumb.oc-round{width:46px;aspect-ratio:1;border-radius:50%;}
+  .side-controls .oc-thumb.oc-round{aspect-ratio:1;border-radius:50%;}
   .side-controls .oc-thumb.oc-round img{border-radius:50%;}
   .side-controls .oc-thumb.oc-polaroid img{height:calc(100% - 16px);}
 
@@ -1117,9 +1113,6 @@
   </div>
 
   <div class="work-area">
-    <div class="wa-top">
-      <h2 id="wa-titulo">Selecione uma foto na lateral</h2>
-    </div>
     <div class="ribbon-banner" id="ribbon-banner" style="display:none;"></div>
     <div class="wa-body">
       <div class="photo-column">
@@ -2606,12 +2599,8 @@ function miniThumbTamanho(t){
 }
 
 function renderOptions(){
-  // sem tamanho escolhido a instrução sai do topo e passa a ficar centralizada
-  // no bloco do meio (renderFrame); o cabeçalho só aparece com o enquadramento ativo
-  document.querySelector('.wa-top').style.display = currentTamanho ? 'flex' : 'none';
-  document.getElementById('wa-titulo').textContent = currentTamanho
-    ? `Ajustando enquadramento — ${TAMANHOS.find(t=>t.id===currentTamanho).label}`
-    : '';
+  // a instrução "Ajustando enquadramento — <formato>" fica no chip acima da foto
+  // (renderFrame usa o #size-hint), não mais como cabeçalho no topo.
 
   const tList = document.getElementById('tamanhos-list');
   tList.innerHTML='';
@@ -2622,7 +2611,7 @@ function renderOptions(){
     card.innerHTML = `
       <button class="oc-main" type="button">
         ${miniThumbTamanho(t)}
-        <span class="oc-left"><span class="oc-name">${t.label}</span><span class="oc-price">${fmt(t.preco)}${t.nota?' · '+t.nota:''}</span></span>
+        <span class="oc-left"><span class="oc-name">${t.label}</span><span class="oc-price">${fmt(t.preco)}</span></span>
         <span class="oc-check">✓</span>
       </button>
     `;
@@ -2631,39 +2620,14 @@ function renderOptions(){
       renderOptions(); renderFrame();
     });
     if(selecionado){
-      const inlineCombo = COMBOS.find(c=>c.inline && c.tamanhoAlvo===t.id);
-      if(inlineCombo){
-        const itemExtra = inlineCombo.itens.find(it=>it.tipoProduto==='extra');
-        const catalogoExtra = catalogLookup(itemExtra.produtoId,'extra');
-
-        const somenteFotoBtn = document.createElement('button');
-        somenteFotoBtn.className='oc-add-inline';
-        somenteFotoBtn.textContent = `Adicionar somente foto: ${fmt(t.preco*addQty)}`;
-        somenteFotoBtn.addEventListener('click', ()=>{
-          addToCart('tamanho', t.id, t.label, t.preco, addQty);
-        });
-        card.appendChild(somenteFotoBtn);
-
-        const comboBtn = document.createElement('button');
-        comboBtn.className='oc-add-inline';
-        comboBtn.style.marginTop='6px';
-        comboBtn.style.background='rgba(212,162,76,.15)';
-        comboBtn.style.border='1px solid var(--gold-500)';
-        comboBtn.style.color='var(--gold-300)';
-        comboBtn.textContent = `Adicionar foto + ${catalogoExtra.label}: ${fmt(inlineCombo.valorCombo)}`;
-        comboBtn.addEventListener('click', ()=>{
-          adicionarFotoComComboInline(t, inlineCombo);
-        });
-        card.appendChild(comboBtn);
-      } else {
-        const addBtn = document.createElement('button');
-        addBtn.className='oc-add-inline';
-        addBtn.textContent='+ Adicionar este ao carrinho';
-        addBtn.addEventListener('click', ()=>{
-          addToCart('tamanho', t.id, t.label, t.preco, addQty);
-        });
-        card.appendChild(addBtn);
-      }
+      // padrão único para todos os tamanhos: botão que abre o pop de quantidade
+      const addBtn = document.createElement('button');
+      addBtn.className='oc-add-inline';
+      addBtn.textContent='+ Adicionar este ao carrinho';
+      addBtn.addEventListener('click', ()=>{
+        abrirQtdModal(t);
+      });
+      card.appendChild(addBtn);
     }
     tList.appendChild(card);
   });
@@ -2693,6 +2657,46 @@ function catalogLookup(produtoId, tipoProduto){
   if(produtoId==='item-encarte') return ITEM_ENCARTE;
   if(produtoId==='porta-cartao-postal') return PORTA_CARTAO_POSTAL;
   return tipoProduto==='tamanho' ? TAMANHOS.find(t=>t.id===produtoId) : EXTRAS.find(e=>e.id===produtoId);
+}
+
+/* pop de quantidade para o tamanho — aparece ao clicar em "+ Adicionar este ao carrinho" */
+function abrirQtdModal(t){
+  let qtd = 1;
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">Quantidade</div><h3>${t.label}</h3></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <p class="modal-sub">Quantas cópias deste tamanho você quer?</p>
+    <div style="display:flex;justify-content:center;margin:4px 0 18px;">
+      <div class="qty-controls">
+        <button type="button" id="qtd-modal-m">−</button>
+        <span id="qtd-modal-v">1</span>
+        <button type="button" id="qtd-modal-p">+</button>
+      </div>
+    </div>
+    <div class="pay-total-banner">
+      <span class="l">Total</span>
+      <span class="v" id="qtd-modal-total">${fmt(t.preco)}</span>
+    </div>
+    <button class="btn-primary" id="qtd-modal-ok" style="width:100%;margin-top:4px;">Adicionar ao carrinho</button>
+  `);
+  const val = document.getElementById('qtd-modal-v');
+  const total = document.getElementById('qtd-modal-total');
+  const update = ()=>{
+    val.textContent = qtd;
+    total.textContent = fmt(qtd*t.preco);
+  };
+  document.getElementById('qtd-modal-m').addEventListener('click', ()=>{
+    qtd = Math.max(1, qtd-1); update();
+  });
+  document.getElementById('qtd-modal-p').addEventListener('click', ()=>{
+    qtd = Math.min(20, qtd+1); update();
+  });
+  document.getElementById('qtd-modal-ok').addEventListener('click', ()=>{
+    addToCart('tamanho', t.id, t.label, t.preco, qtd);
+    closeModal();
+  });
 }
 
 function renderCombos(){
@@ -2731,33 +2735,8 @@ function renderCombos(){
   });
 }
 
-/* combo inline no card do tamanho — usa o enquadramento (zoom/posição) que a vendedora já ajustou,
-   em vez do enquadramento padrão que addCombo() usaria genericamente */
-function adicionarFotoComComboInline(t, combo){
-  const itemExtra = combo.itens.find(it=>it.tipoProduto==='extra');
-  const catalogoExtra = catalogLookup(itemExtra.produtoId, 'extra');
-  if(!temEstoqueFisico(itemExtra.produtoId, itemExtra.qtd)){
-    toast(`⚠ Estoque insuficiente de ${catalogoExtra.label}`);
-    return;
-  }
-  const itemFoto = combo.itens.find(it=>it.tipoProduto==='tamanho');
-  const somaIndividual = t.preco*itemFoto.qtd + catalogoExtra.preco*itemExtra.qtd;
-
-  addToCart('tamanho', t.id, t.label, t.preco, itemFoto.qtd); // enquadramento atual (zoom/offX/offY já ajustados)
-  addToCart('extra', itemExtra.produtoId, catalogoExtra.label, catalogoExtra.preco, itemExtra.qtd);
-
-  const diferenca = +(somaIndividual - combo.valorCombo).toFixed(2);
-  if(diferenca > 0){
-    cart.push({
-      cartId:'combo-desc-'+Date.now()+Math.random().toString(36).slice(2,5),
-      sessionId: currentSession.id, sessionSenha: currentSession.senha,
-      fotoSeed: currentFoto.seed, tipo:'combo-desconto', produtoId:'combo', label:`Desconto do combo "${combo.nome}"`,
-      qtd:1, precoUnit:-diferenca, preco:-diferenca
-    });
-    renderCart(); updateRibbonBanner();
-  }
-  toast(`Combo "${combo.nome}" adicionado ao carrinho`);
-}
+/* combo inline no card do tamanho foi removido — todos os tamanhos usam o mesmo
+   botão "+ Adicionar este ao carrinho" com pop de quantidade (abrirQtdModal). */
 
 function addCombo(comboId){
   const combo = COMBOS.find(c=>c.id===comboId);
@@ -2911,6 +2890,7 @@ function renderFrame(){
 
   if(!currentTamanho){
     document.getElementById('size-badge').style.display='none';
+    hint.textContent='Selecione um tamanho para ajustar o enquadramento';
     hint.style.display='block';
     box.className='frame-box no-frame';
     box.style.position='relative';
@@ -2924,7 +2904,8 @@ function renderFrame(){
     return;
   }
 
-  hint.style.display='none';
+  hint.textContent=`Ajustando enquadramento — ${TAMANHOS.find(x=>x.id===currentTamanho).label}`;
+  hint.style.display='block';
   controls.classList.remove('disabled');
   const t = TAMANHOS.find(x=>x.id===currentTamanho);
   const badge = document.getElementById('size-badge');
@@ -2946,6 +2927,7 @@ function renderFrame(){
   // o contorno redondo/agora vem do PNG do molde, não de border-radius CSS
   box.style.borderRadius = '4px';
 
+  // instrução de ajuste fica NO CHIP acima da foto (size-hint), não dentro do box
   let im, cropContainer;
 
   // A foto cobre o box INTEIRO (setupCover faz cover exato) e o molde real vem
@@ -5617,11 +5599,21 @@ function checarAlertaHorario(){
 (function(){
   const tbTab = document.getElementById('tb-tab');
   const brand = document.querySelector('.topbar .brand');
-  tbTab.addEventListener('click', ()=>{ document.body.classList.remove('tb-hidden'); });
+  const chip = document.getElementById('ribbon-chip');
+  const topbarRight = document.querySelector('.topbar-right');
+  const userChip = document.getElementById('user-chip');
+  /* o chip de papel não pode sumir com a barra retraída — ele anda junto com a aba fixa */
+  function syncRibbonChip(){
+    if(document.body.classList.contains('tb-hidden')) tbTab.appendChild(chip);
+    else topbarRight.insertBefore(chip, userChip);
+  }
+  tbTab.addEventListener('click', ()=>{ document.body.classList.remove('tb-hidden'); syncRibbonChip(); });
   brand.addEventListener('click', ()=>{
     document.getElementById('caixa-menu').style.display='none';
     document.body.classList.add('tb-hidden');
+    syncRibbonChip();
   });
+  syncRibbonChip(); // a barra já nasce retraída
 })();
 </script>
 </body>
