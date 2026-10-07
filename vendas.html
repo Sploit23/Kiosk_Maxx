@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Maxx Foto — Protótipo do sistema de vendas</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
     --navy-950:#0a1626;
@@ -62,12 +60,12 @@
       radial-gradient(circle at 75% 80%, rgba(108,155,209,.08), transparent 40%),
       #e8edf5;
   }
-  html[data-theme="light"] .idle-area{
-    background:
-      radial-gradient(circle at 30% 20%, rgba(212,162,76,.08), transparent 45%),
-      radial-gradient(circle at 75% 80%, rgba(108,155,209,.07), transparent 40%),
-      #e8edf5;
-  }
+  html[data-theme="light"] .sessions-col{border-right-color:rgba(212,162,76,.55);}
+  html[data-theme="light"] .left-panel,
+  html[data-theme="light"] .lp-head,
+  html[data-theme="light"] .cart-dock,
+  html[data-theme="light"] .side-controls,
+  html[data-theme="light"] .wa-top{border-color:rgba(212,162,76,.55);}
   /* recebido/recibo segue "papel" claro, e o botão dourado da ASK-400 continua claro */
   html[data-theme="light"] .receipt{background:#fff;}
   html[data-theme="light"] .caixa-fechado-destaque{color:#b3453f;}
@@ -84,11 +82,11 @@
     margin:0;
     background:var(--navy-950);
     color:var(--cream-100);
-    font-family:'Inter',sans-serif;
+    font-family:Arial,sans-serif;
     overflow:hidden;
   }
   h1,h2,h3,.display{
-    font-family:'Fraunces',serif;
+    font-family:Arial,sans-serif;
     font-weight:600;
     letter-spacing:.2px;
   }
@@ -104,15 +102,35 @@
     padding:0 22px;
     background:var(--navy-900);
     border-bottom:1px solid var(--navy-line);
+    transition:margin-top .3s ease;
   }
+  body.tb-hidden .topbar{margin-top:-56px;}
+  /* aba fixa que sobra quando a barra retraí — clique pra mostrar de novo */
+  .tb-tab{
+    position:fixed;top:0;left:0;z-index:60;
+    display:none;align-items:center;gap:9px;
+    padding:7px 14px 8px 11px;
+    background:var(--navy-900);
+    border:1px solid var(--navy-line);border-top:none;border-left:none;
+    border-radius:0 0 12px 0;
+    box-shadow:0 6px 16px rgba(0,0,0,.4);
+    cursor:pointer;
+    transition:border-color .15s;
+  }
+  body.tb-hidden .tb-tab{display:flex;}
+  .tb-tab:hover{border-color:var(--gold-500);}
+  /* com a barra retraída, os cabeçalhos das telas começam abaixo da aba fixa */
+  body.tb-hidden .sessions-col .col-head{padding-top:52px;}
+  body.tb-hidden .lp-head{padding-top:52px;}
+  body.tb-hidden .pedidos-wrap{padding-top:54px;}
   .brand{display:flex;align-items:center;gap:10px;}
   .brand .mark{
     width:30px;height:30px;border-radius:8px;
     background:linear-gradient(135deg,var(--gold-500),var(--gold-300));
     display:flex;align-items:center;justify-content:center;
-    color:var(--navy-950);font-weight:800;font-family:'Fraunces',serif;
+    color:var(--navy-950);font-weight:800;font-family:Arial,sans-serif;
   }
-  .brand .name{font-family:'Fraunces',serif;font-size:16px;font-weight:600;color:var(--gold-050);}
+  .brand .name{font-family:Arial,sans-serif;font-size:16px;font-weight:600;color:var(--gold-050);}
   .brand .loja{font-size:12px;color:var(--slate-400);margin-left:4px;}
   .topbar-right{display:flex;align-items:center;gap:18px;font-size:13px;color:var(--slate-300);}
   .clock{font-variant-numeric:tabular-nums;color:var(--gold-300);font-weight:600;}
@@ -120,7 +138,7 @@
     display:flex;align-items:center;gap:8px;
     background:var(--navy-800);border:1px solid var(--navy-line);
     padding:6px 12px;border-radius:20px;font-size:12px;
-    color:var(--slate-300);font-family:'Inter',sans-serif;
+    color:var(--slate-300);font-family:Arial,sans-serif;
   }
   .op-chip .dot{width:7px;height:7px;border-radius:50%;background:var(--green-500);}
   .op-chip .rb-p{display:inline-flex;align-items:baseline;gap:5px;}
@@ -184,7 +202,7 @@
     width:52px;height:52px;border-radius:14px;margin:0 auto 16px;
     background:linear-gradient(135deg,var(--gold-500),var(--gold-300));
     display:flex;align-items:center;justify-content:center;
-    color:var(--navy-950);font-weight:800;font-family:'Fraunces',serif;font-size:24px;
+    color:var(--navy-950);font-weight:800;font-family:Arial,sans-serif;font-size:24px;
   }
   .login-box h1{font-size:22px;margin:0 0 4px;color:var(--gold-050);}
   .login-sub{font-size:12.5px;color:var(--slate-400);margin:0 0 22px;}
@@ -199,7 +217,7 @@
   .login-user-avatar{
     width:34px;height:34px;border-radius:50%;flex-shrink:0;
     background:var(--navy-700);display:flex;align-items:center;justify-content:center;
-    font-family:'Fraunces',serif;color:var(--gold-300);font-weight:700;
+    font-family:Arial,sans-serif;color:var(--gold-300);font-weight:700;
   }
   .login-user-nome{font-size:13.5px;color:var(--cream-100);font-weight:600;}
   .login-user-funcao{font-size:11px;color:var(--slate-400);}
@@ -225,26 +243,28 @@
     height:calc(100% - 56px);
     display:none;
     overflow:hidden;
+    transition:height .3s ease;
   }
+  body.tb-hidden .screen{height:100%;}
   .screen.active{display:flex;}
 
   /* ===== SCREEN 1: PAINEL ===== */
   #screen-painel{width:100%;}
   .sessions-col{
     width:340px;min-width:340px;
-    background:var(--navy-900);
-    border-right:1px solid var(--navy-line);
+    background:#ffffff;
+    border-right:2px solid rgba(212,162,76,.4);
     display:flex;flex-direction:column;
   }
   .sessions-col .col-head{
     padding:18px 18px 10px;
   }
-  .sessions-col .col-head h2{font-size:15px;color:var(--gold-050);margin:0 0 3px;}
-  .sessions-col .col-head p{margin:0 0 12px;font-size:12px;color:var(--slate-400);}
+  .sessions-col .col-head h2{font-size:15px;color:#0a1626;margin:0 0 3px;}
+  .sessions-col .col-head p{margin:0 0 12px;font-size:12px;color:#45546a;}
   .session-search{
     width:100%;box-sizing:border-box;
     background:var(--navy-800);border:1px solid var(--navy-line);color:var(--gold-050);
-    font-family:'Inter';font-size:14px;font-weight:600;
+    font-family:Arial,sans-serif;font-size:14px;font-weight:600;
     padding:10px 12px;border-radius:8px;margin-bottom:8px;
     appearance:none;-webkit-appearance:none;
   }
@@ -253,7 +273,7 @@
   .date-select{
     width:100%;
     background:var(--navy-800);border:1px solid var(--navy-line);color:var(--gold-050);
-    font-family:'Inter';font-size:13px;font-weight:600;
+    font-family:Arial,sans-serif;font-size:13px;font-weight:600;
     padding:9px 12px;border-radius:8px;
     appearance:none;-webkit-appearance:none;
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23d4a24c'><path d='M5.25 7.5L10 12.25 14.75 7.5z'/></svg>");
@@ -282,7 +302,7 @@
   .session-card:active{transform:scale(.99);}
   .session-card.is-finalizada{opacity:.55;}
   .sc-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
-  .sc-senha{font-family:'Fraunces',serif;font-size:17px;color:var(--gold-050);}
+  .sc-senha{font-family:Arial,sans-serif;font-size:17px;color:var(--gold-050);}
   .sc-hora{font-size:11px;color:var(--slate-400);margin-top:2px;}
   .sc-tag{
     font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
@@ -304,33 +324,36 @@
   .idle-area{
     flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
     background:
-      radial-gradient(circle at 30% 20%, rgba(212,162,76,.07), transparent 45%),
-      radial-gradient(circle at 75% 80%, rgba(108,155,209,.06), transparent 40%),
-      var(--navy-950);
+      radial-gradient(circle at 30% 18%, rgba(212,162,76,.10), transparent 42%),
+      radial-gradient(circle at 78% 82%, rgba(108,155,209,.22), transparent 48%),
+      linear-gradient(155deg, #eaf5ff 0%, #dcebfd 52%, #cfe6fb 100%);
     text-align:center;padding:40px;
   }
   .idle-area .eyebrow{
-    font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--gold-500);margin-bottom:14px;
+    font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#8a5e12;margin-bottom:14px;
   }
-  .idle-area h1{font-size:42px;color:var(--gold-050);margin:0 0 12px;max-width:620px;}
-  .idle-area p{color:var(--slate-400);font-size:14px;max-width:460px;line-height:1.6;margin:0 0 28px;}
+  .idle-area h1{font-size:42px;color:#0a1626;margin:0 0 12px;max-width:620px;}
+  .idle-area p{color:#45546a;font-size:14px;max-width:460px;line-height:1.6;margin:0 0 28px;}
   .idle-stats{display:flex;gap:14px;}
   .idle-stat{
     background:var(--navy-900);border:1px solid var(--navy-line);
     border-radius:var(--radius-md);padding:16px 22px;min-width:120px;
   }
-  .idle-stat .n{font-family:'Fraunces',serif;font-size:26px;color:var(--gold-300);}
+  .idle-stat .n{font-family:Arial,sans-serif;font-size:26px;color:var(--gold-300);}
   .idle-stat .l{font-size:11px;color:var(--slate-400);margin-top:4px;}
   .idle-hint{
-    margin-top:34px;font-size:12px;color:var(--slate-500);
+    margin-top:34px;font-size:12px;color:#45546a;
     border:1px dashed var(--navy-line);padding:8px 16px;border-radius:20px;
   }
+  /* botões/textos que caem dentro da área clara das fotos */
+  .idle-area .lp-back{color:#45546a;}
+  .idle-area .lp-back:hover{color:#0a1626;}
 
   /* visualizador inline de fotos da sessão — gr. miniatura + preview grande */
   .idle-slide-viewer{width:100%;max-width:820px;}
   .isv-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
-  .isv-label{font-family:'Fraunces',serif;font-size:18px;color:var(--gold-050);}
-  .isv-count{font-size:12px;color:var(--slate-400);margin-top:2px;}
+  .isv-label{font-family:Arial,sans-serif;font-size:18px;color:#0a1626;}
+  .isv-count{font-size:12px;color:#45546a;margin-top:2px;}
   .isv-thumbs{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 12px;margin-bottom:6px;}
   .isv-thumb{width:88px;height:88px;border-radius:8px;object-fit:cover;cursor:pointer;flex-shrink:0;
     border:2px solid var(--navy-line);opacity:.85;transition:border-color .15s,opacity .15s;background:var(--navy-800);}
@@ -377,24 +400,25 @@
   .global-cart .gc-info{flex:1;}
   .global-cart .gc-label{font-size:12.5px;color:var(--cream-100);font-weight:600;}
   .global-cart .gc-sub{font-size:10.5px;color:var(--slate-400);margin-top:1px;}
-  .global-cart .gc-total{font-family:'Fraunces',serif;font-size:16px;color:var(--gold-300);}
+  .global-cart .gc-total{font-family:Arial,sans-serif;font-size:16px;color:var(--gold-300);}
 
   /* ===== SCREEN 2: VENDA ===== */
   #screen-venda{width:100%;}
   .left-panel{
     width:300px;min-width:300px;
-    background:var(--navy-900);
-    border-right:1px solid var(--navy-line);
+    background:#ffffff;
+    border-right:2px solid rgba(212,162,76,.4);
     display:flex;flex-direction:column;
+    position:relative;
   }
-  .lp-head{padding:16px 16px 10px;border-bottom:1px solid var(--navy-line);}
+  .lp-head{padding:16px 16px 10px;border-bottom:2px solid rgba(212,162,76,.4);}
   .lp-back{
-    background:none;border:none;color:var(--slate-300);font-size:12px;
+    background:none;border:none;color:#45546a;font-size:12px;
     display:flex;align-items:center;gap:6px;margin-bottom:10px;padding:0;
   }
-  .lp-back:hover{color:var(--gold-300);}
-  .lp-senha{font-family:'Fraunces',serif;font-size:20px;color:var(--gold-050);}
-  .lp-meta{font-size:11px;color:var(--slate-400);margin-top:2px;}
+  .lp-back:hover{color:#0a1626;}
+  .lp-senha{font-family:Arial,sans-serif;font-size:20px;color:#0a1626;}
+  .lp-meta{font-size:11px;color:#45546a;margin-top:2px;}
 
   .thumb-strip{
     padding:12px;
@@ -403,7 +427,7 @@
     align-items:start;
     gap:10px;
     overflow-y:auto;
-    max-height:38vh;
+    flex:1;min-height:0;
   }
   .thumb{
     position:relative;border-radius:8px;overflow:hidden;cursor:pointer;
@@ -419,17 +443,44 @@
     z-index:2;
   }
 
-  .cart-panel{
-    flex:1;display:flex;flex-direction:column;
-    border-top:1px solid var(--navy-line);
-    min-height:0;
+  .cart-dock{
+    flex-shrink:0;display:flex;flex-direction:column;gap:8px;
+    padding:12px;border-top:2px solid rgba(212,162,76,.4);background:#fff;
   }
+  .cart-summary{
+    width:100%;padding:13px;border-radius:10px;border:none;cursor:pointer;
+    background:linear-gradient(135deg,var(--gold-500),#c78f38);
+    color:var(--navy-950);font-size:13.5px;font-weight:800;letter-spacing:.3px;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+  }
+  .cart-summary .cs-icon{font-size:17px;line-height:1;}
+  .cart-summary:disabled{opacity:.35;cursor:not-allowed;}
+  .cart-summary:not(:disabled):hover{filter:brightness(1.08);}
+
+  /* palco do painel esquerdo: miniaturas + gaveta do carrinho por cima */
+  .lp-stage{
+    position:relative;flex:1;min-height:0;
+    display:flex;flex-direction:column;
+  }
+  .cart-drawer{
+    position:absolute;inset:0;z-index:40;
+    background:#fff;display:flex;flex-direction:column;
+    visibility:hidden;opacity:0;transform:translateY(12px);
+    transition:opacity .18s ease,transform .18s ease,visibility .18s;
+  }
+  .cart-drawer.open{visibility:visible;opacity:1;transform:none;}
+  .cart-close{
+    margin-left:auto;width:28px;height:28px;border-radius:50%;flex-shrink:0;
+    background:var(--navy-850);border:1px solid var(--navy-line);
+    color:var(--cream-100);font-size:14px;line-height:1;cursor:pointer;
+  }
+  .cart-close:hover{border-color:var(--red-400);color:var(--red-400);}
   .cart-head{padding:12px 16px 8px;display:flex;justify-content:space-between;align-items:center;}
-  .cart-head h3{margin:0;font-size:13px;color:var(--gold-050);}
-  .cart-count{font-size:11px;color:var(--slate-400);}
+  .cart-head h3{margin:0;font-size:13px;color:#0a1626;}
+  .cart-count{font-size:11px;color:#45546a;}
   .cart-items{flex:1;overflow-y:auto;padding:0 12px;display:flex;flex-direction:column;gap:6px;}
   .cart-empty{
-    color:var(--slate-500);font-size:12px;text-align:center;padding:26px 10px;
+    color:#45546a;font-size:12px;text-align:center;padding:26px 10px;
     border:1px dashed var(--navy-line);border-radius:8px;margin:6px 4px;
   }
   .cart-item{
@@ -460,8 +511,8 @@
 
   .cart-footer{padding:14px 16px 16px;border-top:1px solid var(--navy-line);}
   .cart-total-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;}
-  .cart-total-row .lbl{font-size:12px;color:var(--slate-400);}
-  .cart-total-row .val{font-family:'Fraunces',serif;font-size:24px;color:var(--gold-300);}
+  .cart-total-row .lbl{font-size:12px;color:#45546a;}
+  .cart-total-row .val{font-family:Arial,sans-serif;font-size:24px;color:#8a5e12;}
   .btn-finalizar{
     width:100%;padding:13px;border:none;border-radius:10px;
     background:linear-gradient(135deg,var(--gold-500),#c78f38);
@@ -471,17 +522,17 @@
   .btn-finalizar:not(:disabled):hover{filter:brightness(1.08);}
   .btn-desconto-venda{
     width:100%;padding:9px;border-radius:8px;margin-bottom:8px;
-    background:none;border:1px solid var(--navy-line);color:var(--slate-300);font-size:12px;
+    background:none;border:1px solid var(--navy-line);color:#45546a;font-size:12px;
   }
   .btn-desconto-venda:disabled{opacity:.3;cursor:not-allowed;}
-  .btn-desconto-venda:not(:disabled):hover{border-color:var(--gold-500);color:var(--gold-300);}
+  .btn-desconto-venda:not(:disabled):hover{border-color:var(--gold-500);color:#0a1626;}
 
   /* CENTER WORK AREA */
   .ribbon-banner{
     display:flex;align-items:center;gap:12px;
-    background:linear-gradient(90deg,rgba(193,102,107,.16),rgba(193,102,107,.06));
+    background:linear-gradient(90deg,rgba(193,102,107,.22),rgba(193,102,107,.10));
     border-bottom:2px solid var(--red-400);
-    color:#f0c9cb;font-size:14px;font-weight:600;
+    color:#8f2f34;font-size:14px;font-weight:600;
     padding:12px 28px;
   }
   .ribbon-banner .rb-icon{font-size:20px;}
@@ -490,18 +541,24 @@
     background:var(--navy-900);border:1px solid var(--gold-500);
     padding:6px 12px;border-radius:20px;white-space:nowrap;
   }
-  .work-area{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;}
+  .work-area{
+    flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;
+    background:
+      radial-gradient(circle at 30% 18%, rgba(212,162,76,.10), transparent 42%),
+      radial-gradient(circle at 78% 82%, rgba(108,155,209,.22), transparent 48%),
+      linear-gradient(155deg, #eaf5ff 0%, #dcebfd 52%, #cfe6fb 100%);
+  }
   .wa-top{
     padding:16px 28px;display:flex;justify-content:space-between;align-items:center;
-    border-bottom:1px solid var(--navy-line);
+    border-bottom:2px solid rgba(212,162,76,.4);
   }
-  .wa-top h2{margin:0;font-size:14px;color:var(--slate-300);font-family:'Inter';font-weight:600;}
+  .wa-top h2{margin:0;font-size:14px;color:#45546a;font-family:Arial,sans-serif;font-weight:600;}
   .wa-body{flex:1;display:flex;gap:26px;padding:22px 28px;min-height:0;}
 
   .photo-column{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;gap:14px;}
   .size-badge{
     align-self:center;
-    font-family:'Fraunces',serif;font-size:22px;color:var(--gold-300);
+    font-family:Arial,sans-serif;font-size:22px;color:var(--gold-300);
     background:var(--navy-900);border:1px solid var(--gold-500);
     padding:8px 22px;border-radius:30px;
   }
@@ -596,16 +653,24 @@
     white-space:nowrap;
   }
 
-  .hint-select{
-    color:var(--slate-500);font-size:13px;text-align:center;max-width:280px;
+  /* instrução "sem tamanho" — chip acima da foto (fluxo, não cobre a imagem) */
+  .size-hint{
+    align-self:center;flex-shrink:0;
+    background:rgba(255,255,255,.94);
+    border:1px solid rgba(212,162,76,.55);
+    color:#0a1626;font-size:15px;font-weight:700;text-align:center;
+    padding:10px 22px;border-radius:24px;
+    box-shadow:0 4px 14px rgba(10,22,38,.15);
+    max-width:80%;
   }
 
-  /* barra de ajuste de enquadramento — embaixo da foto */
+  /* barra de ajuste de enquadramento — embaixo da foto (clara sobre o fundo azul) */
   .frame-controls{
-    background:var(--navy-900);border:1px solid var(--navy-line);border-radius:12px;
+    background:#fff;border:1px solid rgba(212,162,76,.5);border-radius:12px;
     padding:12px 16px;flex-shrink:0;
+    box-shadow:0 4px 14px rgba(10,22,38,.08);
   }
-  .frame-controls.disabled{opacity:.4;pointer-events:none;}
+  .frame-controls.disabled{opacity:.6;pointer-events:none;}
   .fc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .fc-zoom{display:flex;align-items:center;gap:8px;flex:1;min-width:180px;}
   .fc-label{font-size:11px;color:var(--slate-400);white-space:nowrap;}
@@ -623,12 +688,27 @@
     font-size:12px;color:var(--slate-300);
   }
   .fc-logo input{accent-color:var(--gold-500);}
+  /* filhos da barra: fundo claro, texto escuro (não afeta os fc-btn dos modais) */
+  .frame-controls .fc-label{color:#45546a;}
+  .frame-controls .fc-val{color:#8a5e12;font-weight:700;}
+  .frame-controls .fc-btn{background:#f2f6fb;border-color:#d9e3ef;color:#33455e;}
+  .frame-controls .fc-btn:hover{border-color:var(--gold-500);color:#0a1626;}
+  .frame-controls .fc-btn.active{background:rgba(212,162,76,.18);border-color:var(--gold-500);color:#8a5e12;}
+  .frame-controls .fc-btn-undo{color:#6b7a90;}
+  .frame-controls .fc-logo{color:#45546a;}
 
-  .side-controls{width:300px;min-width:280px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;min-height:0;padding-right:4px;}
+  .side-controls{
+    width:300px;min-width:280px;display:flex;flex-direction:column;gap:16px;
+    overflow-y:auto;min-height:0;
+    background:#ffffff;
+    border-left:2px solid rgba(212,162,76,.4);
+    margin:-22px -28px -22px 0;
+    padding:22px 20px 22px 20px;
+  }
 
   .option-group{}
   .option-group h4{
-    margin:0 0 10px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--slate-500);
+    margin:0 0 10px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#45546a;
   }
   .option-cards{display:flex;flex-direction:column;gap:8px;}
   .option-card{
@@ -640,11 +720,6 @@
   .option-card .oc-name{font-size:13px;color:var(--cream-100);}
   .option-card .oc-price{font-size:11px;color:var(--slate-400);margin-top:1px;}
   .option-card.selected{border-color:var(--gold-500);background:rgba(212,162,76,.08);}
-  .oc-select-btn{
-    background:var(--navy-800);border:1px solid var(--navy-line);color:var(--slate-300);
-    font-size:11px;padding:6px 10px;border-radius:6px;
-  }
-  .oc-select-btn.is-selected{background:var(--gold-500);color:var(--navy-950);border-color:var(--gold-500);font-weight:700;}
   .oc-add-btn{
     background:var(--navy-800);border:1px solid var(--navy-line);color:var(--slate-300);
     font-size:11px;padding:6px 10px;border-radius:6px;
@@ -657,6 +732,51 @@
   }
   .oc-add-inline:hover{filter:brightness(1.08);}
 
+  /* coluna da direita: os produtos viram botões de verdade, com miniatura do que é */
+  .side-controls .option-card{
+    display:block;padding:8px;background:#f7fafd;
+    border:1px solid #d9e3ef;border-radius:12px;
+  }
+  .side-controls .option-card.selected{
+    border-color:var(--gold-500);background:rgba(212,162,76,.12);
+    box-shadow:0 2px 8px rgba(212,162,76,.28);
+  }
+  .side-controls .oc-main{
+    display:flex;align-items:center;gap:10px;width:100%;
+    background:none;border:none;padding:2px;cursor:pointer;text-align:left;
+    font-family:inherit;
+  }
+  .side-controls .oc-left{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .side-controls .oc-name{font-size:13px;font-weight:700;color:#0a1626;}
+  .side-controls .oc-price{font-size:11px;color:#45546a;margin-top:1px;}
+  .side-controls .oc-check{
+    display:none;flex-shrink:0;width:26px;height:26px;border-radius:50%;
+    background:var(--gold-500);color:var(--navy-950);
+    font-size:14px;font-weight:800;align-items:center;justify-content:center;
+  }
+  .side-controls .option-card.selected .oc-check{display:flex;}
+  .side-controls .oc-plus{
+    flex-shrink:0;width:26px;height:26px;border-radius:50%;
+    background:var(--gold-500);color:var(--navy-950);
+    font-size:16px;font-weight:800;line-height:1;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .side-controls .oc-add-inline{display:block;width:100%;}
+
+  /* miniaturas: mockups em CSS (papel com a proporção real, moldura, bolinha, polaroid, ímã) */
+  .side-controls .oc-thumb{
+    position:relative;flex-shrink:0;width:44px;aspect-ratio:2/3;
+    background:#fff;border:1px solid #d9e3ef;border-radius:4px;
+    box-shadow:0 2px 6px rgba(10,22,38,.18);overflow:hidden;
+  }
+  .side-controls .oc-thumb img{
+    position:absolute;inset:3px;width:calc(100% - 6px);height:calc(100% - 6px);
+    object-fit:cover;border-radius:2px;display:block;
+  }
+  .side-controls .oc-thumb.oc-round{width:46px;aspect-ratio:1;border-radius:50%;}
+  .side-controls .oc-thumb.oc-round img{border-radius:50%;}
+  .side-controls .oc-thumb.oc-polaroid img{height:calc(100% - 16px);}
+
   .combo-card{
     background:var(--navy-900);border:1px solid var(--gold-500);border-radius:10px;
     padding:10px 12px;
@@ -666,7 +786,7 @@
   .combo-card .combo-bottom{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;}
   .combo-card .combo-precos{display:flex;flex-direction:column;}
   .combo-card .combo-de{font-size:10px;color:var(--slate-500);text-decoration:line-through;}
-  .combo-card .combo-por{font-family:'Fraunces',serif;font-size:15px;color:var(--gold-300);}
+  .combo-card .combo-por{font-family:Arial,sans-serif;font-size:15px;color:var(--gold-300);}
   .combo-card .oc-add-btn{font-size:10.5px;padding:6px 9px;white-space:nowrap;}
   .combo-card .oc-add-btn:disabled{opacity:.4;}
 
@@ -684,7 +804,7 @@
     font-size:15px;line-height:1;font-weight:700;
   }
   .qty-controls button:hover{border-color:var(--gold-500);}
-  .qty-controls span{font-family:'Fraunces',serif;font-size:16px;color:var(--cream-100);min-width:18px;text-align:center;}
+  .qty-controls span{font-family:Arial,sans-serif;font-size:16px;color:var(--cream-100);min-width:18px;text-align:center;}
 
   .btn-add-cart{
     padding:13px;border:none;border-radius:10px;
@@ -720,7 +840,7 @@
     background:var(--navy-900);border:1px solid var(--navy-line);border-radius:12px;
     padding:14px 20px;min-width:140px;flex:1;
   }
-  .ped-stat .n{font-family:'Fraunces',serif;font-size:24px;color:var(--gold-300);}
+  .ped-stat .n{font-family:Arial,sans-serif;font-size:24px;color:var(--gold-300);}
   .ped-stat .l{font-size:11px;color:var(--slate-400);margin-top:4px;}
   .ped-columns{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:8px;}
   .ped-col h3{font-size:13px;color:var(--gold-050);margin:0 0 10px;}
@@ -768,7 +888,7 @@
     padding:12px 16px;margin-bottom:16px;
   }
   .pay-total-banner .l{font-size:12px;color:var(--slate-400);}
-  .pay-total-banner .v{font-family:'Fraunces',serif;font-size:22px;color:var(--gold-300);}
+  .pay-total-banner .v{font-family:Arial,sans-serif;font-size:22px;color:var(--gold-300);}
 
   .pay-rows{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;}
   .pay-row{display:flex;gap:8px;align-items:center;}
@@ -827,16 +947,18 @@
   .conf-info{flex:1;}
   .conf-label{font-size:14px;color:var(--cream-100);font-weight:600;}
   .conf-sub{font-size:11.5px;color:var(--slate-400);margin-top:2px;}
-  .conf-price{font-family:'Fraunces',serif;font-size:16px;color:var(--gold-300);}
+  .conf-price{font-family:Arial,sans-serif;font-size:16px;color:var(--gold-300);}
 
   /* recibo */
   .receipt{
     background:var(--cream-100);color:var(--navy-950);border-radius:10px;
-    padding:18px 18px;font-family:'Inter';margin-bottom:16px;
+    padding:18px 18px;font-family:Arial,sans-serif;margin-bottom:16px;
   }
-  .receipt h4{margin:0 0 2px;font-family:'Fraunces',serif;font-size:16px;text-align:center;}
+  .receipt h4{margin:0 0 2px;font-family:Arial,sans-serif;font-size:16px;text-align:center;}
   .receipt .rc-sub{text-align:center;font-size:10.5px;color:#666;margin-bottom:10px;}
   .receipt .rc-line{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px dashed #ccc;}
+      .receipt .rc-secao{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:#777;
+        padding:0 0 6px;margin-bottom:2px;border-bottom:1px solid #bbb;font-weight:700;}
   .receipt .rc-total{display:flex;justify-content:space-between;font-size:14px;font-weight:800;padding-top:8px;margin-top:6px;border-top:1px solid #999;}
   .receipt .rc-pay{font-size:11px;color:#555;margin-top:8px;}
 
@@ -860,7 +982,7 @@
 </style>
 <script>try{if(localStorage.getItem('natal-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch{}</script>
 </head>
-<body>
+<body class="tb-hidden">
 
 <!-- ===================== TELA DE LOGIN ===================== -->
 <div class="login-overlay" id="login-overlay">
@@ -907,6 +1029,14 @@
     <button class="op-chip op-chip-btn" id="btn-tema" title="Alternar tema claro/escuro">🌗</button>
     <button class="op-chip op-chip-btn" id="btn-fullscreen" title="Sair da tela cheia">⛶</button>
     <div class="clock" id="clock">--:--:--</div>
+  </div>
+</div>
+
+<!-- aba fixa da barra retraída — clique pra mostrar a topbar -->
+<div class="tb-tab" id="tb-tab" title="Mostrar barra de ferramentas">
+  <div class="brand">
+    <div class="mark">M</div>
+    <div class="name">Maxx Foto</div>
   </div>
 </div>
 
@@ -962,21 +1092,27 @@
       <div class="lp-senha" id="venda-senha">Senha —</div>
       <div class="lp-meta" id="venda-meta">—</div>
     </div>
-    <div class="thumb-strip" id="thumb-strip"></div>
-    <div class="cart-panel">
-      <div class="cart-head">
-        <h3>Carrinho</h3>
-        <div class="cart-count" id="cart-count">0 itens</div>
-      </div>
-      <div class="cart-items" id="cart-items"></div>
-      <div class="cart-footer">
-        <div class="cart-total-row">
-          <div class="lbl">Total</div>
-          <div class="val" id="cart-total">R$ 0,00</div>
+    <div class="lp-stage">
+      <div class="thumb-strip" id="thumb-strip"></div>
+      <div class="cart-drawer" id="cart-drawer">
+        <div class="cart-head">
+          <h3>Carrinho</h3>
+          <div class="cart-count" id="cart-count">0 itens</div>
+          <button class="cart-close" id="cart-close" title="Fechar carrinho">×</button>
         </div>
-        <button class="btn-desconto-venda" id="btn-desconto-venda" disabled>🏷 Aplicar desconto</button>
-        <button class="btn-finalizar" id="btn-finalizar" disabled>Finalizar pedido</button>
+        <div class="cart-items" id="cart-items"></div>
+        <div class="cart-footer">
+          <div class="cart-total-row">
+            <div class="lbl">Total</div>
+            <div class="val" id="cart-total">R$ 0,00</div>
+          </div>
+          <button class="btn-desconto-venda" id="btn-desconto-venda" disabled>🏷 Aplicar desconto</button>
+          <button class="btn-finalizar" id="btn-finalizar" disabled>Finalizar pedido</button>
+        </div>
       </div>
+    </div>
+    <div class="cart-dock">
+      <button class="cart-summary" id="cart-summary" disabled><span class="cs-icon">🛒</span><span id="cart-summary-text">0 itens · R$ 0,00</span></button>
     </div>
   </div>
 
@@ -988,10 +1124,9 @@
     <div class="wa-body">
       <div class="photo-column">
         <div class="size-badge" id="size-badge" style="display:none;"></div>
+        <div class="size-hint" id="size-hint">Selecione um tamanho para ajustar o enquadramento</div>
         <div class="frame-zone">
-          <div class="frame-box no-frame" id="frame-box">
-            <div class="hint-select" id="frame-hint">Selecione um tamanho ao lado para ver o enquadramento de impressão</div>
-          </div>
+          <div class="frame-box no-frame" id="frame-box"></div>
         </div>
 
         <div class="frame-controls disabled" id="frame-controls">
@@ -1322,19 +1457,25 @@ function isoDataLocal(d){ return d.getFullYear() + '-' + pad2(d.getMonth() + 1) 
    gravado no sidecar SEM meio (virando '—' no PDV e "não informado" no portal).
    Use sempre meioInfoDeForma(), que normaliza os dois casos em {meio, parcelas}. */
 function meioDeForma(forma){
-  if(forma === 'Dinheiro') return 'dinheiro';
-  if(forma === 'Débito') return 'debito';
-  if(forma === 'PIX') return 'pix';
-  const m = /^Crédito (\d+)x$/.exec(forma || '');
-  if(m) return { meio: 'credito', parcelas: +m[1] };
-  if(forma === 'Crédito à vista') return { meio: 'credito', parcelas: null };
-  return forma;
+  // Normaliza (minúsculas, sem acento, espaços) porque a forma pode vir de
+  // texto digitado, de pedido legado ou do seletor: qualquer variação tem que
+  // cair em um dos 4 meios conhecidos — senão o valor sobe ao portal sem forma.
+  const f = String(forma || '').trim();
+  const chave = f.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if(chave.startsWith('dinheiro')) return 'dinheiro';
+  if(chave.startsWith('debito')) return 'debito';
+  if(chave.startsWith('pix')) return 'pix';
+  const parc = /^credito\s+(\d+)\s*x$/.exec(chave);
+  if(parc) return { meio: 'credito', parcelas: +parc[1] };
+  if(chave.startsWith('credito') || chave.startsWith('cartao')) return { meio: 'credito', parcelas: null };
+  return f;
 }
 function meioInfoDeForma(forma){
   const m = meioDeForma(forma);
-  return (typeof m === 'string')
-    ? { meio: (m && m !== '—') ? m : '', parcelas: null }
-    : { meio: m.meio || '', parcelas: m.parcelas || null };
+  if(typeof m !== 'string') return { meio: m.meio || '', parcelas: m.parcelas || null };
+  // '', '-', '—' (placeholder de pedido sem forma) = forma não informada.
+  const chave = m.trim().toLowerCase().replace(/[\u2010-\u2015]/g, '-');
+  return { meio: (!chave || /^-+$/.test(chave)) ? '' : m, parcelas: null };
 }
 function formaDeMeio(meio, parcelas){
   if(meio === 'dinheiro') return 'Dinheiro';
@@ -2044,6 +2185,7 @@ async function finalizarVenda(){
   if(r.error){ toast('⚠ ' + r.error); return; }
 
   const novoPedido = r.pedido;
+  closeCartDrawer();
   const pedidoId = novoPedido._realId || novoPedido.id;
   const itensResumo = [...cart];
   const pagamentos = efetivoRows.map(r => r.forma + ': ' + fmt(r.valor)).join(' · ');
@@ -2404,6 +2546,7 @@ function openVenda(sessionId){
   currentFoto = currentSession.fotos[0];
   currentTamanho = null;
   resetCrop();
+  closeCartDrawer();
   document.getElementById('screen-painel').classList.remove('active');
   document.getElementById('screen-venda').classList.add('active');
   document.getElementById('venda-senha').textContent = 'Senha #'+currentSession.senha;
@@ -2416,6 +2559,7 @@ function openVenda(sessionId){
 }
 
 document.getElementById('btn-voltar').addEventListener('click', ()=>{
+  closeCartDrawer();
   document.getElementById('screen-venda').classList.remove('active');
   if(editingPedidoId){
     editingPedidoId = null;
@@ -2448,10 +2592,26 @@ function renderThumbs(){
 }
 
 /* ---------------- OPTIONS (tamanhos + extras) ---------------- */
+/* miniaturas dos produtos nos botões da coluna da direita (mockups montados em CSS) */
+function miniThumb(cls='', styleAttr=''){
+  const src = currentFoto ? img(currentFoto.seed) : PLACEHOLDER_IMG;
+  return `<span class="oc-thumb ${cls}" ${styleAttr}><img src="${src}" alt=""></span>`;
+}
+function miniThumbTamanho(t){
+  if(t.id==='bolinha') return miniThumb('oc-round');
+  if(t.id==='polaroide') return miniThumb('oc-polaroid');
+  // 10x15 e 15x20: papel em paisagem (proporção trocada na miniatura)
+  const [w,h] = String(t.ratio).split('/');
+  return miniThumb('', `style="aspect-ratio:${h}/${w}"`);
+}
+
 function renderOptions(){
+  // sem tamanho escolhido a instrução sai do topo e passa a ficar centralizada
+  // no bloco do meio (renderFrame); o cabeçalho só aparece com o enquadramento ativo
+  document.querySelector('.wa-top').style.display = currentTamanho ? 'flex' : 'none';
   document.getElementById('wa-titulo').textContent = currentTamanho
     ? `Ajustando enquadramento — ${TAMANHOS.find(t=>t.id===currentTamanho).label}`
-    : 'Selecione um tamanho para ajustar o enquadramento';
+    : '';
 
   const tList = document.getElementById('tamanhos-list');
   tList.innerHTML='';
@@ -2460,10 +2620,13 @@ function renderOptions(){
     const card=document.createElement('div');
     card.className='option-card'+(selecionado?' selected':'');
     card.innerHTML = `
-      <div class="oc-left"><div class="oc-name">${t.label}</div><div class="oc-price">${fmt(t.preco)}${t.nota?' · '+t.nota:''}</div></div>
-      <button class="oc-select-btn ${selecionado?'is-selected':''}">${selecionado?'Selecionado':'Selecionar'}</button>
+      <button class="oc-main" type="button">
+        ${miniThumbTamanho(t)}
+        <span class="oc-left"><span class="oc-name">${t.label}</span><span class="oc-price">${fmt(t.preco)}${t.nota?' · '+t.nota:''}</span></span>
+        <span class="oc-check">✓</span>
+      </button>
     `;
-    card.querySelector('.oc-select-btn').addEventListener('click', ()=>{
+    card.querySelector('.oc-main').addEventListener('click', ()=>{
       currentTamanho = t.id; resetCrop();
       renderOptions(); renderFrame();
     });
@@ -2511,10 +2674,12 @@ function renderOptions(){
     const card=document.createElement('div');
     card.className='option-card';
     card.innerHTML = `
-      <div class="oc-left"><div class="oc-name">${ex.label}</div><div class="oc-price">${fmt(ex.preco)}</div></div>
-      <button class="oc-add-btn">+ Adicionar</button>
+      <button class="oc-main" type="button">
+        <span class="oc-left"><span class="oc-name">${ex.label}</span><span class="oc-price">${fmt(ex.preco)}</span></span>
+        <span class="oc-plus">+</span>
+      </button>
     `;
-    card.querySelector('button').addEventListener('click', ()=>{
+    card.querySelector('.oc-main').addEventListener('click', ()=>{
       addToCart('extra', ex.id, ex.label, ex.preco);
     });
     eList.appendChild(card);
@@ -2742,23 +2907,24 @@ function renderFrame(){
   const controls = document.getElementById('frame-controls');
   box.innerHTML='';
 
+  const hint = document.getElementById('size-hint');
+
   if(!currentTamanho){
     document.getElementById('size-badge').style.display='none';
+    hint.style.display='block';
     box.className='frame-box no-frame';
-    const hint=document.createElement('div');
-    hint.className='hint-select';
-    hint.textContent='Selecione um tamanho ao lado para ver o enquadramento de impressão';
     box.style.position='relative';
-    box.appendChild(hint);
+    box.style.width='560px'; box.style.height='640px';
+
     const im=document.createElement('img');
     im.src = img(currentFoto.seed, 500, 600);
     box.appendChild(im);
-    hint.style.position='absolute';
-    box.style.width='560px'; box.style.height='640px';
+
     controls.classList.add('disabled');
     return;
   }
 
+  hint.style.display='none';
   controls.classList.remove('disabled');
   const t = TAMANHOS.find(x=>x.id===currentTamanho);
   const badge = document.getElementById('size-badge');
@@ -3308,6 +3474,9 @@ function renderCart(){
   }
   document.getElementById('cart-count').textContent = cart.length+' iten'+(cart.length===1?'':'s');
   document.getElementById('cart-total').textContent = fmt(cartTotal());
+  const resumoBtn = document.getElementById('cart-summary');
+  document.getElementById('cart-summary-text').textContent = (cart.length===1 ? '1 item' : cart.length+' itens') + ' · ' + fmt(cartTotal());
+  resumoBtn.disabled = cart.length===0;
   document.getElementById('btn-finalizar').disabled = cart.length===0;
   document.getElementById('btn-desconto-venda').disabled = cart.length===0;
   renderGlobalCart();
@@ -3315,6 +3484,12 @@ function renderCart(){
 }
 
 document.getElementById('btn-finalizar').addEventListener('click', startCheckoutFlow);
+
+/* gaveta do carrinho: o botão-resumo do pé do painel abre/fecha */
+function toggleCartDrawer(){ document.getElementById('cart-drawer').classList.toggle('open'); }
+function closeCartDrawer(){ document.getElementById('cart-drawer').classList.remove('open'); }
+document.getElementById('cart-summary').addEventListener('click', toggleCartDrawer);
+document.getElementById('cart-close').addEventListener('click', closeCartDrawer);
 
 const EXTRA_PRECO = id => EXTRAS.find(e=>e.id===id).preco;
 
@@ -3474,8 +3649,8 @@ async function showConfigModal(){
       <div style="display:flex;gap:8px;align-items:center;">
         <input id="cfg-folder" type="text" value="${folder.replace(/"/g,'&quot;')}"
           placeholder="C:\\Users\\Maxx\\Desktop\\fotos"
-          style="flex:1;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:'Inter',sans-serif;outline:none;" />
-        <button id="cfg-browse" style="padding:10px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;white-space:nowrap;font-family:'Inter',sans-serif;">Procurar</button>
+          style="flex:1;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:Arial,sans-serif;outline:none;" />
+        <button id="cfg-browse" style="padding:10px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;white-space:nowrap;font-family:Arial,sans-serif;">Procurar</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Onde o software do fotógrafo salva as fotos nesta máquina.</div>
     </div>
@@ -3484,7 +3659,7 @@ async function showConfigModal(){
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Logo do shopping</div>
       <input id="cfg-logo" type="text" value="${logoTextoEsc}"
         placeholder="SHOPPING PALLADIUM"
-        style="width:100%;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:'Inter',sans-serif;outline:none;box-sizing:border-box;" />
+        style="width:100%;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:Arial,sans-serif;outline:none;box-sizing:border-box;" />
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Escrita na frente das fotos quando a opção "Incluir logo do shopping" estiver marcada no enquadramento.</div>
     </div>
 
@@ -3519,13 +3694,13 @@ async function showConfigModal(){
                 <span style="font-weight:700;color:var(--gold-300);white-space:nowrap;">${j.numero||j.pedidoId}</span>
                 <span style="color:var(--slate-400);white-space:nowrap;">${j.fotos} foto(s)</span>
                 <span style="color:${estCor};font-weight:600;white-space:nowrap;">${estLabel}${j.tries>0 && j.estado!=='IMPRIMINDO' ? ` (${j.tries} tent.)`:''}</span>
-                ${j.estado!=='IMPRIMINDO' ? `<button data-limpa-fila="${j.pedidoId}" style="margin-left:auto;padding:4px 10px;border:1px solid var(--navy-line);border-radius:6px;background:var(--navy-950);color:var(--red-400);font-size:11px;cursor:pointer;font-family:'Inter',sans-serif;">Limpar</button>` : ''}
+                ${j.estado!=='IMPRIMINDO' ? `<button data-limpa-fila="${j.pedidoId}" style="margin-left:auto;padding:4px 10px;border:1px solid var(--navy-line);border-radius:6px;background:var(--navy-950);color:var(--red-400);font-size:11px;cursor:pointer;font-family:Arial,sans-serif;">Limpar</button>` : ''}
               </div>`;
             }).join('')}
           </div>
           <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
             <span style="font-size:11px;color:var(--slate-500);">${filaLimpar.length} podendo ser limpos</span>
-            ${filaLimpar.length>0 ? `<button id="cfg-fila-clear-all" style="padding:6px 14px;border:1px solid var(--red-400);border-radius:8px;background:transparent;color:var(--red-400);font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;">Limpar todos</button>` : ''}
+            ${filaLimpar.length>0 ? `<button id="cfg-fila-clear-all" style="padding:6px 14px;border:1px solid var(--red-400);border-radius:8px;background:transparent;color:var(--red-400);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">Limpar todos</button>` : ''}
           </div>`
       }
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Impressões aguardando a impressora ficam nesta fila e retomam sozinhas. Limpar remove o pedido da fila (não cancela a venda).</div>
@@ -3536,8 +3711,8 @@ async function showConfigModal(){
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span style="font-size:16px;font-weight:800;color:var(--gold-300);font-family:ui-monospace,Consolas,monospace;letter-spacing:3px;">${kk}</span>
         <span style="font-size:11.5px;color:${parOk?'var(--green-400)':'var(--amber-500)'};font-weight:600;">${parOk ? '✔ Emparelhado — ' + (par.loja?par.loja.nome:'') : 'Não emparelhado'}</span>
-        <button id="cfg-pair" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;">Emparelhar agora</button>
-        <button id="cfg-new-code" style="padding:8px 14px;border:1px solid var(--slate-600);border-radius:8px;background:transparent;color:var(--slate-400);font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;" title="Gera um código novo e desemparelha — só use em PDV novo, código perdido ou troca de loja">Gerar novo código</button>
+        <button id="cfg-pair" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">Emparelhar agora</button>
+        <button id="cfg-new-code" style="padding:8px 14px;border:1px solid var(--slate-600);border-radius:8px;background:transparent;color:var(--slate-400);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;" title="Gera um código novo e desemparelha — só use em PDV novo, código perdido ou troca de loja">Gerar novo código</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Informe este código na loja do portal de gestão (campo "código do kiosk"). O PDV reconhece sozinho a cada 30s.</div>
     </div>
@@ -3547,9 +3722,19 @@ async function showConfigModal(){
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span style="font-size:13px;color:var(--slate-300);">Versão instalada: <b style="color:var(--gold-300);">v${versaoAtual||'—'}</b></span>
         <span id="cfg-upd-info" style="font-size:12px;font-weight:700;"></span>
-        <button id="cfg-upd-btn" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;">Verificar atualizações</button>
+        <button id="cfg-upd-btn" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">Verificar atualizações</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">O PDV verifica sozinho no boot e a cada 60s ocioso. Quando houver nova versão, aparece o aviso na tela com "Instalar agora".</div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Manutenção</div>
+      <div style="font-size:12px;color:var(--slate-400);margin-bottom:8px;">
+        Zera os dados de teste desta máquina (sessões e fotos, pedidos, caixa, fila de impressão,
+        auditoria e contador de ribbon). O pareamento com a loja e as configurações são preservados.
+      </div>
+      <div id="cfg-limpar-resumo" style="font-size:11px;color:var(--slate-500);margin-bottom:8px;"></div>
+      <button id="cfg-limpar" style="padding:10px 16px;border:1px solid var(--red-400);border-radius:8px;background:transparent;color:var(--red-400);font-size:13px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">🧹 Limpar dados</button>
     </div>
 
     <div class="modal-actions" style="margin-top:20px;">
@@ -3564,6 +3749,17 @@ async function showConfigModal(){
       if(sel) document.getElementById('cfg-folder').value = sel;
     }catch{}
   };
+
+  // ─── Manutenção: limpar dados de teste (protegido por senha) ───
+  const resumoLimpar = document.getElementById('cfg-limpar-resumo');
+  if(resumoLimpar){
+    resumoLimpar.textContent =
+      `Nesta máquina agora: ${sessions.length} sessão(ões), ${pedidosRealizados.length} pedido(s), ` +
+      `${caixaAberto ? 'caixa aberto (' + ((caixaReal && (caixaReal.numero || caixaReal.id)) || '') + ')' : 'sem caixa aberto'}` +
+      `${ribbonBalanceBase != null ? ', ribbon ' + ribbonBalanceBase + ' un.' : ''}.`;
+  }
+  const cfgLimparBtn = document.getElementById('cfg-limpar');
+  if(cfgLimparBtn) cfgLimparBtn.onclick = ()=> abrirConfirmacaoLimparDados();
 
   const cfgPairBtn = document.getElementById('cfg-pair');
   if(cfgPairBtn) cfgPairBtn.onclick = async ()=>{
@@ -3669,6 +3865,93 @@ const r = await natalApi.limparFila({ pedidoId });
   };
 }
 
+/* Limpeza total dos dados de teste (botão ⚙ > Manutenção). Apaga sessões com
+   as fotos, pedidos, caixa, fila de impressão, auditoria e contador de ribbon;
+   mantém config.json → o pareamento com a loja sobrevive. Exige a senha de
+   manutenção e confirmação por escrito do que vai ser apagado. */
+async function abrirConfirmacaoLimparDados(){
+  let qtdPedidos = pedidosRealizados.length;
+  let qtdSessoes = sessions.length;
+  let qtdFila = 0;
+  try{
+    const f = await natalApi.filaImpressao();
+    qtdFila = (f && Array.isArray(f.fila)) ? f.fila.filter(j => j.estado !== 'IMPRIMINDO').length : 0;
+  }catch{}
+  const cxNum = (caixaReal && (caixaReal.numero || caixaReal.id)) || '';
+  const temCaixa = !!caixaAberto;
+
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">Manutenção</div><h3>Limpar todos os dados</h3></div>
+      <button class="modal-close" onclick="abrirConfirmacaoLimparDados();showConfigModal()">×</button>
+    </div>
+    <p class="modal-sub">Use para zerar uma máquina com dados de teste. Não dá para desfazer.</p>
+
+    <div style="background:rgba(239,68,68,.10);border:1px solid var(--red-400);border-radius:10px;padding:12px 14px;margin-top:12px;">
+      <div style="font-size:11px;letter-spacing:.5px;font-weight:700;color:var(--red-400);text-transform:uppercase;margin-bottom:6px;">Será apagado</div>
+      <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--slate-200);line-height:1.7;">
+        <li><b>${qtdSessoes}</b> sessão(ões) de cliente <b>e as fotos</b> (originais e previews)</li>
+        <li><b>${qtdPedidos}</b> pedido(s) / vendas do dia e o histórico</li>
+        <li>Caixa ${temCaixa ? `<b>aberto (${cxNum})</b> — será encerrado` : 'e o histórico de caixas fechadas'}</li>
+        <li>${qtdFila} impressão(ões) na fila da ASK-400</li>
+        <li>Auditoria de senha master e contador de ribbon (volta a 400)</li>
+      </ul>
+      <div style="font-size:12px;color:var(--green-400);margin-top:8px;">
+        ✓ Preservados: pareamento com a loja (código do kiosk), pasta de fotos e logo do shopping.
+      </div>
+    </div>
+
+    ${temCaixa ? `
+    <label style="display:flex;align-items:center;gap:9px;margin-top:14px;font-size:12.5px;color:var(--slate-200);cursor:pointer;">
+      <input type="checkbox" id="lm-forcar" style="width:16px;height:16px;">
+      Encerrar o caixa aberto (${cxNum}) e limpar mesmo assim
+    </label>` : ''}
+
+    <div style="margin-top:14px;">
+      <label class="modal-step-label" for="lm-senha" style="display:block;margin-bottom:6px;">Senha de manutenção</label>
+      <input id="lm-senha" type="password" autocomplete="off" placeholder="Senha"
+        style="width:100%;padding:11px 13px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:15px;font-family:Arial,sans-serif;outline:none;box-sizing:border-box;" />
+      <div id="lm-erro" style="font-size:12px;color:var(--red-400);margin-top:6px;min-height:14px;"></div>
+    </div>
+
+    <div class="modal-actions" style="margin-top:18px;">
+      <button class="btn" id="lm-cancelar" style="padding:11px 20px;border:1px solid var(--navy-line);border-radius:8px;background:transparent;color:var(--slate-300);font-size:13px;cursor:pointer;">Cancelar</button>
+      <button class="btn" id="lm-confirmar" style="padding:11px 24px;border:none;border-radius:8px;background:var(--red-400);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">Limpar agora</button>
+    </div>
+  `);
+
+  const err = document.getElementById('lm-erro');
+  const senhaEl = document.getElementById('lm-senha');
+  const forcarEl = document.getElementById('lm-forcar');
+  document.getElementById('lm-cancelar').onclick = ()=> showConfigModal();
+  senhaEl.focus();
+
+  document.getElementById('lm-confirmar').onclick = async ()=>{
+    const btn = document.getElementById('lm-confirmar');
+    const senha = senhaEl.value.trim();
+    if(!senha){ err.textContent = 'Informe a senha de manutenção.'; return; }
+    btn.disabled = true; btn.textContent = 'Limpando...';
+    try{
+      const r = await natalApi.limparDados({ senha, forcar: !!(forcarEl && forcarEl.checked) });
+      if(r && r.success){
+        closeModal();
+        toast(`Dados limpos: ${r.sessoes} sessão(ões), ${r.pedidos} pedido(s) · backup em ${r.backup}`);
+        await Promise.allSettled([carregarPedidos(), carregarSessoes(), carregarCaixa(), carregarRibbon()]);
+        renderCaixaChip && renderCaixaChip();
+        renderRibbonChip && renderRibbonChip();
+        agendarSnapshotVendas(1500); // portal recebe o "dia zerado" logo em seguida
+        showConfigModal();
+      }else{
+        err.textContent = (r && (r.message || r.error)) || 'Não foi possível limpar.';
+        btn.disabled = false; btn.textContent = 'Limpar agora';
+      }
+    }catch(e){
+      err.textContent = 'Falha na limpeza: ' + (e && e.message ? e.message : e);
+      btn.disabled = false; btn.textContent = 'Limpar agora';
+    }
+  };
+}
+
 function paymentRowsHTML(rows, editable, formasList){
   return rows.map((r,i)=>`
     <div class="pay-row" data-i="${i}">
@@ -3685,6 +3968,11 @@ function paymentRowsHTML(rows, editable, formasList){
 
 function wirePaymentRows(rows, containerId, total, onChange){
   const cont = document.getElementById(containerId);
+  // Sincroniza o objeto com o que o <select> está EXIBINDO: quando rows[i].forma
+  // não existe na lista (ex.: '-' de pedido legado), o navegador marca a 1ª
+  // opção mas o objeto continuava com a forma antiga — o pagamento era gravado
+  // sem forma e subia ao portal como não informado.
+  cont.querySelectorAll('.pr-forma').forEach((sel,i)=>{ rows[i].forma = sel.value; });
   cont.querySelectorAll('.pr-forma').forEach((sel,i)=>{
     sel.addEventListener('change', e=>{ rows[i].forma = e.target.value; onChange(); });
   });
@@ -4685,16 +4973,38 @@ document.getElementById('cx-consultar').addEventListener('click', (e)=>{
   e.stopPropagation();
   document.getElementById('caixa-menu').style.display='none';
   const desde = caixaAbertoEm ? +caixaAbertoEm : 0;
-  const vendaDinheiroHoje = pedidosRealizados.filter(p=>p.status==='pago' && (!p.horario || +p.horario >= desde))
-    .reduce((s,p)=>s+p.pagamentosEfetivos.filter(r=>r.forma==='Dinheiro').reduce((s2,r)=>s2+r.valor,0),0);
+  const pagosCaixa = pedidosRealizados.filter(p=>p.status==='pago' && (!p.horario || +p.horario >= desde));
+  // Total do caixa por forma (todas as vendas desde a abertura). O fundo de
+  // troco NÃO entra aqui: ele pertence só à gaveta e é somado no saldo em
+  // dinheiro mais abaixo, como antes.
+  const porFormaConsulta = {};
+  FORMAS.forEach(f=>porFormaConsulta[f]=0);
+  pagosCaixa.forEach(p=>(p.pagamentosEfetivos||[]).forEach(r=>{
+    if(r.valor) porFormaConsulta[r.forma] = (porFormaConsulta[r.forma]||0) + r.valor;
+  }));
+  // Soma sobre as chaves realmente encontradas, não sobre FORMAS: se uma venda
+  // tiver uma forma fora da lista (digitada na correção pós-pagamento), ela
+  // aparece no breakdown e no total em vez de sumir do relatório.
+  const totalVendasCaixa = Object.keys(porFormaConsulta).reduce((s,f)=>s+porFormaConsulta[f],0);
+  const formasComVenda = Object.keys(porFormaConsulta).filter(f=>porFormaConsulta[f] > 0);
+  const vendaDinheiroHoje = porFormaConsulta['Dinheiro'];
   const caixaAtual = caixasHoje.find(c=>c.aberto);
   const equipeTxt = caixaAtual && caixaAtual.equipe && caixaAtual.equipe.length ? caixaAtual.equipe.join(', ') : 'nenhuma selecionada';
+  const linhasVenda = formasComVenda.length
+    ? formasComVenda.map(f=>`<div class="rc-line"><span>${f}</span><span>${fmt(porFormaConsulta[f])}</span></div>`).join('')
+    : '<div class="rc-line"><span style="color:var(--slate-400);">Nenhuma venda registrada desde a abertura</span><span>—</span></div>';
   openModal(`
     <div class="modal-head"><div><div class="modal-step-label">Consulta</div><h3>Caixa ${caixaAtual?'nº '+caixaAtual.numero:''} atual</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
     <div class="receipt">
+      <div class="rc-secao">Vendas desde a abertura</div>
+      ${linhasVenda}
+      <div class="rc-total"><span>Total vendido no caixa</span><span>${fmt(totalVendasCaixa)}</span></div>
+    </div>
+    <div class="receipt">
+      <div class="rc-secao">Conciliação da gaveta</div>
       <div class="rc-line"><span>Aberto às</span><span>${caixaAbertoEm ? caixaAbertoEm.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '—'}</span></div>
       <div class="rc-line"><span>Fundo de troco</span><span>${fmt(fundoTrocoCaixa)}</span></div>
-      <div class="rc-line"><span>Vendas em dinheiro hoje</span><span>${fmt(vendaDinheiroHoje)}</span></div>
+      <div class="rc-line"><span>Vendas em dinheiro</span><span>${fmt(vendaDinheiroHoje)}</span></div>
       <div class="rc-total"><span>Saldo esperado em dinheiro</span><span>${fmt(fundoTrocoCaixa+vendaDinheiroHoje)}</span></div>
     </div>
     <p class="modal-sub">👥 Equipe no quiosque: ${equipeTxt}</p>
@@ -5300,6 +5610,19 @@ function checarAlertaHorario(){
 /* ALERTA HORÁRIO — desligado em produção: usava valores mock aleatórios (regra 4.4 passa a ser coberta pela telemetria real) */
 // setInterval(checarAlertaHorario, 45000);
 // setInterval(()=>{ if(horaAlertaPendente) checarAlertaHorario(); }, 4000);
+
+/* ---------------- TOPBAR RETRÁTIL ---------------- */
+// Barra começa retraída (classe tb-hidden no <body>).
+// Clique no "Maxx Foto" da topbar retraí; clique na aba fixa (#tb-tab) mostra de volta.
+(function(){
+  const tbTab = document.getElementById('tb-tab');
+  const brand = document.querySelector('.topbar .brand');
+  tbTab.addEventListener('click', ()=>{ document.body.classList.remove('tb-hidden'); });
+  brand.addEventListener('click', ()=>{
+    document.getElementById('caixa-menu').style.display='none';
+    document.body.classList.add('tb-hidden');
+  });
+})();
 </script>
 </body>
 </html>

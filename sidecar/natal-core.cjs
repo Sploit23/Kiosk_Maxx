@@ -25,6 +25,30 @@ const crypto = require('node:crypto');
 const PORT = parseInt(process.env.NATAL_PORT, 10) || 9877;
 const HOST = process.env.NATAL_HOST || '0.0.0.0';
 
+// Build id do PRÓPRIO arquivo (12 chars do sha256). O electron-main calcula o
+// mesmo hash do natal-core.cjs no disco e compara com o /api/health: se forem
+// diferentes, a instância na porta é ANTIGA (código anterior à atualização) e
+// ele mata e relança — evita o bug de "Rota nao encontrada" por reuso de
+// sidecar desatualizado (electron-main: "Porta 9877 ja em uso").
+const BUILD_ID = (() => {
+  try {
+    return crypto.createHash('sha256').update(fs.readFileSync(__filename)).digest('hex').slice(0, 12);
+  } catch {
+    return null;
+  }
+})();
+
+// Senha da manutenção "Limpar dados" (botão no ⚙ Config do PDV). Apaga vendas,
+// sessões, fotos, caixa, fila de impressão, auditoria e contador de ribbon —
+// preservando machineId/kioskCode (o pareamento com a loja sobrevive). Pode ser
+// trocada por variável de ambiente no teste/Manutenção.
+const SENHA_LIMPEZA = String(process.env.NATAL_LIMPEZA_SENHA || 'HCss221087');
+function senhaConfere(enviada) {
+  const a = crypto.createHash('sha256').update(String(enviada || '')).digest();
+  const b = crypto.createHash('sha256').update(SENHA_LIMPEZA).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
 // ─── Caminhos ────────────────────────────────────────────────
 // Tudo (sessões, pedidos, caixa, counters, config) fica centralizado em
 // <photosFolder>\natal-app — a pasta escolhida no ⚙ Configurações. Sem pasta
@@ -735,6 +759,70 @@ function limparFila(opts = {}) {
   return { success: true, removidos: removidos.map((j) => j.pedidoId), qtd: pendentes };
 }
 
+// ─── Manutenção: limpar todos os dados de teste do PDV ───────
+// Usado pelo botão "Limpar dados" no ⚙ Config (protegido por senha). Faz
+// backup do database/ antes, apaga sessões (com as fotos), pedidos, caixa,
+// fila de impressão, auditoria e contador de ribbon, e RECARREGA o estado em
+// memória — o app aberto continua funcionando e já nasce sem caixa aberto.
+// database\config.json é preservado: machineId/kioskCode (pareamento) sobrevivem.
+function limparDadosLocais(opts = {}) {
+  const aberto = requireCaixaAberto();
+  if (aberto && opts.forcar !== true) {
+    return {
+      success: false,
+      error: 'CAIXA_ABERTO',
+      message: `Há um caixa aberto (${aberto.numero || aberto.id}). Feche o caixa antes de limpar os dados.`,
+      caixa: { id: aberto.id, numero: aberto.numero || null },
+    };
+  }
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const backupDir = path.join(path.dirname(DATA_DIR), `${path.basename(DATA_DIR)}-backup-${stamp}`);
+  const resumo = {
+    sessoes: (() => { try { return fs.readdirSync(SESSOES_DIR).length; } catch { return 0; } })(),
+    pedidos: pedidos.length,
+    auditoria: auditoria.length,
+    filaImpressao: filaImpressao.length,
+    caixaAberto: !!(aberto && aberto.numero),
+    ribbon: getRibbon(),
+    em: new Date().toISOString(),
+  };
+
+  // Backup: só o database/ (JSONs e contadores são leves). As fotos das
+  // sessões não são copiadas — são descartadas junto com as sessões de teste.
+  try {
+    fs.mkdirSync(backupDir, { recursive: true });
+    if (fs.existsSync(DB_DIR)) fs.cpSync(DB_DIR, path.join(backupDir, 'database'), { recursive: true });
+    fs.writeFileSync(path.join(backupDir, 'resumo.json'), JSON.stringify(resumo, null, 2), 'utf-8');
+  } catch (e) {
+    return { success: false, error: 'BACKUP', message: 'Não consegui criar o backup: ' + (e.message || e) };
+  }
+
+  // Apaga as pastas e recria vazias (o sidecar e o PDV esperam que existam).
+  for (const dir of [SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR]) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.mkdirSync(DB_DIR, { recursive: true });
+
+  // Zera os arquivos. caixa.json some junto: o PDV passa a pedir "abrir caixa".
+  writeJson(PEDIDOS_FILE, []);
+  writeJson(CAIXAS_FILE, []);
+  writeJson(AUDITORIA_FILE, []);
+  writeJson(PASTA_IMPORTADAS_FILE, {});
+  writeJson(FILA_IMPRESSAO_FILE, []);
+  writeText(COUNTER_FILE, '0');
+  writeText(RIBBON_FILE, '400');
+  try { fs.rmSync(CAIXA_FILE, { force: true }); } catch {}
+
+  pedidosImprimindo.clear();
+  recarregarEstadoLocal();
+
+  console.log(`[natal-core] DADOS LIMPOS (backup em ${backupDir}):`, JSON.stringify(resumo));
+  emit('dados:limpos', resumo);
+  return { success: true, ...resumo, backup: backupDir, ribbon: getRibbon() };
+}
+
 // ─── Roteador ────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -760,7 +848,7 @@ const server = http.createServer(async (req, res) => {
 
     // ── Health / config ──
     if (method === 'GET' && p === '/api/health') {
-      return sendJson(res, 200, { ok: true, pdv: machineConfig.pdvNome || os.hostname(), time: Date.now(), ribbon: getRibbon() });
+      return sendJson(res, 200, { ok: true, pdv: machineConfig.pdvNome || os.hostname(), time: Date.now(), ribbon: getRibbon(), build: BUILD_ID, pid: process.pid });
     }
     if (method === 'GET' && p === '/api/config') {
       return sendJson(res, 200, { ...machineConfig, ribbon: getRibbon() });
@@ -810,6 +898,14 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
       setMachineConfig(body);
       return sendJson(res, 200, { success: true, config: machineConfig });
+    }
+    // Manutenção: limpa TODOS os dados de teste do PDV (senha obrigatória).
+    if (method === 'POST' && p === '/api/manutencao/limpar') {
+      const body = JSON.parse((await readBody(req, 64 * 1024)).toString() || '{}');
+      if (!senhaConfere(body.senha)) {
+        return sendJson(res, 401, { success: false, error: 'SENHA', message: 'Senha incorreta.' });
+      }
+      return sendJson(res, 200, limparDadosLocais(body));
     }
 
     // ── Sessões ──

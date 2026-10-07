@@ -93,6 +93,12 @@ button{cursor:pointer;font-family:inherit;}
 
 .card{background:var(--navy-900);border:1px solid var(--navy-line);border-radius:12px;padding:20px;margin-bottom:18px;}
 .card h3{font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--slate-400);margin-bottom:14px;}
+ .card h3.h3-toggle{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;margin-bottom:0;}
+ .card h3.h3-toggle:hover{color:var(--gold-100);}
+ .card h3.h3-toggle[aria-expanded="true"]{margin-bottom:14px;}
+ .card h3.h3-toggle .caret{display:inline-block;font-size:11px;line-height:1;color:var(--gold-200);transition:transform .12s ease;}
+ .card h3.h3-toggle .h3-count{margin-left:auto;font-size:11px;letter-spacing:0;text-transform:none;color:var(--slate-500);}
+ .card h3.h3-toggle:focus-visible{outline:1px solid var(--gold-300);outline-offset:3px;}
 
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;}
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:18px;}
@@ -488,32 +494,37 @@ select.form-input{appearance:none;}
       <div class="card">
         <h3>Recebimentos por forma de pagamento — período</h3>
         <div class="grid4-pay" id="fin-pagamentos"></div>
+        <div id="fin-pag-alerta" style="font-size:11px;color:var(--red-400);margin-top:10px;display:none;"></div>
         <div id="fin-total-rodape" style="font-size:11px;color:var(--slate-500);margin-top:12px;"></div>
       </div>
       <div class="card">
-        <h3>Caixa atual dos PDVs (último snapshot de cada loja)</h3>
-        <table id="fin-caixas"></table>
+        <h3 class="h3-toggle" id="fin-caixas-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="fin-caixas-wrap" title="Clique para ver/ocultar os caixas">
+          <span class="caret" id="fin-caixas-caret">&#9656;</span>
+          Caixa atual dos PDVs <em style="color:var(--slate-400);font-size:11px;font-weight:400;font-style:normal;">(último snapshot de cada loja)</em>
+          <span class="h3-count" id="fin-caixas-count"></span>
+        </h3>
+        <div id="fin-caixas-wrap" style="display:none;">
+          <table id="fin-caixas"></table>
+        </div>
       </div>
       <div class="card">
-        <h3>Receita por loja — período</h3>
-        <table id="fin-tabela"></table>
+        <h3 class="h3-toggle" id="fin-tabela-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="fin-tabela-wrap" title="Clique para ver/ocultar a receita por loja">
+          <span class="caret" id="fin-tabela-caret">&#9656;</span>
+          Receita por loja — período
+          <span class="h3-count" id="fin-tabela-count"></span>
+        </h3>
+        <div id="fin-tabela-wrap" style="display:none;">
+          <table id="fin-tabela"></table>
+        </div>
       </div>
       <div class="card">
-        <h3>Pedidos do período <em style="color:var(--slate-400);font-size:11px;font-weight:400;font-style:normal;">(consolidado dos PDVs)</em></h3>
-        <table id="fin-pedidos"></table>
-      </div>
-      <div class="card">
-        <h3>DRE do período <em style="color:var(--slate-400);font-size:11px;font-weight:400;">(pedidos reais do PDV × parâmetros da gestão)</em></h3>
-        <div class="grid4-pay" id="fin-dre"></div>
-      </div>
-      <div class="card">
-        <h3>Parâmetros do DRE <em style="color:var(--slate-400);font-size:11px;font-weight:400;">(definidos aqui — o PDV não usa; só o cálculo do portal)</em></h3>
-        <div class="form-row-h">
-          <div class="form-row"><label class="form-label">Custo por unidade de ribbon (R$)</label><input class="form-input" id="f-param-ribbon" type="number" min="0" step="0.01" placeholder="ex.: 1,50"></div>
-          <div class="form-row"><label class="form-label">Comissão vendedora (%)</label><input class="form-input" id="f-param-cv" type="number" min="0" max="100" step="0.5" placeholder="ex.: 5"></div>
-          <div class="form-row"><label class="form-label">Comissão fotógrafo (%)</label><input class="form-input" id="f-param-cf" type="number" min="0" max="100" step="0.5" placeholder="ex.: 3"></div>
-          <div class="form-row"><label class="form-label">Ribbon crítico (un.)</label><input class="form-input" id="f-param-crit" type="number" min="1" step="10" placeholder="ex.: 100"></div>
-          <div class="form-row" style="align-self:flex-end;"><button class="btn btn-primary" id="btn-salvar-parametros">💾 Salvar parâmetros</button></div>
+        <h3 class="h3-toggle" id="fin-pedidos-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="fin-pedidos-wrap" title="Clique para ver/ocultar a lista de pedidos">
+          <span class="caret" id="fin-pedidos-caret">&#9656;</span>
+          Pedidos do período <em style="color:var(--slate-400);font-size:11px;font-weight:400;font-style:normal;">(consolidado dos PDVs)</em>
+          <span class="h3-count" id="fin-pedidos-count"></span>
+        </h3>
+        <div id="fin-pedidos-wrap" style="display:none;">
+          <table id="fin-pedidos"></table>
         </div>
       </div>
     </div>
@@ -1021,21 +1032,6 @@ function fmtDt(s){
   var dt = new Date(s);
   return isNaN(dt) ? s : dt.toLocaleDateString('pt-BR')+' '+dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 }
-function funcaoDeOperador(nome){
-  var nm = String(nome||'').toLowerCase().trim();
-  if(!nm) return '';
-  var users = state.usuarios || [];
-  for(var i=0;i<users.length;i++){
-    var u = users[i];
-    if(String(u.nome||'').toLowerCase().trim()===nm || String(u.usuario||'').toLowerCase().trim()===nm){
-      return u.funcao || '';
-    }
-  }
-  return 'vendedor';
-}
-function payoff(label, val, sub){
-  return '<div class="pay-total-box"><div class="pt-label">'+esc(label)+'</div><div class="pt-val">'+esc(val)+'</div><div class="pt-pct">'+esc(sub)+'</div></div>';
-}
 function conexaoDeltaMin(iso){
   if(!iso) return '';
   var dt = new Date(iso);
@@ -1264,71 +1260,19 @@ function renderBarChart(elId, byDay, cut){
 }
 
 // ——— FINANCEIRO ———
-function calcDre(rows, params, despesas, cut){
-  params = params || {};
-  var vendas = 0, unidades = 0, pedidos = 0;
-  var porOperador = {};
-  var corte = cut ? dayStr(cut) : '';
-  rows.filter(function(p){
-    return (p.status==='pago' || p.status==='impresso')
-      && (!corte || (p.data||'') >= corte);
-  }).forEach(function(p){
-    vendas += toNum(p.total);
-    unidades += toNum(p.unidadesTotal);
-    pedidos++;
-    var k = p.operador || '—';
-    porOperador[k] = (porOperador[k]||0) + toNum(p.total);
-  });
-  var custoRibbon = unidades * toNum(params.custoRibbonUnitario);
-  var comissoes = 0;
-  for(var k in porOperador){
-    var fn = funcaoDeOperador(k);
-    // comissão só incide sobre vendedor/fotógrafo — admin/gerente não geram custo
-    var pct = fn==='fotografo' ? toNum(params.comissaoFotografo) : (fn==='vendedor' ? toNum(params.comissaoVendedor) : 0);
-    comissoes += porOperador[k] * pct / 100;
-  }
-  var desp = despesas.filter(function(d){ return cut ? (d.data||'') >= dayStr(cut) : true; })
-    .reduce(function(s,d){ return s + toNum(d.valor); }, 0);
-  return { vendas:vendas, unidades:unidades, pedidos:pedidos, custoRibbon:custoRibbon, comissoes:comissoes, despesas:desp, resultado: vendas - custoRibbon - comissoes - desp };
-}
-function preencherParametros(){
-  var p = state.parametros || {};
-  var fmtNum = function(id, v){
-    var el = $(id);
-    if(!el || el.value !== '') return;
-    el.value = (v === null || v === undefined || v === '') ? '' : String(toNum(v));
-  };
-  fmtNum('#f-param-ribbon', p.custoRibbonUnitario);
-  fmtNum('#f-param-cv', p.comissaoVendedor);
-  fmtNum('#f-param-cf', p.comissaoFotografo);
-  fmtNum('#f-param-crit', p.ribbonCritico);
-}
-async function salvarParametros(){
-  var num = function(id){ return parseFloat(String($(id).value).replace(',', '.')); };
-  var rb = num('#f-param-ribbon'), cv = num('#f-param-cv'), cf = num('#f-param-cf'), cr = num('#f-param-crit');
-  var body = {};
-  if(!isNaN(rb) && rb >= 0) body.custoRibbonUnitario = rb;
-  if(!isNaN(cv) && cv >= 0 && cv <= 100) body.comissaoVendedor = cv;
-  if(!isNaN(cf) && cf >= 0 && cf <= 100) body.comissaoFotografo = cf;
-  if(!isNaN(cr) && cr > 0) body.ribbonCritico = cr;
-  if(!Object.keys(body).length){ toast('Preencha ao menos um parâmetro válido', true); return; }
-  var res = await call('parametros.save', body);
-  if(!res || !res.ok){ toast((res&&res.error)||'Falha ao salvar parâmetros', true); return; }
-  state._paramProm = null;
-  state.parametros = res.parametros;
-  toast('Parâmetros salvos');
-  renderFinanc();
-}
-$('#btn-salvar-parametros').addEventListener('click', salvarParametros);
-
 async function renderFinanc(){
-  await Promise.all([getVendas(), getPedidos(), getParametros(), loadDespesas()]);
+  await Promise.all([getVendas(), getPedidos()]);
   var period = state.finPeriodo;
   var cut = periodCutoff(period);
   var rows = state.vendasRaw.filter(function(v){ return cut ? (v.data||'') >= dayStr(cut) : true; });
   var a = aggVendas(rows);
   var label = typeVal(null, period);
   var recebido = PAY_META.reduce(function(s,pm){ return s + a.meios[pm.k]; }, 0);
+  // Regra do portal: a forma de pagamento é OBRIGATÓRIA — o PDV sempre registra
+  // uma forma no seletor (Dinheiro/Débito/Crédito/PIX). Então não existe uma
+  // forma "Não informado" no relatório: a diferença entre a receita e a soma das
+  // formas é DADO QUEBRADO de PDV antigo e aparece só como alerta abaixo.
+  var semForma = Math.max(0, +(a.total - recebido).toFixed(2));
   var ticket = a.pedidos ? a.total/a.pedidos : 0;
 
   $('#fin-kpis').innerHTML =
@@ -1347,6 +1291,13 @@ async function renderFinanc(){
       '<div class="pt-label">'+pm.label+'</div><div class="pt-val">'+fmtBRL(v)+'</div>'+
       '<div class="pt-pct">'+pct+'% da receita</div></div>';
   }).join('');
+  var alerta = $('#fin-pag-alerta');
+  if(alerta){
+    alerta.style.display = semForma>0 ? '' : 'none';
+    alerta.textContent = semForma>0
+      ? ('⚠ '+fmtBRL(semForma)+' da receita está sem forma de pagamento registrada (PDV não informou a forma). Reenvie o snapshot desse PDV para o valor entrar na forma correta.')
+      : '';
+  }
   $('#fin-total-rodape').textContent = 'Total recebido no período: '+fmtBRL(tot)+' · receita '+fmtBRL(a.total)+' · '+
     (rows.length ? rows.length+' snapshot(s) de '+new Set(rows.map(function(r){return r.lojaId;})).size+' loja(s)' : 'nenhum snapshot enviado ainda');
 
@@ -1370,6 +1321,8 @@ async function renderFinanc(){
   } else {
     cxEl.innerHTML = '<tr><td class="empty" colspan="6">Nenhum snapshot recebido ainda — o PDV envia sozinho assim que emparelha.</td></tr>';
   }
+  var cxAbertos = cxs.filter(function(v){ return v.caixa && v.caixa.aberto; }).length;
+  setCardCount('#fin-caixas-count', cxs.length ? (fmtInt(cxs.length)+' PDV(s) · '+fmtInt(cxAbertos)+' caixa(s) aberto(s)') : 'sem snapshot');
 
   var lojas = aggPorLoja(rows);
   var tb = $('#fin-tabela');
@@ -1386,22 +1339,15 @@ async function renderFinanc(){
   } else {
     tb.innerHTML = '<tr><td class="empty" colspan="9">Sem vendas no período.</td></tr>';
   }
+  setCardCount('#fin-tabela-count', lojas.length ? (fmtInt(lojas.length)+' loja(s) · '+fmtBRL(a.total)+' · '+fmtInt(a.pedidos)+' pedido(s)') : 'sem vendas no período');
 
   var peds = state.pedidos.filter(function(p){ return cut ? (p.data||'') >= dayStr(cut) : true; })
     .sort(function(a,b){ return String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')); });
   var ptb = $('#fin-pedidos');
   ptb.innerHTML = pedidosTabelaHTML(peds, 200);
   bindPedidoVer(ptb);
-
-  var params = state.parametros || {};
-  var dre = calcDre(state.pedidos, params, state.despesas, cut);
-  $('#fin-dre').innerHTML =
-    payoff('Vendas ('+label+')', fmtBRL(dre.vendas), dre.pedidos+' pedido(s) reais do PDV') +
-    payoff('Custo de ribbon', '−'+fmtBRL(dre.custoRibbon), fmtInt(dre.unidades)+' un. × '+fmtBRL(toNum(params.custoRibbonUnitario))) +
-    payoff('Custo de equipe', '−'+fmtBRL(dre.comissoes), toNum(params.comissaoVendedor)+'% vendedora · '+toNum(params.comissaoFotografo)+'% fotógrafo') +
-    payoff('Despesas do período', '−'+fmtBRL(dre.despesas), 'lançadas em Despesas & Taxas') +
-    payoff('Resultado líquido', fmtBRL(dre.resultado), dre.resultado>=0 ? 'lucro do período' : 'prejuízo do período');
-  preencherParametros();
+  var totPed = peds.reduce(function(s,p){ return s + toNum(p.total); }, 0);
+  setCardCount('#fin-pedidos-count', peds.length ? (fmtInt(peds.length)+' pedido(s) · '+fmtBRL(totPed)) : 'nenhum pedido no período');
 }
 
 // ——— FLUXO DE CAIXA ———
@@ -1454,6 +1400,31 @@ function bindPeriodTabs(sel, onPeriod){
 bindPeriodTabs('#fin-periodo', function(p){ state.finPeriodo = p; renderFinanc(); });
 bindPeriodTabs('#fluxo-periodo', function(p){ state.fluxoPeriodo = p; renderFluxo(); });
 
+// ——— FINANCEIRO: tabelas recolhidas (seta no título) ———
+// O render do Financeiro reescreve só o <table>, então o estado do
+// recolhimento vive no card (fora do innerHTML) e não se perde ao trocar período.
+// Cada título começa recolhido; o resumo (h3-count) mostra o que há dentro.
+function bindCardToggle(headId, wrapId, caretId){
+  var head = $(headId), wrap = $(wrapId), caret = $(caretId);
+  if(!head || !wrap || !caret) return;
+  var aplicar = function(aberto){
+    wrap.style.display = aberto ? '' : 'none';
+    head.setAttribute('aria-expanded', aberto ? 'true' : 'false');
+    caret.innerHTML = aberto ? '&#9662;' : '&#9656;'; // ▾ aberto · ▸ fechado
+  };
+  var toggle = function(){ aplicar(head.getAttribute('aria-expanded') !== 'true'); };
+  head.addEventListener('click', toggle);
+  head.addEventListener('keydown', function(e){
+    if(e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar'){ e.preventDefault(); toggle(); }
+  });
+  aplicar(false); // começa escondido
+  return { abrir: function(){ aplicar(true); } };
+}
+bindCardToggle('#fin-caixas-toggle', '#fin-caixas-wrap', '#fin-caixas-caret');
+bindCardToggle('#fin-tabela-toggle', '#fin-tabela-wrap', '#fin-tabela-caret');
+bindCardToggle('#fin-pedidos-toggle', '#fin-pedidos-wrap', '#fin-pedidos-caret');
+function setCardCount(id, txt){ var el = $(id); if(el) el.textContent = txt || ''; }
+
 // ——— DESPESAS & TAXAS ———
 function loadDespesas(){
   if(!state._despProm || state._despDirty){
@@ -1490,9 +1461,9 @@ async function renderDespesas(){
   if(despRows.length){
     tb.innerHTML = '<tr><th>Data</th><th>Loja</th><th>Categoria</th><th>Descrição</th><th>Valor</th><th></th></tr>' +
       despRows.map(function(d){
-        var loja = state.lojas.find(function(l){ return l.id===d.lojaId; });
+        var loja = d.lojaId && state.lojas.find(function(l){ return l.id===d.lojaId; });
         return '<tr><td style="white-space:nowrap;">'+d.data+'</td>'+
-          '<td>'+esc(loja?loja.nome:'—')+'</td>'+
+          '<td>'+esc(loja ? loja.nome : (d.lojaId || 'Geral'))+'</td>'+
           '<td>'+esc(d.categoria)+'</td>'+
           '<td style="color:var(--slate-400);">'+esc(d.descricao||'')+'</td>'+
           '<td>'+fmtBRL(toNum(d.valor))+'</td>'+
@@ -1587,7 +1558,7 @@ async function renderEstoque(){
     kpi('Estoque da rede', fmtInt(totalEf)+' un.', 'papel real (menor dos gaveteiros)', totalEf>=0?'ok':'alert') +
     kpi('Lojas reportando', latest.length, 'último snapshot de cada', 'ok') +
     kpi('Reportando papel real', comPapel, 'via checkPrinter (ASK-400)', comPapel?'ok':'warn') +
-    kpi('Crítico (< '+fmtInt(ribbonCrit())+' un.)', criticos, 'abaixo do limite configurado em Parâmetros', criticos?'alert':'ok');
+    kpi('Crítico (< '+fmtInt(ribbonCrit())+' un.)', criticos, 'abaixo do limite configurado (ribbonCrítico)', criticos?'alert':'ok');
 
   var tb = $('#estoque-ribbon');
   if(latest.length){
@@ -1782,7 +1753,7 @@ function renderLojas(){
     (state.lojas.length ? state.lojas.map(function(l){
       var qtd = state.usuarios.filter(function(u){ return u.lojaId===l.id; }).length;
       return '<tr><td><b>'+esc(l.id)+'</b></td><td>'+esc(l.nome)+'</td><td>'+esc(l.pdv||'—')+'</td><td>'+qtd+'</td>'+
-        '<td>'+(l.pareamento ? '<span class="pill pill-green">✔ '+esc(l.pareamento.pdvNome||'—')+'</span>' : '<span class="pill pill-slate">—</span>')+'</td>'+
+        '<td>'+(l.pareamento ? '<span class="pill pill-green">✔ '+esc(l.pareamento.pdvNome || l.pdv || l.kioskCode || '—')+'</span>' : '<span class="pill pill-slate">—</span>')+'</td>'+
         '<td>'+connPill(l)+'</td>'+
         '<td><span class="pill '+(l.ativo?'pill-green':'pill-red')+'">'+(l.ativo?'Ativa':'Inativa')+'</span></td>'+
         '<td><button class="btn btn-ghost" style="padding:3px 8px;font-size:11px;" data-edit-loja="'+escAttr(l.id)+'">Editar</button> '+
@@ -1819,7 +1790,7 @@ function modalLoja(l){
     '<div class="form-row"><label class="form-label">Código do kiosk (aparece na tela do PDV)</label>'+
     '<input class="form-input" id="f-loja-kiosk" value="'+escAttr(fmtKiosk(l.kioskCode||''))+'" placeholder="ex.: K8XQ-4B9D" style="letter-spacing:2px;text-transform:uppercase;font-family:ui-monospace,Consolas,monospace;"></div>'+
     (pm
-      ? '<div class="pair-status">✔ Emparelhado — '+esc(pm.pdvNome||'—')+' · '+esc(pm.emparelhadoEm||'')+(pm.machineId?' · '+esc(pm.machineId.slice(0,8)):'')+'</div>'
+      ? '<div class="pair-status">✔ Emparelhado — '+esc(pm.pdvNome || l.pdv || l.kioskCode || '—')+' · '+esc(pm.emparelhadoEm||'')+(pm.machineId?' · '+esc(pm.machineId.slice(0,8)):'')+'</div>'
       : '<div class="pair-status muted">Ainda não emparelhado — nenhum kiosk validou com este código.</div>')+
     '<details class="pair-tutorial"><summary>Como emparelhar o kiosk? (mini tutorial)</summary>'+
     '<ol><li>Ligue o PDV do kiosk. Na tela de login (canto do rodapé) aparece o <b>Código do kiosk</b> (ex.: K8XQ-4B9D).</li>'+
@@ -1887,7 +1858,10 @@ function renderEquipe(){
       return '<option value="'+escAttr(l.id)+'"'+(state.filtroLoja===l.id?' selected':'')+'>'+esc(l.nome)+' ('+esc(l.id)+')</option>';
     }).join('');
   var users = state.usuarios;
-  if(state.filtroLoja) users = users.filter(function(u){ return u.lojaId===state.filtroLoja; });
+  if(state.filtroLoja) users = users.filter(function(u){
+    var lj = u.lojas || (u.lojaId ? [u.lojaId] : []);
+    return lj.indexOf(state.filtroLoja) !== -1;
+  });
   var t = $('#tabela-equipe');
   t.innerHTML = '<tr><th>Nome</th><th>Usuário</th><th>Função</th><th>Acesso</th><th>Loja</th><th>Status</th><th></th></tr>' +
     (users.length ? users.map(function(u){
@@ -1919,10 +1893,13 @@ $('#btn-novo-colaborador').addEventListener('click', function(){
 
 function modalUser(u){
   u = u || {};
-  var lojaOpts = state.lojas.map(function(l){
-    return '<option value="'+escAttr(l.id)+'"'+((u.lojaId||state.filtroLoja||''===l.id)?' selected':'')+'>'+esc(l.nome)+' ('+esc(l.id)+')</option>';
+  var userLojas = (u && u.lojas && Array.isArray(u.lojas)) ? u.lojas : ((u && u.lojaId) ? [u.lojaId] : []);
+  var lojaCheckboxes = state.lojas.map(function(l){
+    var sel = userLojas.indexOf(l.id) !== -1 || (!userLojas.length && (state.filtroLoja === l.id));
+    return '<label style="display:flex;align-items:center;gap:8px;margin:4px 0;padding:6px 8px;border:1px solid rgba(255,255,255,.05);border-radius:8px;background:var(--navy-900);color:var(--cream-100);">'+
+      '<input type="checkbox" name="user-lojas" value="'+escAttr(l.id)+'"'+(sel?' checked':'')+'>'+esc(l.nome)+' ('+esc(l.id)+')'+
+    '</label>';
   }).join('');
-  if(!u.lojaId) lojaOpts = lojaOpts.replace(' selected','',1);
   var fnOpts = FUNCOES.map(function(f){
     return '<option value="'+f+'"'+(u.funcao===f?' selected':'')+'>'+FN_LABEL[f]+'</option>';
   }).join('');
@@ -1937,8 +1914,8 @@ function modalUser(u){
     '<select class="form-input" id="f-user-funcao">'+fnOpts+'</select></div>'+
     '<div class="form-row"><label class="form-label">Senha</label>'+
     '<input class="form-input" id="f-user-senha" value="'+escAttr(u.senha||'1234')+'" placeholder="mín. 4 caracteres"></div></div>'+
-    '<div class="form-row-h"><div class="form-row"><label class="form-label">Loja / Kiosk</label>'+
-    '<select class="form-input" id="f-user-loja">'+lojaOpts+'</select></div>'+
+    '<div class="form-row-h"><div class="form-row" style="flex:2;"><label class="form-label">Lojas</label>'+
+    '<div class="lojas-checklist" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto">'+lojaCheckboxes+'</div></div>'+
     '<div class="form-row"><label class="form-label">Status</label>'+
     '<select class="form-input" id="f-user-ativo"><option value="1"'+(u.ativo===false?'':' selected')+'>Ativo</option>'+
     '<option value="0"'+(u.ativo===false?' selected':'')+'>Inativo</option></select></div></div>'+
@@ -1946,17 +1923,19 @@ function modalUser(u){
     '<button class="btn btn-ghost" onclick="nacCloseModal()">Cancelar</button></div>'
   );
   $('#salvar-user').addEventListener('click', async function(){
+    var lojasSel = Array.prototype.slice.call(document.querySelectorAll('input[name="user-lojas"]:checked')).map(function(i){ return i.value; });
     var payload = {
       id: u.id||'',
-      lojaId: $('#f-user-loja').value,
+      lojaId: lojasSel[0] || '',
+      lojas: lojasSel,
       usuario: $('#f-user-usuario').value.trim(),
       nome: $('#f-user-nome').value.trim(),
       funcao: $('#f-user-funcao').value,
       senha: $('#f-user-senha').value,
       ativo: $('#f-user-ativo').value==='1'
     };
-    if(!payload.lojaId || !payload.usuario || !payload.nome || !payload.senha){
-      toast('Preencha loja, usuário, nome e senha', true); return;
+    if(!payload.lojaId || lojasSel.length === 0 || !payload.usuario || !payload.nome || !payload.senha){
+      toast('Preencha pelo menos uma loja, usuário, nome e senha', true); return;
     }
     if(payload.senha.length<4){ toast('Senha deve ter no mínimo 4 caracteres', true); return; }
     var res = await call('usuarios.save', payload);
@@ -2108,7 +2087,7 @@ function exportarDados(){
           esc(u.titulo||'—'), esc(u.motivo||'—') ];
       }));
 
-    html += '<h2>Parâmetros (DRE / estoque)</h2>' + expTabela(
+    html += '<h2>Parâmetros (estoque)</h2>' + expTabela(
       ['Parâmetro','Valor'],
       [
         ['Custo de ribbon (por unidade)', fmtBRL(toNum(params.custoRibbonUnitario))],

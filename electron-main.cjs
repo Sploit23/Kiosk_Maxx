@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
+const http = require('http');
+const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 
 const isDev = !app.isPackaged;
@@ -66,36 +68,132 @@ function isPortInUse(port, host = '127.0.0.1') {
   });
 }
 
-function startSidecar() {
+// Hash do natal-core.cjs no disco (12 chars) — mesmo cálculo do BUILD_ID
+// embutido no sidecar. Comparar os dois detecta instância ANTIGA na porta.
+function localSidecarBuild(sidecarPath) {
+  try {
+    return crypto.createHash('sha256').update(fs.readFileSync(sidecarPath)).digest('hex').slice(0, 12);
+  } catch {
+    return null;
+  }
+}
+
+// GET /api/health da instância que já está na porta (null se não responder).
+function fetchSidecarHealth(port, host = '127.0.0.1', timeout = 2000) {
+  return new Promise((resolve) => {
+    const req = http.get({ host, port, path: '/api/health', timeout }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; if (data.length > 4096) { req.destroy(); resolve(null); } });
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+    });
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.on('error', () => resolve(null));
+  });
+}
+
+// PID do processo que escuta na porta (Windows: netstat -ano). Usado só quando
+// o health não devolve o pid (sidecar antigo ou porta de outro programa).
+function pidListeningOn(port) {
+  try {
+    const { execSync } = require('child_process');
+    const out = execSync(`netstat -ano -p tcp`, { encoding: 'utf8', timeout: 4000 });
+    const alvo = `:${port}`;
+    for (const linha of out.split(/\r?\n/)) {
+      if (!/LISTENING/i.test(linha)) continue;
+      const cols = linha.trim().split(/\s+/);
+      if (cols.length < 5) continue;
+      if (cols[1] !== `0.0.0.0:${port}` && cols[1] !== `[::]:${port}` && cols[1] !== `127.0.0.1:${port}`) continue;
+      const pid = parseInt(cols[4], 10);
+      if (pid && pid !== process.pid) return pid;
+    }
+  } catch {}
+  return null;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function spawnSidecar(sidecarPath, expectedBuild) {
+  const env = {
+    ...process.env,
+    ELECTRON_RUN_AS_NODE: '1',
+    NATAL_DATA_DIR: app.getPath('userData'),
+    NATAL_PHOTOS_FOLDER: (config.photosFolder || '').trim(),
+  };
+  sidecarProcess = spawn(process.execPath, [sidecarPath], { env, windowsHide: true });
+  sidecarProcess.stdout.on('data', (d) => console.log(`[Sidecar] ${d}`.trim()));
+  sidecarProcess.stderr.on('data', (d) => console.error(`[Sidecar] ${d}`.trim()));
+  sidecarProcess.on('close', (code) => {
+    console.warn(`[Sidecar] Finalizado com codigo ${code}`);
+    sidecarProcess = null;
+    if (code !== 0 && code !== null) {
+      sidecarRestartCount++;
+      setTimeout(startSidecar, 3000);
+    }
+  });
+  // Guarda pós-spawn: se em 4s a porta não subir (ou subir com build antigo),
+  // mata e tenta de novo — nunca fica conversando com sidecar desatualizado.
+  // O relançamento é agendado AQUI (e não no close): kill no Windows fecha o
+  // filho com code=null, e o handler de close só relança em code !== 0.
+  if (expectedBuild) {
+    setTimeout(async () => {
+      if (!sidecarProcess) return;
+      const h = await fetchSidecarHealth(9877);
+      if (!h || (h.build && h.build !== expectedBuild)) {
+        console.warn('[Sidecar] Instancia nova nao respondeu com o build atual. Relancando...');
+        sidecarRestartCount++;
+        const proc = sidecarProcess;
+        try { proc.kill(); } catch {}
+        setTimeout(() => startSidecar(), 1500);
+      }
+    }, 4000);
+  }
+}
+
+async function startSidecar() {
   const sidecarPath = getSidecarPath();
   if (!fs.existsSync(sidecarPath)) {
     console.warn('[Sidecar] natal-core.cjs nao encontrado.');
     return;
   }
   if (sidecarRestartCount >= SIDECAR_MAX_RESTARTS) return;
-  isPortInUse(9877).then((inUse) => {
-    if (inUse) {
-      console.warn('[Sidecar] Porta 9877 ja em uso (outra instancia). Usando a existente.');
+  const expectedBuild = localSidecarBuild(sidecarPath);
+  const inUse = await isPortInUse(9877);
+
+  if (inUse) {
+    const health = await fetchSidecarHealth(9877);
+    const sameBuild = health && health.ok && expectedBuild && health.build === expectedBuild;
+    if (sameBuild) {
+      console.warn('[Sidecar] Porta 9877 ja em uso (instancia identica). Usando a existente.');
       return;
     }
-    const env = {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: '1',
-      NATAL_DATA_DIR: app.getPath('userData'),
-      NATAL_PHOTOS_FOLDER: (config.photosFolder || '').trim(),
-    };
-    sidecarProcess = spawn(process.execPath, [sidecarPath], { env, windowsHide: true });
-    sidecarProcess.stdout.on('data', (d) => console.log(`[Sidecar] ${d}`.trim()));
-    sidecarProcess.stderr.on('data', (d) => console.error(`[Sidecar] ${d}`.trim()));
-    sidecarProcess.on('close', (code) => {
-      console.warn(`[Sidecar] Finalizado com codigo ${code}`);
-      sidecarProcess = null;
-      if (code !== 0 && code !== null) {
-        sidecarRestartCount++;
-        setTimeout(startSidecar, 3000);
+    // Instância na porta é antiga (build diferente), não responde health, ou o
+    // disco não bate — reutilizá-la deixaria o PDV sem as rotas novas
+    // ("Rota nao encontrada"). Mata o dono da porta e relança com o código atual.
+    const motivo = !health ? 'sem resposta' : (!health.ok ? 'health invalido' : `build ${health.build || '?'} != ${expectedBuild || '?'}`);
+    const pid = (health && health.pid) || pidListeningOn(9877);
+    console.warn(`[Sidecar] Porta 9877 em uso por instancia DESATUALIZADA (${motivo}). Substituindo...`);
+    if (pid) {
+      try {
+        process.kill(pid);
+      } catch (e) {
+        console.error(`[Sidecar] Nao consegui matar o pid ${pid}: ${e.message}`);
+        return;
       }
-    });
-  });
+      for (let i = 0; i < 20; i++) {
+        if (!(await isPortInUse(9877))) break;
+        await sleep(250);
+      }
+      if (await isPortInUse(9877)) {
+        console.error('[Sidecar] Porta 9877 continua ocupada apos kill. Mantendo a existente.');
+        return;
+      }
+    } else {
+      console.error('[Sidecar] Nao identifiquei o pid dono da 9877. Mantendo a existente.');
+      return;
+    }
+  }
+
+  spawnSidecar(sidecarPath, expectedBuild);
 }
 
 // ─── 2. Sidecar Java (Fujifilm ASK-400) ─────────────────────

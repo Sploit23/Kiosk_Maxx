@@ -227,9 +227,14 @@ function conexaoPorLoja(): array
 
 function userVisible(array $u, bool $withSenha = false): array
 {
+    $lojas = is_array($u['lojas'] ?? null) ? array_values(array_unique(array_map('strval', $u['lojas']))) : [];
+    if (!$lojas && isset($u['lojaId']) && $u['lojaId'] !== '') {
+        $lojas = [(string) $u['lojaId']];
+    }
     $out = [
         'id' => $u['id'] ?? '',
-        'lojaId' => $u['lojaId'] ?? '',
+        'lojaId' => $lojas[0] ?? ($u['lojaId'] ?? ''),
+        'lojas' => $lojas,
         'usuario' => $u['usuario'] ?? '',
         'nome' => $u['nome'] ?? '',
         'funcao' => $u['funcao'] ?? 'vendedor',
@@ -276,6 +281,54 @@ function resolverPdvNome($pdv, array $loja): string
     $v = trim((string) ($pdv ?? ''));
     if ($v === '') $v = trim((string) ($loja['pdv'] ?? ''));
     return $v;
+}
+
+const MEIOS_CONHECIDOS = ['dinheiro', 'debito', 'credito', 'pix'];
+
+// Normaliza a forma de pagamento de um pagamento do PDV. O lado do PDV já
+// manda `meio` canônico ('dinheiro'|'debito'|'credito'|'pix'), mas versões
+// antigas gravavam pagamento SEM meio (string vazia) — nesses casos a forma
+// ('Dinheiro', 'Crédito 3x', ...) é a única fonte para recuperar o meio, senão
+// a venda cai no grupo "Não informado" do Financeiro.
+function normalizarMeioPagamento($meio, $forma, &$parcelas = null): string
+{
+    $m = strtolower(trim((string) ($meio ?? '')));
+    if (in_array($m, MEIOS_CONHECIDOS, true)) return $m;
+    $f = trim((string) ($forma ?? ''));
+    $pl = null;
+    if (preg_match('/^Cr[eé]dito\s+(\d+)x$/iu', $f, $mm)) $pl = (int) $mm[1];
+    $fSemAcento = strtolower(preg_replace('/\s+/u', ' ', strtr($f, ['á'=>'a','à'=>'a','ã'=>'a','â'=>'a','é'=>'e','ê'=>'e','í'=>'i','ó'=>'o','õ'=>'o','ô'=>'o','ú'=>'u','ç'=>'c'])));
+    $mapa = ['dinheiro' => 'dinheiro', 'debito' => 'debito', 'cartao de debito' => 'debito',
+             'credito' => 'credito', 'credito a vista' => 'credito', 'cartao de credito' => 'credito',
+             'pix' => 'pix'];
+    if (isset($mapa[$fSemAcento])) {
+        if ($mapa[$fSemAcento] === 'credito') {
+            if (preg_match('/(\d+)\s*x$/', $fSemAcento, $mm)) $parcelas = (int) $mm[1];
+        }
+        return $mapa[$fSemAcento];
+    }
+    // "Crédito 3x", "Crédito parcelado", ... — qualquer rótulo que comece por
+    // crédito é crédito (o número de parcelas vem do sufixo "Nx").
+    if (strpos($fSemAcento, 'credito') === 0) {
+        if (preg_match('/(\d+)\s*x$/', $fSemAcento, $mm)) $parcelas = (int) $mm[1];
+        return 'credito';
+    }
+    // forma vazia/"—" (pedido gravado sem meio): mantém o que veio, sem inventar.
+    return $m;
+}
+
+// Soma os meios já classificados de um conjunto de pagamentos.
+function somaMeios(array $pagamentos): array
+{
+    $meios = array_fill_keys(MEIOS_CONHECIDOS, 0.0);
+    foreach ($pagamentos as $pg) {
+        if (!is_array($pg)) continue;
+        $valor = (float) ($pg['valor'] ?? 0);
+        if ($valor <= 0) continue;
+        $mk = strtolower(trim((string) ($pg['meio'] ?? '')));
+        if (isset($meios[$mk])) $meios[$mk] = round($meios[$mk] + $valor, 2);
+    }
+    return $meios;
 }
 
 // Parâmetros globais da operação (Portal define, DRE/Estoque consomem).
@@ -335,7 +388,8 @@ try {
             $match = null;
             $lower = mb_strtolower($usuario, 'UTF-8');
             foreach ($db['usuarios'] as $u) {
-                if (($u['lojaId'] ?? '') !== $lojaId) continue;
+                $lojasU = is_array($u['lojas'] ?? null) ? array_map('strval', $u['lojas']) : (($u['lojaId'] ?? '') ? [(string)$u['lojaId']] : []);
+                if (!in_array($lojaId, $lojasU, true)) continue;
                 if (!empty($u['ativo'])
                     && (mb_strtolower($u['usuario'] ?? '', 'UTF-8') === $lower
                         || mb_strtolower($u['nome'] ?? '', 'UTF-8') === $lower)
@@ -361,7 +415,8 @@ try {
             $loja = findLoja($db, $lojaId);
             if (!$loja) fail('LOJA_INVALIDA', 404);
             $users = array_values(array_filter($db['usuarios'], function ($u) use ($lojaId) {
-                return ($u['lojaId'] ?? '') === $lojaId && !empty($u['ativo']);
+                $lojasU = is_array($u['lojas'] ?? null) ? array_map('strval', $u['lojas']) : (($u['lojaId'] ?? '') ? [(string)$u['lojaId']] : []);
+                return in_array($lojaId, $lojasU, true) && !empty($u['ativo']);
             }));
             respond([
                 'ok' => true,
@@ -413,7 +468,7 @@ try {
             }
 
             $pareamento = [
-                'pdvNome' => $pdvNome,
+                'pdvNome' => resolverPdvNome($pdvNome, $loja),
                 'machineId' => $machineId,
                 'emparelhadoEm' => gmdate('c'),
             ];
@@ -457,8 +512,45 @@ try {
 
             $meios = [];
             $rawMeios = is_array($p['meios'] ?? null) ? $p['meios'] : [];
-            foreach (['dinheiro', 'debito', 'credito', 'pix'] as $mk) {
+            foreach (MEIOS_CONHECIDOS as $mk) {
                 $meios[$mk] = round(max(0, (float) ($rawMeios[$mk] ?? 0)), 2);
+            }
+            $totalVendido = round(max(0, (float) ($p['totalVendido'] ?? 0)), 2);
+            // Reconciliação: se a soma das formas não fecha com a receita do dia,
+            // recalcula a partir dos pedidos REAIS que o próprio PDV já subiu
+            // (fonte de verdade das formas). Assim a diferença nunca vira
+            // "Não informado" por dessincronia do snapshot. Só usa os pedidos
+            // quando eles cobrem o dia inteiro — snapshot parcial não corrige.
+            $somaMeios = round(array_sum($meios), 2);
+            if ($somaMeios + 0.005 < $totalVendido) {
+                $pedidosDia = [];
+                $todosPedidos = loadJson('pedidos.json', []);
+                if (is_array($todosPedidos)) {
+                    foreach ($todosPedidos as $pd) {
+                        if (!is_array($pd)) continue;
+                        if (($pd['lojaId'] ?? '') !== $lojaId) continue;
+                        if (($pd['data'] ?? '') !== $data) continue;
+                        $st = strtolower(trim((string) ($pd['status'] ?? '')));
+                        if ($st !== 'pago' && $st !== 'impresso') continue;
+                        $pedidosDia[] = $pd;
+                    }
+                }
+                $totalDia = 0.0;
+                foreach ($pedidosDia as $pd) $totalDia += (float) ($pd['total'] ?? 0);
+                $totalDia = round($totalDia, 2);
+                if ($pedidosDia && $totalDia > 0 && abs($totalDia - $totalVendido) <= 0.005) {
+                    $pgsDia = [];
+                    foreach ($pedidosDia as $pd) {
+                        foreach ((array) ($pd['pagamentos'] ?? []) as $pg) {
+                            if (is_array($pg)) $pgsDia[] = $pg;
+                        }
+                    }
+                    $meiosRec = somaMeios($pgsDia);
+                    if (round(array_sum($meiosRec), 2) + 0.005 >= $totalVendido) {
+                        $meios = $meiosRec;
+                        $somaMeios = round(array_sum($meios), 2);
+                    }
+                }
             }
             $snap = [
                 'lojaId' => $lojaId,
@@ -466,7 +558,7 @@ try {
                 'pdvNome' => resolverPdvNome($p['pdvNome'], $loja),
                 'machineId' => $machineId,
                 'data' => $data,
-                'totalVendido' => round(max(0, (float) ($p['totalVendido'] ?? 0)), 2),
+                'totalVendido' => $totalVendido,
                 'pedidos' => max(0, (int) ($p['pedidos'] ?? 0)),
                 'sessoesCriadas' => max(0, (int) ($p['sessoesCriadas'] ?? 0)),
                 'sessoesVendidas' => max(0, (int) ($p['sessoesVendidas'] ?? 0)),
@@ -524,11 +616,16 @@ try {
             $pagamentos = [];
             foreach ((array) ($pd['pagamentos'] ?? []) as $pg) {
                 if (!is_array($pg)) continue;
+                $pl = null;
+                $meio = normalizarMeioPagamento($pg['meio'] ?? '', $pg['forma'] ?? '', $pl);
+                $forma = trim((string) ($pg['forma'] ?? ''));
+                if ($forma === '' || $forma === '—') $forma = $meio;
+                $parcelas = (int) ($pg['parcelas'] ?? 0) ?: (int) ($pl ?? 0);
                 $pagamentos[] = [
-                    'meio' => trim((string) ($pg['meio'] ?? '')),
-                    'forma' => trim((string) ($pg['forma'] ?? '')),
+                    'meio' => $meio,
+                    'forma' => $forma,
                     'valor' => round(max(0, (float) ($pg['valor'] ?? 0)), 2),
-                    'parcelas' => max(0, (int) ($pg['parcelas'] ?? 0)),
+                    'parcelas' => max(0, $parcelas),
                 ];
             }
             $registro = [
@@ -881,7 +978,8 @@ try {
             }, $db['usuarios']);
             if ($lojaId !== '') {
                 $users = array_values(array_filter($users, function ($u) use ($lojaId) {
-                    return $u['lojaId'] === $lojaId;
+                    $lojas = $u['lojas'] ?? (($u['lojaId'] ?? '') ? [$u['lojaId']] : []);
+                    return in_array($lojaId, $lojas, true);
                 }));
             }
             respond(['ok' => true, 'usuarios' => $users]);
@@ -890,25 +988,37 @@ try {
         case 'usuarios.save': {
             $db = db();
             $id = (string) ($p['id'] ?? '');
-            $lojaId = trim((string) ($p['lojaId'] ?? ''));
+            $lojas = null;
+            if (isset($p['lojas']) && is_array($p['lojas'])) {
+                $lojas = array_values(array_filter(array_map(function ($v) {
+                    $s = trim((string) $v); return $s === '' ? null : $s;
+                }, $p['lojas']), function ($v) { return $v !== null; }));
+                $lojas = array_values(array_unique($lojas));
+            }
+            $lojaId = trim((string) ($p['lojaId'] ?? ($lojas[0] ?? '')));
+            if (!$lojas || count($lojas) === 0) $lojas = $lojaId !== '' ? [$lojaId] : [];
+
             $u = [
                 'id' => $id,
                 'lojaId' => $lojaId,
+                'lojas' => $lojas,
                 'usuario' => trim((string) ($p['usuario'] ?? '')),
                 'nome' => trim((string) ($p['nome'] ?? '')),
                 'funcao' => trim((string) ($p['funcao'] ?? 'vendedor')),
                 'senha' => (string) ($p['senha'] ?? ''),
                 'ativo' => !empty($p['ativo']),
             ];
-            if ($lojaId === '' || $u['usuario'] === '' || $u['nome'] === '' || $u['senha'] === '') {
-                fail('DADOS_INCOMPLETOS: loja, usuário, nome e senha são obrigatórios');
+            if (count($lojas) === 0 || $u['usuario'] === '' || $u['nome'] === '' || $u['senha'] === '') {
+                fail('DADOS_INCOMPLETOS: loja/lojas, usuário, nome e senha são obrigatórios');
             }
             if (!in_array($u['funcao'], FUNCOES(), true)) fail('FUNCAO_INVALIDA');
-            if (!findLoja($db, $lojaId)) fail('LOJA_INVALIDA', 404);
+            foreach ($lojas as $l) if (!findLoja($db, $l)) fail('LOJA_INVALIDA', 404);
 
             $duplicado = function ($users, $i, $lojaId, $usuario) {
                 foreach ($users as $j => $y) {
-                    if ($j !== $i && ($y['lojaId'] ?? '') === $lojaId
+                    if ($j === $i) continue;
+                    $yl = $y['lojas'] ?? (($y['lojaId'] ?? '') ? [$y['lojaId']] : []);
+                    if (in_array($lojaId, $yl, true)
                         && mb_strtolower($y['usuario'] ?? '') === mb_strtolower($usuario)) {
                         return true;
                     }
@@ -918,13 +1028,17 @@ try {
 
             foreach ($db['usuarios'] as $i => $x) {
                 if (($x['id'] ?? '') === $u['id']) {
-                    if ($duplicado($db['usuarios'], $i, $lojaId, $u['usuario'])) fail('USUARIO_DUPLICADO');
+                    foreach ($lojas as $l) {
+                        if ($duplicado($db['usuarios'], $i, $l, $u['usuario'])) fail('USUARIO_DUPLICADO');
+                    }
                     $db['usuarios'][$i] = $u;
                     saveDb($db);
                     respond(['ok' => true, 'usuario' => userVisible($u, true)]);
                 }
             }
-            if ($duplicado($db['usuarios'], -1, $lojaId, $u['usuario'])) fail('USUARIO_DUPLICADO');
+            foreach ($lojas as $l) {
+                if ($duplicado($db['usuarios'], -1, $l, $u['usuario'])) fail('USUARIO_DUPLICADO');
+            }
             $u['id'] = uid();
             $db['usuarios'][] = $u;
             saveDb($db);

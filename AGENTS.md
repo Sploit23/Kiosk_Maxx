@@ -352,6 +352,7 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 - `npm run release` — build + publish GitHub (release)
 - `npm run lint` — ESLint
 - `backend/publish.ps1` — deploy FTP do portal PHP (credenciais em `../../credencial.txt`)
+- `tools/limpar-dados-pdv.ps1` — zera os dados de teste do PDV (sessões, pedidos, caixa, fila de impressão, auditoria, contador de ribbon) com backup automático. Acha a pasta de dados sozinho (API `:9877/api/config` → ponteiro `%APPDATA%\natal-kiosk\database\fotos-folder.txt` → `electron-config.json` → `config.json`) e **recusa rodar com o app aberto** (o sidecar reescreve os arquivos em memória). Flags: `-DryRun` (só mostra), `-Completo` (apaga `database\config.json` → novo `machineId`/`kioskCode`, exigindo re-emparelhamento no portal), `-Forcar`. Depois de limpar é preciso **abrir um novo caixa** no PDV.
 
 - **Auto-update (electron-updater):** o main checa atualizações no boot (10s) e
   de 60 em 60s quando ocioso (`performAutoUpdate`, `autoDownload=false`); o

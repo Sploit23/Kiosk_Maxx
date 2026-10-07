@@ -78,6 +78,10 @@ const natalApi = {
   // Config da máquina (salva no sidecar)
   getConfig: () => api('GET', '/api/config'),
   saveConfig: (partial) => api('POST', '/api/config', partial),
+  // Manutenção: apaga sessões, pedidos, caixa, fila de impressão, auditoria e
+  // contador de ribbon (preserva config.json → pareamento com a loja).
+  // Exige { senha } no body; com caixa aberto precisa de { forcar: true }.
+  limparDados: (opts) => api('POST', '/api/manutencao/limpar', opts || {}),
 };
 
 export default natalApi;

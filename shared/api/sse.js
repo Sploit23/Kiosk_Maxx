@@ -48,6 +48,8 @@ function _openSse() {
   subscribe('print-start');
   subscribe('printer:progress');
   subscribe('print-complete');
+  subscribe('print-waiting');       // sidecar avisa que há item na fila de impressão
+  subscribe('print-fila:atualizada'); // (re)envio manual da fila pelo PDV
 
   _sseSource.onopen = () => {
     if (_sseConsecutiveErrors > 0) console.log('[SSE] Reconectado.');
