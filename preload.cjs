@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('natal', {
     pdvNome: config.pdvNome,
     portalApiUrl: config.portalApiUrl,
     lojaId: config.lojaId,
+    lojaNome: config.lojaNome || '',
     pairingCode: config.pairingCode || '',
     photosFolder: config.photosFolder || '',
     logoTexto: config.logoTexto || 'SHOPPING PALLADIUM',

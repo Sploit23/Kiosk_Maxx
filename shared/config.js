@@ -16,6 +16,8 @@ const DEFAULTS = {
   portalApiUrl: 'https://maxxfoto.com.br/natalcontroler/api.php',
   // ID da loja/kiosk no portal (define o time de vendedores/fotógrafos).
   lojaId: 'teste',
+  // Nome exibido da loja (definido no app no ⚙ Config — offline-first).
+  lojaNome: '',
   // Código de emparelhamento gerado no portal (kiosk.pair) — garantia de
   // que esta máquina é a "dona" do lojaId (evita dados misturados em clone).
   pairingCode: '',
@@ -40,6 +42,7 @@ function resolveConfig() {
       pdvNome: cfg.pdvNome || DEFAULTS.pdvNome,
       portalApiUrl: cfg.portalApiUrl || DEFAULTS.portalApiUrl,
       lojaId: cfg.lojaId || DEFAULTS.lojaId,
+      lojaNome: cfg.lojaNome || DEFAULTS.lojaNome,
       pairingCode: cfg.pairingCode || DEFAULTS.pairingCode,
       photosFolder: cfg.photosFolder || '',
       logoTexto: cfg.logoTexto || DEFAULTS.logoTexto,

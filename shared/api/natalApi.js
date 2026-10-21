@@ -60,6 +60,20 @@ const natalApi = {
   auditoriaList: () => api('GET', '/api/auditoria'),
   auditoriaSave: (usos) => api('POST', '/api/auditoria', { usos }),
 
+  // ─── Outbox do portal (fila durável de envio) ────────────
+  // O PDV enfileira tudo que precisa registrar no portal; o item só
+  // sai da fila quando o portal confirma. Sobrevive a reinício/offline.
+  filaPortalList: () => api('GET', '/api/portal/fila'),
+  filaPortalAdd: (item) => api('POST', '/api/portal/fila', item),
+  filaPortalConfirmar: (item) => api('POST', '/api/portal/fila/confirmar', item),
+  filaPortalErro: (item) => api('POST', '/api/portal/fila/erro', item),
+  filaPortalLimpar: (senha) => api('POST', '/api/portal/fila/limpar', { senha }),
+
+  // ─── Cache local do portal (preços, equipe, credenciais) ──
+  cachePortalGet: () => api('GET', '/api/cache/portal'),
+  cachePortalSave: (partial) => api('POST', '/api/cache/portal', partial),
+  cachePortalConferir: (usuario, senha) => api('POST', '/api/cache/portal/conferir', { usuario, senha }),
+
   // ─── Impressão ASK-400 (produção) ────────────────────────
   // Envia o JPEG final de cada foto composta no PDV para a fila do pedido.
   uploadImpressao: (pedidoId, filename, blob) =>

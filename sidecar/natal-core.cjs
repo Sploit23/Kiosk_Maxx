@@ -89,6 +89,9 @@ function bindPaths(dataDir) {
   CONFIG_FILE = path.join(DB_DIR, 'config.json');
   PASTA_IMPORTADAS_FILE = path.join(DB_DIR, 'pasta-importadas.json');
   FILA_IMPRESSAO_FILE = path.join(DB_DIR, 'fila-impressao.json');
+  FILA_PORTAL_FILE = path.join(DB_DIR, 'fila-portal.json');
+  CACHE_PORTAL_FILE = path.join(DB_DIR, 'cache-portal.json');
+  ENVIADOS_PORTAL_FILE = path.join(DB_DIR, 'enviados-portal.json');
 }
 
 // Move dados do diretório antigo para o novo (1º boot na pasta centralizada
@@ -125,7 +128,7 @@ function persistFolderPointer(folder) {
 
 let DATA_DIR = computeDataDir(readBootstrapPhotosFolder());
 let DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR;
-let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE, FILA_IMPRESSAO_FILE;
+let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE, FILA_IMPRESSAO_FILE, FILA_PORTAL_FILE, CACHE_PORTAL_FILE, ENVIADOS_PORTAL_FILE;
 bindPaths(DATA_DIR);
 moverDados(LEGACY_BOOT_DIR, DATA_DIR);
 
@@ -176,7 +179,7 @@ function sanitizeSegment(s) {
 // ─── Config da máquina ───────────────────────────────────────
 // machineId: gerado pelo PDV no primeiro boot e persistido aqui — identifica
 // a máquina física p/ emparelhamento no portal (kiosk.pair) e carimbos futuros.
-const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM' };
+const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', lojaNome: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM' };
 let machineConfig = { ...MACHINE_DEFAULTS, ...readJson(CONFIG_FILE, {}) };
 persistFolderPointer(machineConfig.photosFolder);
 function getMachineConfig() { return machineConfig; }
@@ -429,6 +432,147 @@ function arquivarCaixa(fechada) {
   writeJson(CAIXAS_FILE, caixas);
 }
 
+// ─── Outbox para o portal (fila durável de envio) ─────────────
+// O PDV funciona OFFLINE: nada é enviado direto do balcão. Tudo que o
+// portal precisa registrar (snapshot do dia, pedido a pedido, uso de
+// senha master) é gravado AQUI primeiro e fica no arquivo até a
+// internet voltar. O portal é idempotente (pedido por pedido.id,
+// snapshot por loja+data, auditoria por uso.id), então reenviar é seguro.
+//
+// item = { id, tipo, chave, payload, criadoEm, atualizadoEm,
+//          tentativas, ultimoErro, ultimoEnvioEm }
+//   tipo  = 'vendas' | 'pedido' | 'auditoria'
+//   chave = identificador do registro no portal (data | pedidoId | usoId)
+let filaPortal = readJson(FILA_PORTAL_FILE, []);
+if (!Array.isArray(filaPortal)) filaPortal = [];
+function saveFilaPortal() { writeJson(FILA_PORTAL_FILE, filaPortal); }
+
+// Registro do que JÁ foi confirmado pelo portal: { "tipo:chave": timestamp }.
+// Serve para o PDV não reenviar o histórico inteiro a cada boot (o portal é
+// idempotente, mas reenviar tudo o tempo todo é desperdício e risco).
+let enviadosPortal = readJson(ENVIADOS_PORTAL_FILE, {});
+if (!enviadosPortal || typeof enviadosPortal !== 'object' || Array.isArray(enviadosPortal)) enviadosPortal = {};
+function saveEnviadosPortal() { writeJson(ENVIADOS_PORTAL_FILE, enviadosPortal); }
+
+function filaPortalItem(tipo, chave) {
+  return filaPortal.find((i) => i && i.tipo === tipo && i.chave === String(chave)) || null;
+}
+
+// Enfileira (ou atualiza) um registro. Reenfileirar o mesmo tipo+chave
+// ATUALIZA o payload em vez de duplicar (o snapshot do dia evolui com
+// as vendas que entram depois).
+function enfileirarPortal({ tipo, chave, payload } = {}) {
+  const t = String(tipo || '').trim();
+  const c = String(chave || '').trim();
+  if (!t || !c) return null;
+  const existente = filaPortalItem(t, c);
+  if (existente) {
+    if (payload !== undefined && payload !== null) existente.payload = payload;
+    existente.atualizadoEm = Date.now();
+    saveFilaPortal();
+    return { item: existente, criado: false };
+  }
+  const item = {
+    id: 'q-' + Date.now().toString(36) + '-' + crypto.randomBytes(3).toString('hex'),
+    tipo: t,
+    chave: c,
+    payload: payload === undefined ? null : payload,
+    criadoEm: Date.now(),
+    atualizadoEm: Date.now(),
+    tentativas: 0,
+    ultimoErro: '',
+    ultimoEnvioEm: null,
+  };
+  filaPortal.push(item);
+  saveFilaPortal();
+  emit('portal:fila', { total: filaPortal.length });
+  return { item, criado: true };
+}
+
+// Confirmação do portal: o item saiu com sucesso e sai da fila (e fica
+// registrado como enviado para não ser reenviado).
+function confirmarPortal({ id, tipo, chave } = {}) {
+  const removidos = [];
+  filaPortal = filaPortal.filter((i) => {
+    if (id && i.id === id) { removidos.push(i); return false; }
+    if (!id && tipo && chave && i.tipo === tipo && i.chave === String(chave)) { removidos.push(i); return false; }
+    return true;
+  });
+  if (removidos.length) {
+    saveFilaPortal();
+    for (const i of removidos) {
+      enviadosPortal[i.tipo + ':' + i.chave] = Date.now();
+    }
+    saveEnviadosPortal();
+    emit('portal:fila', { total: filaPortal.length });
+  }
+  return { success: true, restantes: filaPortal.length, confirmados: removidos.length };
+}
+
+// Falha no envio: o item CONTINUA na fila (não se perde nada) e a
+// tentativa fica registrada para o operador ver no ⚙.
+function erroPortal({ id, erro } = {}) {
+  const item = filaPortal.find((i) => i.id === id);
+  if (!item) return { success: false, error: 'ITEM_NAO_ENCONTRADO' };
+  item.tentativas = (item.tentativas || 0) + 1;
+  item.ultimoErro = String(erro || '').slice(0, 300);
+  item.ultimoEnvioEm = Date.now();
+  saveFilaPortal();
+  return { success: true, tentativas: item.tentativas };
+}
+
+function filaPortalParaUI() {
+  return filaPortal.map((i) => ({
+    id: i.id,
+    tipo: i.tipo,
+    chave: i.chave,
+    // payload é obrigatório: o drain do PDV envia o registro COMPLETO ao
+    // portal (sem ele o item seria reenviado como objeto vazio).
+    payload: i.payload,
+    tentativas: i.tentativas || 0,
+    ultimoErro: i.ultimoErro || '',
+    criadoEm: i.criadoEm || null,
+    ultimoEnvioEm: i.ultimoEnvioEm || null,
+  }));
+}
+
+// ─── Cache local do portal (preços, equipe, credenciais) ──────
+// O PDV precisa continuar funcionando sem internet: guarda aqui a última
+// versão conhecida do catálogo e da equipe para cobrar o PREÇO CERTO e
+// autenticar o operador quando a rede cai. As senhas nunca são
+// gravadas em claro — só o hash sha256 (para conferência offline).
+let cachePortal = readJson(CACHE_PORTAL_FILE, {});
+if (!cachePortal || typeof cachePortal !== 'object' || Array.isArray(cachePortal)) cachePortal = {};
+function saveCachePortal() { writeJson(CACHE_PORTAL_FILE, cachePortal); }
+
+function mesclarCachePortal(partial = {}) {
+  const p = partial || {};
+  // Credenciais: { usuario: senha } → { usuario: { hash, atualizadoEm } }
+  if (p.credenciais && typeof p.credenciais === 'object') {
+    const cred = { ...(cachePortal.credenciais || {}) };
+    for (const [usuario, senha] of Object.entries(p.credenciais)) {
+      const u = String(usuario || '').trim();
+      if (!u || !senha) continue;
+      cred[u] = {
+        hash: crypto.createHash('sha256').update(String(senha)).digest('hex'),
+        atualizadoEm: Date.now(),
+      };
+    }
+    p.credenciais = cred;
+  }
+  cachePortal = { ...cachePortal, ...p, atualizadoEm: Date.now() };
+  saveCachePortal();
+  return cachePortal;
+}
+
+function conferirCredencialCache(usuario, senha) {
+  const u = String(usuario || '').trim();
+  const entry = (cachePortal.credenciais || {})[u];
+  if (!entry || !entry.hash) return false;
+  const h = crypto.createHash('sha256').update(String(senha || '')).digest('hex');
+  return h === entry.hash;
+}
+
 // Re-carrega o estado em memória após relocar o diretório de dados (troca de
 // pasta no ⚙): o outro diretório pode ter seus próprios pedidos/caixa/etc.
 function recarregarEstadoLocal() {
@@ -442,6 +586,14 @@ function recarregarEstadoLocal() {
     const arr = readJson(FILA_IMPRESSAO_FILE, []);
     return Array.isArray(arr) ? arr.filter((j) => j && j.pedidoId) : [];
   })();
+  filaPortal = (() => {
+    const arr = readJson(FILA_PORTAL_FILE, []);
+    return Array.isArray(arr) ? arr.filter((i) => i && i.tipo && i.chave) : [];
+  })();
+  cachePortal = readJson(CACHE_PORTAL_FILE, {});
+  if (!cachePortal || typeof cachePortal !== 'object' || Array.isArray(cachePortal)) cachePortal = {};
+  enviadosPortal = readJson(ENVIADOS_PORTAL_FILE, {});
+  if (!enviadosPortal || typeof enviadosPortal !== 'object' || Array.isArray(enviadosPortal)) enviadosPortal = {};
 }
 
 // ─── Ribbon (contagem de papel) ──────────────────────────────
@@ -783,6 +935,7 @@ function limparDadosLocais(opts = {}) {
     pedidos: pedidos.length,
     auditoria: auditoria.length,
     filaImpressao: filaImpressao.length,
+    filaPortal: filaPortal.length,
     caixaAberto: !!(aberto && aberto.numero),
     ribbon: getRibbon(),
     em: new Date().toISOString(),
@@ -811,6 +964,9 @@ function limparDadosLocais(opts = {}) {
   writeJson(AUDITORIA_FILE, []);
   writeJson(PASTA_IMPORTADAS_FILE, {});
   writeJson(FILA_IMPRESSAO_FILE, []);
+  writeJson(FILA_PORTAL_FILE, []);
+  writeJson(CACHE_PORTAL_FILE, {});
+  writeJson(ENVIADOS_PORTAL_FILE, {});
   writeText(COUNTER_FILE, '0');
   writeText(RIBBON_FILE, '400');
   try { fs.rmSync(CAIXA_FILE, { force: true }); } catch {}
@@ -848,7 +1004,7 @@ const server = http.createServer(async (req, res) => {
 
     // ── Health / config ──
     if (method === 'GET' && p === '/api/health') {
-      return sendJson(res, 200, { ok: true, pdv: machineConfig.pdvNome || os.hostname(), time: Date.now(), ribbon: getRibbon(), build: BUILD_ID, pid: process.pid });
+      return sendJson(res, 200, { ok: true, pdv: machineConfig.pdvNome || os.hostname(), time: Date.now(), ribbon: getRibbon(), filaPortal: filaPortal.length, build: BUILD_ID, pid: process.pid });
     }
     if (method === 'GET' && p === '/api/config') {
       return sendJson(res, 200, { ...machineConfig, ribbon: getRibbon() });
@@ -898,6 +1054,70 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
       setMachineConfig(body);
       return sendJson(res, 200, { success: true, config: machineConfig });
+    }
+
+    // ── Outbox do portal (fila durável de envio) ──────────────
+    // O PDV enfileira aqui tudo que precisa registrar no portal e só
+    // remove quando o portal confirma. Sem internet, a fila só cresce.
+    if (method === 'GET' && p === '/api/portal/fila') {
+      return sendJson(res, 200, {
+        success: true,
+        itens: filaPortalParaUI(),
+        total: filaPortal.length,
+        enviados: Object.keys(enviadosPortal),
+      });
+    }
+    if (method === 'POST' && p === '/api/portal/fila') {
+      const body = JSON.parse((await readBody(req, 8 * 1024 * 1024)).toString() || '{}');
+      const r = enfileirarPortal({ tipo: body.tipo, chave: body.chave, payload: body.payload });
+      if (!r) return sendJson(res, 400, { success: false, error: 'DADOS_INCOMPLETOS: tipo e chave são obrigatórios' });
+      return sendJson(res, 200, { success: true, id: r.item.id, criado: r.criado, total: filaPortal.length });
+    }
+    if (method === 'POST' && p === '/api/portal/fila/confirmar') {
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      return sendJson(res, 200, confirmarPortal(body));
+    }
+    if (method === 'POST' && p === '/api/portal/fila/erro') {
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      const r = erroPortal(body);
+      return sendJson(res, r.success ? 200 : 404, r);
+    }
+    if (method === 'POST' && p === '/api/portal/fila/limpar') {
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      if (!senhaConfere(body.senha)) {
+        return sendJson(res, 401, { success: false, error: 'SENHA', message: 'Senha incorreta.' });
+      }
+      const total = filaPortal.length;
+      filaPortal = [];
+      saveFilaPortal();
+      emit('portal:fila', { total: 0 });
+      return sendJson(res, 200, { success: true, removidos: total });
+    }
+    // Zera o registro do que já foi enviado → o PDV reenvia tudo ao portal.
+    if (method === 'POST' && p === '/api/portal/enviados/limpar') {
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      if (!senhaConfere(body.senha)) {
+        return sendJson(res, 401, { success: false, error: 'SENHA', message: 'Senha incorreta.' });
+      }
+      const total = Object.keys(enviadosPortal).length;
+      enviadosPortal = {};
+      saveEnviadosPortal();
+      return sendJson(res, 200, { success: true, removidos: total });
+    }
+
+    // ── Cache local do portal (preços, equipe, credenciais) ────
+    if (method === 'GET' && p === '/api/cache/portal') {
+      return sendJson(res, 200, { success: true, cache: cachePortal });
+    }
+    if (method === 'POST' && p === '/api/cache/portal') {
+      const body = JSON.parse((await readBody(req, 4 * 1024 * 1024)).toString() || '{}');
+      const cache = mesclarCachePortal(body);
+      return sendJson(res, 200, { success: true, cache });
+    }
+    // Conferência de credencial em cache (login offline). Não expõe hash.
+    if (method === 'POST' && p === '/api/cache/portal/conferir') {
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      return sendJson(res, 200, { success: true, ok: conferirCredencialCache(body.usuario, body.senha) });
     }
     // Manutenção: limpa TODOS os dados de teste do PDV (senha obrigatória).
     if (method === 'POST' && p === '/api/manutencao/limpar') {

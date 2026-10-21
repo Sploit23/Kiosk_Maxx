@@ -5,3 +5,6 @@ electron-config.json
 *.log
 jre8/
 /overlay1.png
+.opencode/node_modules/
+.playwright-mcp/
+

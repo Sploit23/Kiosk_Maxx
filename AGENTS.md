@@ -72,7 +72,7 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 | Método | Rota | Descrição |
 |---|---|---|
 | GET | `/api/events` | SSE (`text/event-stream`) de eventos |
-| GET | `/api/health` | `{ ok, pdv, time, ribbon }` |
+| GET | `/api/health` | `{ ok, pdv, time, ribbon, filaPortal, build, pid }` |
 | GET | `/api/printer/status` | Status real da ASK-400 (proxy p/ Java: papel 10x15/15x20, connected, lastError) |
 | GET | `/api/config` | Config da máquina + ribbon |
 | POST | `/api/config` | Salva config da máquina |
@@ -95,6 +95,15 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 | GET | `/api/pdv/caixas` | Histórico de caixas fechados (persistido em `caixas.json`, ordenado do mais recente primeiro) |
 | POST | `/api/pdv/caixa/abrir` | Abre caixa (`CX-...`) |
 | POST | `/api/pdv/caixa/fechar` | Fecha caixa (conciliação: totalVendido, totalPorMeio, meiosDeclarados, totalRecebido, diferenca, valorEnvelope, saldoRestante, fechadoPor, numero) e arquiva no histórico |
+| GET | `/api/portal/fila` | Fila de envio ao portal: `{ itens, total, enviados }` (`itens` **incluem `payload`**) |
+| POST | `/api/portal/fila` | Enfileira item `{tipo: vendas\|pedido\|auditoria, chave, payload}` (dedup por tipo+chave → `criado`) |
+| POST | `/api/portal/fila/confirmar` | Confirma envio `{ids, status}` → remove e grava em `enviados-portal.json` |
+| POST | `/api/portal/fila/erro` | Registra falha `{id, erro}` → `tentativas++`, `ultimoErro` |
+| POST | `/api/portal/fila/limpar` | Limpa a fila (**exige senha**: body `{senha}`, default `HCss221087`, env `NATAL_LIMPEZA_SENHA`) |
+| POST | `/api/portal/enviados/limpar` | Limpa o registro de enviados (permite reenviar do zero) |
+| GET | `/api/cache/portal` | Cache offline `{precos, equipe, credenciais}` (credenciais só como hash sha256) |
+| POST | `/api/cache/portal` | Salva/atualiza o cache (`{precos}\|{equipe}\|{credenciais}`) |
+| POST | `/api/cache/portal/conferir` | Valida login offline `{usuario, senha}` contra o cache TOFU → `{ ok }` |
 | OPTIONS | qualquer | CORS preflight |
 
 **Eventos SSE emitidos:** `sessao:criada`, `sessao:status`, `sessao:concluida`,
@@ -231,6 +240,15 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `GET /api/pdv/caixas` (mais recente primeiro).
 - **Contadores:** `counter.txt` (sessões), `ribbon-counter.txt` (ribbon da
   impressora, default 400), `config.json` (config da máquina).
+- **Fila de envio ao portal (`database/fila-portal.json`):** array de itens
+  `{id, tipo: vendas|pedido|auditoria, chave, payload, tentativas, ultimoErro,
+  criadoEm, atualizadoEm}` — o `payload` é o **corpo completo** guardado no
+  enqueue; o drain reenvia exatamente ele. Dedup por `tipo`+`chave`.
+- **Enviados (`database/enviados-portal.json`):** objeto `tipo:chave → ms`,
+  gravado no confirmar — evita reenvio duplicado.
+- **Cache offline (`database/cache-portal.json`):**
+  `{ precos, equipe, credenciais, atualizadoEm }`; credenciais são
+  `{ usuario: {hash: sha256(senha), atualizadoEm} }` (nunca senha em claro).
 
 **Portal PHP — `backend/data/app.json`:**
 
@@ -279,18 +297,32 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 
 - **`shared/config.js`** — fonte única: `serverUrl` (default
   `http://localhost:9877`), `portalApiUrl` (`https://maxxfoto.com.br/natalcontroler/api.php`),
-  `lojaId` (`teste`), `pairingCode`, `pdvNome`, formatos de foto, produtos,
-  pricing, overlays, estados, meios de pagamento (`dinheiro`, `pix`, `debito`,
-  `credito`) e timers.
+  `lojaId` (`teste`), `lojaNome`, `pairingCode`, `pdvNome`, formatos de foto,
+  produtos, pricing, overlays, estados, meios de pagamento (`dinheiro`, `pix`,
+  `debito`, `credito`) e timers.
 - **Preços — fonte de verdade no portal:** o PDV (`vendas.html`) busca
   `portalApi.precos()` no boot e a cada emparelhamento e sobrescreve o catálogo
   local (`TAMANHOS`/`EXTRAS`/combos). O admin edita por loja em "Catálogo de
   produtos". `shared/config.js` `PRICING` é apenas o fallback offline (valores
-  oficiais do evento).
+  oficiais do evento). **Offline:** o último catálogo recebido é salvo no
+  `cache-portal.json` (`POST /api/cache/portal {precos}`) e reaplicado no
+  próximo boot ("[precos] catálogo do cache local aplicado").
 - **`electron-config.template.json`** — `renderServerUrl`, `serverUrl`,
   `thermalPrinterName`, `pdvNome` (`VENDA-01`), `portalApiUrl`, `lojaId`,
-  `pairingCode` (código gerado no admin do portal; vazio = sem emparelhamento),
-  `photosFolder` (pasta de fotos configurável pelo modal ⚙ do PDV).
+  `lojaNome`, `pairingCode` (código gerado no admin do portal; vazio = sem
+  emparelhamento), `photosFolder` (pasta de fotos configurável pelo modal ⚙
+  do PDV).
+- **Identidade offline-first (PDV `vendas.html`)** — **a loja é definida NO
+  APP**, pelo `⚙ Config` (`lojaId` + `lojaNome` gravados no `config.json` do
+  sidecar e no `electron-config.json`); o portal **não define nem sobrescreve**
+  a loja, só **autoriza a máquina**. `identidadeSync()`/`publicarIdentidade()`
+  publicam `{machineId, lojaId, lojaNome, pdvNome}` em `window.portalIdentidade`
+  e `portalApi.identidadeAtiva()` (→ `lojaIdAtivo()/machineIdAtivo()`) injeta
+  esses campos em todo push (`vendas/pedido/auditoria.push`). `emparelharKiosk`
+  só faz **seed** de `lojaId/lojaNome` quando vazios (1º boot) e grava
+  `pareadoEm/pareadoLojaId`. No portal, `validarLojaPareada` resolve a loja
+  pelo `machineId` enviado (compatível com lojaId divergente) e `lojaNomePush`
+  usa o nome enviado pelo PDV.
 - **Emparelhamento (`kiosk.pair`)** — **zero config manual no kiosk.** No boot,
   o PDV (`vendas.html`, React em `shared/api/kiosk.js`) garante que a config do
   sidecar tem `machineId` + `kioskCode` (gerados no 1º boot, persistidos e
@@ -309,7 +341,18 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   canônica + `machineId`). Snapshot do dia = pedidos `PAGO`, total de hoje,
   sessões criadas/vendidas de hoje, taxa de combos %, ribbon restante (contador
   interno) + papel real da impressora (10x15/15x20 via `checkPrinter`), último
-  pagamento e caixa atual. Offline/falha: tenta de novo no próximo tick.
+  pagamento e caixa atual. Offline/falha: o item vai para a **fila durável**
+  (`enqueuePortal` → `fila-portal.json`) e é drenado quando a rede volta —
+  ver próximo bloco.
+- **Fila de envio / drain (`vendas.html`)** — `drenarFilaPortal()` percorre
+  `GET /api/portal/fila` (itens **com `payload`**), manda cada um via
+  `portalApi.post(action, payload)` e confirma (`/api/portal/fila/confirmar`)
+  ou registra erro (`/api/portal/fila/erro`, com `ultimoErro`). Gatilhos:
+  ~4s após o boot, `setInterval` de 5 min, eventos SSE, botão "Sincronizar
+  agora" do ⚙ e logo após venda/caixa. `enviados-portal.json` impede reenvio
+  já confirmado; para reenviar de propósito use "Limpar fila de envio" (⚙,
+  senha `HCss221087`) ou `POST /api/portal/enviados/limpar`. O chip da topbar
+  (`#sync-chip`) mostra o estado: sincronizado / N pendente(s) / sincronizando.
 - **Sync pedido-a-pedido → portal (`vendas.html`)** — no mesmo tick do snapshot,
   o PDV envia cada pedido completo via `pedido.push` (`enviarPedidosDia` →
   `portalApi.pedidoPush` em `shared/api/portalApi.js`): no 1º boot emparelhado
@@ -321,14 +364,22 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `natalApi.auditoriaSave`, arquivo `auditoria.json` local) e enviados ao portal
   via `auditoria.push` (`enviarAuditoriaPendente`, só `!_portalEnviado`) a cada
   uso (perda/desconto/cancelamento/cobrança) e no tick do snapshot; `carregarAuditoria()`
-  no boot reidrata o log local como já enviado (`_portalEnviado: true`).
+  no boot reidrata o log local como já enviado (`_portalEnviado: true`). Se o
+  portal estiver fora, o item entra na fila durável e sai quando a rede volta.
+- **Login offline (TOFU)** — o primeiro login bem-sucedido de um usuário salva
+  `{usuario: senha}` no cache (`POST /api/cache/portal {credenciais}` → hash
+  sha256, nunca em claro); no offline o PDV valida contra esse hash
+  (`POST /api/cache/portal/conferir`). Equipe e preços também são cacheados no
+  sucesso e reaplicados quando o portal não responde.
 - **Config da máquina (sidecar)** — `%APPDATA%\natal-app\database\config.json`
   guarda `{ pdvNome, photosFolder, thermalPrinterName, machineId, lojaId,
-  pairingCode }` via `GET/POST /api/config`; a UI salva também no
+  lojaNome, pairingCode }` via `GET/POST /api/config`; a UI salva também no
   `electron-config.json`.
 - **Botão ⚙ Config** (`vendas.html`) — abre modal com seletor de pasta nativa
   (IPC `natal:selectFolder` → `dialog.showOpenDialog`) + status real da
-  impressora (10x15/15x20, connected, lastError), e salva nos dois lugares.
+  impressora (10x15/15x20, connected, lastError) + seção "Loja desta máquina"
+  (`lojaId`/`lojaNome`) + painel "Sincronização com o portal" (pendentes,
+  "Sincronizar agora", "Limpar fila de envio"), e salva nos dois lugares.
 - **Importador de pasta de fotos** (`natal-core.cjs`) — regra da drop zone em
   `photosFolder`: **1 subpasta = 1 sessão**. O programa externo cria uma
   subpasta por cliente e salva `*.jpg|*.jpeg|*.png` nela; o sidecar escaneia a
@@ -369,3 +420,15 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   clica** no modal. Primeira instalação é manual (baixar o NSIS do release).
 - **Senha admin do portal** tem hash embutido em `backend/config.php`; usuários
   têm senha em texto puro dentro de `backend/data/app.json`.
+- **Portal publicado pode estar defasado:** `backend/api.php` é editado aqui e
+  só vai ao ar em `backend/publish.ps1`. Antes de caçar bug no PDV por erro de
+  push estranho (`LOJA_INVALIDA`/`LOJA_NAO_EMPARELELHADA`), conferir se a versão
+  em `maxxfoto.com.br` tem as mudanças novas (autorização por `machineId`,
+  `lojaNome`).
+- **Senhas em claro no código:** fallback de login em `vendas.html`
+  (`FALLBACK_USERS`, senha `0000`) e `SENHA_MASTER_PDV = '1234'` (senha master
+  de desconto/perda). O cache offline (TOFU) guarda só sha256.
+- **Limpar a fila de envio exige senha** (`HCss221087`) justamente para o
+  operador não apagar pendências sem querer.
+- **`php` CLI não existe nesta máquina** — lint/validação do `backend/api.php`
+  é manual (na web ou com PHP instalado).

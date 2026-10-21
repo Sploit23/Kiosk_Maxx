@@ -76,16 +76,30 @@ function loadJson(string $name, $default = null)
     if (!is_file($path)) return $default;
     $txt = @file_get_contents($path);
     $data = json_decode((string) $txt, true);
-    return is_array($data) ? $data : $default;
+    if (is_array($data)) return $data;
+    // JSON ilegível: preserva a evidência antes de devolver o default — corrupção
+    // nunca mais apaga dado em silêncio (vale para qualquer arquivo de dados).
+    if (strlen(trim((string) $txt)) > 0) {
+        $stamp = date('Ymd-His');
+        @copy($path, dataFile($name . '.corrupted-' . $stamp));
+        error_log('[natalcontroler] ' . $name . ' ilegível; preservado em ' . $name . '.corrupted-' . $stamp);
+    }
+    return $default;
 }
 
 function saveJson(string $name, array $data): bool
 {
+    // Escrita atômica: grava num .tmp e renomeia por cima. Nunca deixa o JSON pela
+    // metade (se o processo morrer/quota estourar no meio, o arquivo antigo continua
+    // válido) — pasta data estava sujeita a corrupção e a API reescrevia o padrão.
     $path = dataFile($name);
     $fp = @fopen($path . '.lock', 'c');
     if ($fp) flock($fp, LOCK_EX);
     $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    $ok = @file_put_contents($path, $json, LOCK_EX) !== false;
+    $tmp = $path . '.' . getmypid() . '.tmp';
+    $ok = @file_put_contents($tmp, $json, LOCK_EX) !== false;
+    if ($ok) $ok = @rename($tmp, $path); // mesmo diretório ⇒ atômico (substitui o existente)
+    if (!$ok && is_file($tmp)) @unlink($tmp);
     if ($fp) {
         flock($fp, LOCK_UN);
         fclose($fp);
@@ -112,19 +126,92 @@ function seed(): array
     ];
 }
 
+/* ---------------- Backups automáticos (em data/backups/, no próprio servidor) ---------------- */
+function bkpBase(): string
+{
+    return APP_DATA_DIR . '/backups';
+}
+function ensureBkpDir(string $sub): bool
+{
+    $dir = bkpBase() . '/' . $sub;
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    return is_dir($dir);
+}
+// Snapshot diário completo de todos os JSONs (máx. 1x/dia). Serve para recuperação
+// manual e como fonte da auto-restauração do app.json. Mantém os últimos 14 dias.
+function backupDiario(): void
+{
+    $today = date('Y-m-d');
+    $sub = 'daily/' . $today;
+    if (is_dir(bkpBase() . '/' . $sub)) return; // já rodou hoje
+    if (!ensureBkpDir($sub)) return;
+    foreach (glob(APP_DATA_DIR . '/*.json') ?: [] as $f) {
+        @copy($f, bkpBase() . '/' . $sub . '/' . basename($f));
+    }
+    $days = @glob(bkpBase() . '/daily/*', GLOB_ONLYDIR) ?: [];
+    rsort($days); // nome Y-m-d ⇒ do mais novo para o mais antigo
+    foreach (array_slice($days, 14) as $old) {
+        foreach (glob($old . '/*') ?: [] as $of) @unlink($of);
+        @rmdir($old);
+    }
+    error_log('[natalcontroler] backup diário completo: ' . $sub);
+}
+// Snapshot do app.json ANTES de cada alteração de lojas/usuários (histórico fino de config).
+function snapshotConfig(): void
+{
+    if (!ensureBkpDir('history')) return;
+    $src = dataFile('app.json');
+    if (!is_file($src) || filesize($src) < 1) return;
+    $stamp = date('Ymd-His');
+    @copy($src, bkpBase() . '/history/app-' . $stamp . '.json');
+    $hist = @glob(bkpBase() . '/history/app-*.json') ?: [];
+    rsort($hist);
+    foreach (array_slice($hist, 80) as $old) @unlink($old);
+}
+// Restaura o app.json do backup mais recente válido (histórico fino → snapshot diário).
+function restoreConfig(): bool
+{
+    $cands = array_merge(
+        @glob(bkpBase() . '/history/app-*.json') ?: [],
+        @glob(bkpBase() . '/daily/*/app.json') ?: []
+    );
+    rsort($cands); // mais recente primeiro (Ymd-His / Y-m-d ordenam desc)
+    foreach ($cands as $f) {
+        $txt = @file_get_contents($f);
+        $d = json_decode((string) $txt, true);
+        if (!is_array($d) || !isset($d['lojas']) || $d['lojas'] === []) continue;
+        if (saveJson('app.json', $d)) {
+            error_log('[natalcontroler] app.json RESTAURADO de ' . basename($f));
+            return true;
+        }
+    }
+    return false;
+}
+
 function db(): array
 {
     $data = loadJson('app.json', null);
-    if (!$data) {
-        $data = seed();
-        saveJson('app.json', $data);
+    if ($data) {
+        backupDiario(); // garante 1 snapshot completo por dia (no-op se já rodou hoje)
+        return $data;
     }
+    // app.json ilegível/ausente: primeiro TENTA auto-restaurar de um backup.
+    if (restoreConfig()) {
+        $data = loadJson('app.json', null);
+        if ($data) { error_log('[natalcontroler] config recuperada automaticamente de backup'); return $data; }
+    }
+    // Sem backup utilizável: recria o padrão (o arquivo quebrado já foi preservado pelo loadJson).
+    $data = seed();
+    saveJson('app.json', $data);
     return $data;
 }
 
 function saveDb(array $data): bool
 {
-    return saveJson('app.json', $data);
+    snapshotConfig(); // guarda o estado atual antes de qualquer alteração
+    $ok = saveJson('app.json', $data);
+    backupDiario();
+    return $ok;
 }
 
 function uid(): string
@@ -177,6 +264,10 @@ function findLoja(array $data, string $id): ?array
 // Valida que o kiosk que está chamando é a máquina pareada com a loja
 // (pedido.push / auditoria.push / vendas.push). Protege contra push de dados
 // de fora: só a máquina física daquela loja consegue mandar.
+// Offline-first: a loja é definida NO APP e o portal só AUTORIZA a máquina,
+// então a autorização é resolvida pelo machineId — se ele casa com alguma
+// loja pareada, essa é a loja canônica do envio (o lojaId do kiosk pode até
+// divergir, ex.: loja recriada no portal).
 function validarLojaPareada(array $p): array
 {
     $lojaId = trim((string) ($p['lojaId'] ?? ''));
@@ -185,13 +276,30 @@ function validarLojaPareada(array $p): array
         fail('DADOS_INCOMPLETOS: lojaId e machineId são obrigatórios');
     }
     $db = db();
-    $loja = findLoja($db, $lojaId);
-    if (!$loja || empty($loja['ativo'])) fail('LOJA_INVALIDA', 404);
-    if ((string) ($loja['pareamento']['machineId'] ?? '') !== $machineId) {
+    $loja = null;
+    foreach ((array) ($db['lojas'] ?? []) as $l) {
+        if (!is_array($l)) continue;
+        if ((string) ($l['pareamento']['machineId'] ?? '') === $machineId) { $loja = $l; break; }
+    }
+    if (!$loja) {
+        // compat: mesma mensagem de sempre quando a máquina não está autorizada
+        $antiga = findLoja($db, $lojaId);
+        if (!$antiga || empty($antiga['ativo'])) fail('LOJA_INVALIDA', 404);
         usleep(200000);
         fail('LOJA_NAO_EMPARELELHADA', 403);
     }
+    if (empty($loja['ativo'])) fail('LOJA_INVALIDA', 404);
     return [$db, $loja];
+}
+
+// Nome da loja gravado nos registros do portal: o PDV manda o nome definido
+// NO APP (offline-first, exibido no topo do PDV); se vier vazio, usa o
+// cadastrado no portal de gestão.
+function lojaNomePush(array $p, array $loja): string
+{
+    $enviado = trim((string) ($p['lojaNome'] ?? ''));
+    if ($enviado !== '') return $enviado;
+    return (string) ($loja['nome'] ?? ($loja['id'] ?? ''));
 }
 
 // "Heartbeat" do kiosk: o PDV manda snapshot (vendas.push) a cada 5 min e
@@ -495,20 +603,15 @@ try {
         // pareada com a loja — protege contra push de dados de fora).
         case 'vendas.push': {
             $lojaId = trim((string) ($p['lojaId'] ?? ''));
-            $machineId = trim((string) ($p['machineId'] ?? ''));
             $data = trim((string) ($p['data'] ?? ''));
-            if ($lojaId === '' || $machineId === '' || $data === '') {
-                fail('DADOS_INCOMPLETOS: lojaId, machineId e data são obrigatórios');
+            if ($lojaId === '' || $data === '') {
+                fail('DADOS_INCOMPLETOS: lojaId e data são obrigatórios');
             }
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $data)) fail('DATA_INVALIDA');
 
-            $db = db();
-            $loja = findLoja($db, $lojaId);
-            if (!$loja || empty($loja['ativo'])) fail('LOJA_INVALIDA', 404);
-            if ((string) ($loja['pareamento']['machineId'] ?? '') !== $machineId) {
-                usleep(200000);
-                fail('LOJA_NAO_EMPARELELHADA', 403);
-            }
+            // autorização pela máquina (offline-first) → loja canônica do envio
+            [$db, $loja] = validarLojaPareada($p);
+            $lojaId = (string) ($loja['id'] ?? $lojaId);
 
             $meios = [];
             $rawMeios = is_array($p['meios'] ?? null) ? $p['meios'] : [];
@@ -554,9 +657,9 @@ try {
             }
             $snap = [
                 'lojaId' => $lojaId,
-                'lojaNome' => (string) ($loja['nome'] ?? $lojaId),
+                'lojaNome' => lojaNomePush($p, $loja),
                 'pdvNome' => resolverPdvNome($p['pdvNome'], $loja),
-                'machineId' => $machineId,
+                'machineId' => trim((string) ($p['machineId'] ?? '')),
                 'data' => $data,
                 'totalVendido' => $totalVendido,
                 'pedidos' => max(0, (int) ($p['pedidos'] ?? 0)),
@@ -632,7 +735,7 @@ try {
                 'id' => $id,
                 'numero' => (string) ($pd['numero'] ?? $id),
                 'lojaId' => $loja['id'],
-                'lojaNome' => (string) ($loja['nome'] ?? $loja['id']),
+                'lojaNome' => lojaNomePush($p, $loja),
                 'pdvNome' => resolverPdvNome($pd['pdvNome'], $loja),
                 'machineId' => trim((string) ($p['machineId'] ?? '')),
                 'data' => trim((string) ($pd['data'] ?? '')),
@@ -675,7 +778,7 @@ try {
             $registro = [
                 'id' => $id,
                 'lojaId' => $loja['id'],
-                'lojaNome' => (string) ($loja['nome'] ?? $loja['id']),
+                'lojaNome' => lojaNomePush($p, $loja),
                 'pdvNome' => trim((string) ($u['pdvNome'] ?? ($loja['pdv'] ?? ''))),
                 'machineId' => trim((string) ($p['machineId'] ?? '')),
                 'data' => trim((string) ($u['data'] ?? gmdate('Y-m-d'))),

@@ -68,7 +68,7 @@
   /* recebido/recibo segue "papel" claro, e o botão dourado da ASK-400 continua claro */
   html[data-theme="light"] .receipt{background:#fff;}
   html[data-theme="light"] .caixa-fechado-destaque{color:#b3453f;}
-  html[data-theme="light"] .ribbon-banner{color:var(--red-400);}
+  html[data-theme="light"] .ribbon-banner{color:#8a5e12;}
   html[data-theme="light"] .op-chip.ribbon-alert .rb-p .rb-n{color:var(--amber-500);}
   /* campos do modal ⚙ têm fundo navy-950 no default (inline) → senão ficariam escuros no claro */
   html[data-theme="light"] #cfg-folder,
@@ -161,6 +161,11 @@
   .op-chip.ribbon-critical .dot{background:var(--red-400);animation:blink 1s infinite;}
   .op-chip.ribbon-printing{border-color:var(--gold-500);color:var(--gold-300);box-shadow:0 0 0 2px rgba(212,162,76,.25);}
   .op-chip.ribbon-printing .dot{background:var(--gold-500);animation:blink 1s infinite;}
+  /* chip de sincronização PDV → portal (offline-first) */
+  .sync-chip{cursor:default;font-size:11.5px;}
+  .sync-chip.sync-ok{border-color:var(--green-500);color:var(--green-300);}
+  .sync-chip.sync-warn{border-color:var(--amber-500);color:var(--amber-500);background:rgba(217,169,6,.10);}
+  .sync-chip.sync-busy{border-color:var(--gold-500);color:var(--gold-300);animation:blink 1s infinite;}
   @keyframes blink { 50% { opacity: .25; } }
   .caixa-wrap{position:relative;}
   .caixa-fechado-destaque{
@@ -355,13 +360,13 @@
   .isv-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
   .isv-label{font-family:Arial,sans-serif;font-size:18px;color:#0a1626;}
   .isv-count{font-size:12px;color:#45546a;margin-top:2px;}
-  .isv-thumbs{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 12px;margin-bottom:6px;}
+  .isv-thumbs{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 12px;margin-bottom:6px;height:104px;align-items:flex-start;}
   .isv-thumb{width:88px;height:88px;border-radius:8px;object-fit:cover;cursor:pointer;flex-shrink:0;
     border:2px solid var(--navy-line);opacity:.85;transition:border-color .15s,opacity .15s;background:var(--navy-800);}
   .isv-thumb:hover{border-color:var(--gold-500);opacity:1;}
   .isv-thumb.active{border-color:var(--gold-500);box-shadow:0 0 0 2px rgba(212,162,76,.35);opacity:1;}
-  .isv-body{display:flex;align-items:center;justify-content:center;margin-bottom:14px;min-height:0;}
-  .isv-body img{max-width:min(92%,740px);max-height:60vh;border-radius:10px;box-shadow:var(--shadow-lift);object-fit:contain;}
+  .isv-body{display:flex;align-items:center;justify-content:center;margin-bottom:14px;min-height:0;height:50vh;}
+  .isv-body img{max-width:min(92%,740px);max-height:100%;border-radius:10px;box-shadow:var(--shadow-lift);object-fit:contain;}
 
   /* vitrine de fotos passando (atrai olhar de quem passa) */
   .idle-marquee{
@@ -531,17 +536,13 @@
 
   /* CENTER WORK AREA */
   .ribbon-banner{
-    display:flex;align-items:center;gap:12px;
-    background:linear-gradient(90deg,rgba(193,102,107,.22),rgba(193,102,107,.10));
-    border-bottom:2px solid var(--red-400);
-    color:#8f2f34;font-size:14px;font-weight:600;
-    padding:12px 28px;
-  }
-  .ribbon-banner .rb-icon{font-size:20px;}
-  .ribbon-banner .rb-cta{
-    margin-left:auto;font-size:12px;font-weight:700;color:var(--gold-300);
-    background:var(--navy-900);border:1px solid var(--gold-500);
-    padding:6px 12px;border-radius:20px;white-space:nowrap;
+    display:flex;align-items:center;justify-content:center;
+    margin:14px 12px 4px;
+    background:rgba(212,162,76,.16);
+    border:1px dashed rgba(138,94,18,.5);
+    border-radius:12px;
+    color:#8a5e12;font-size:12.5px;font-weight:500;
+    line-height:1.5;text-align:center;padding:9px 14px;
   }
   .work-area{
     flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;
@@ -814,7 +815,8 @@
   /* ===== MODAL / CHECKOUT ===== */
   .modal-overlay{
     position:fixed;inset:0;background:rgba(6,12,22,.72);backdrop-filter:blur(3px);
-    display:none;align-items:center;justify-content:center;z-index:50;
+    /* acima do login-overlay (200): o ⚙ Config é acessível ANTES do login */
+    display:none;align-items:center;justify-content:center;z-index:260;
   }
   .modal-overlay.active{display:flex;}
   .modal-box{
@@ -973,9 +975,45 @@
     position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
     background:var(--navy-800);border:1px solid var(--gold-500);color:var(--gold-050);
     padding:10px 18px;border-radius:30px;font-size:12.5px;
-    opacity:0;pointer-events:none;transition:all .25s;z-index:80;
+    opacity:0;pointer-events:none;transition:all .25s;z-index:280;
   }
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  /* ===== TECLADO NUMÉRICO NA TELA (kiosk sem teclado físico) ===== */
+  .numpad-overlay{
+    position:fixed;inset:0;z-index:300;
+    background:rgba(10,22,38,.45);
+    display:flex;align-items:center;justify-content:center;padding:20px;
+  }
+  .numpad{
+    background:#ffffff;border:2px solid rgba(212,162,76,.45);border-radius:16px;
+    box-shadow:0 18px 50px rgba(0,0,0,.35);
+    width:min(360px,94vw);padding:16px;
+  }
+  .numpad-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+  .numpad-title{font-size:13.5px;color:#45546a;font-weight:600;}
+  .numpad-close{background:none;border:none;color:#45546a;font-size:22px;line-height:1;cursor:pointer;padding:0 2px;}
+  .numpad-close:hover{color:#0a1626;}
+  .numpad-display{
+    border:2px solid rgba(212,162,76,.4);border-radius:10px;background:#f2f8ff;
+    font-family:ui-monospace,Consolas,monospace;font-size:24px;font-weight:700;color:#0a1626;
+    padding:12px 14px;text-align:right;margin-bottom:14px;
+    letter-spacing:3px;word-break:break-all;min-height:50px;box-sizing:border-box;
+  }
+  .numpad-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px;}
+  .np-k{
+    border:1px solid rgba(60,90,140,.35);background:#ffffff;color:#0a1626;
+    font-family:Arial,sans-serif;font-size:22px;font-weight:600;
+    border-radius:12px;min-height:58px;cursor:pointer;user-select:none;
+  }
+  .np-k:hover{background:#eaf2ff;border-color:rgba(212,162,76,.6);}
+  .np-k:active{transform:scale(.96);}
+  .numpad-actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .np-btn{
+    border-radius:12px;min-height:48px;font-size:14px;font-weight:700;cursor:pointer;
+    border:1px solid rgba(60,90,140,.2);background:#f2f3f6;color:#45546a;user-select:none;
+  }
+  .np-ok{background:linear-gradient(135deg,#d4a24c,#e6bd6e);color:#1b2a41;border-color:transparent;}
 </style>
 <script>try{if(localStorage.getItem('natal-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch{}</script>
 </head>
@@ -1020,6 +1058,7 @@
     <div class="op-chip sales-eye" id="sales-eye">
       <span id="sales-eye-icon">👁️</span> <span id="sales-eye-value">Vendas de hoje</span>
     </div>
+    <div class="op-chip sync-chip sync-ok" id="sync-chip" title="Sincronização com o portal">● Sincronizado</div>
     <div class="op-chip" id="ribbon-chip">🖨️ Ribbon: — un.</div>
     <button class="op-chip op-chip-btn" id="user-chip">👤 —</button>
     <button class="op-chip op-chip-btn" id="btn-config" title="Configurações">⚙</button>
@@ -1116,7 +1155,6 @@
   </div>
 
   <div class="work-area">
-    <div class="ribbon-banner" id="ribbon-banner" style="display:none;"></div>
     <div class="wa-body">
       <div class="photo-column">
         <div class="size-badge" id="size-badge" style="display:none;"></div>
@@ -1141,6 +1179,7 @@
             Incluir logo do shopping nesta foto
           </label>
         </div>
+        <div class="ribbon-banner" id="ribbon-banner" style="display:none;"></div>
       </div>
 
       <div class="side-controls">
@@ -1436,6 +1475,9 @@ const PLACEHOLDER_IMG = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent
   '<text x="400" y="470" font-family="Arial" font-size="20" fill="#8aa0bd" text-anchor="middle">MAX FOTO</text>' +
   '</svg>'
 );
+// espaço vazio (1x1 transparente) enquanto uma imagem ainda está carregando —
+// o PNG azul "MAX FOTO" só é usado quando a foto REALMENTE falta no sidecar.
+const PLACEHOLDER_BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
 const URL_POR_FOTO = {}; // seed (filename da sessão) -> URL real no sidecar
 const SENHA_MASTER_PDV = '1234';
 let caixaReal = null; // última resposta de caixaEstado/caixaAbrir/caixaFechar
@@ -1513,6 +1555,15 @@ function swapImg(im, srcPromise){
   }).catch(()=>{
     if(im && im.isConnected && !im.dataset.pd){ im.dataset.pd='1'; }
   });
+}
+// Coloca a foto num <img>: direto da cache (instantâneo, sem piscar) ou, se
+// ainda não tem versão reduzida, deixa o espaço em branco e troca quando ficar
+// pronta. Nunca mostra o placeholder azul "MAX FOTO" (é só pra foto ausente).
+function photoInto(im, level, foto){
+  const u = _imgGet(level, foto.seed);
+  if(u){ im.dataset.pd = '1'; im.src = u; return; }
+  im.src = PLACEHOLDER_BLANK;
+  swapImg(im, (level === 'medium' ? mediumUrl : thumbUrl)(foto));
 }
 let _slideToken = 0;
 
@@ -1739,6 +1790,28 @@ async function carregarEquipe(){
             isAdmin: !!ex.isAdmin,
           };
         });
+      if(USERS.length){
+        // equipe real → cache no sidecar (login offline usa a MESMA lista + senha)
+        natalApi.cachePortalSave({ equipe: lista }).catch(()=>{});
+        return;
+      }
+    }
+  }catch{ }
+  // offline (ou portal sem equipe) → reidrata o último cache da equipe real
+  try{
+    const c = await natalApi.cachePortalGet();
+    const eq = c && c.cache && Array.isArray(c.cache.equipe) ? c.cache.equipe : null;
+    if(eq && eq.length){
+      USERS = eq.filter(u => u.ativo !== false).map((u, i) => {
+        const ex = FUNCAO_EXIBICAO[u.funcao] || { funcao: (u.funcao || 'Vendedora'), isAdmin: false };
+        return {
+          id: u.id || ('equipe-' + (i + 1)),
+          nome: (u.nome || 'Operador ' + (i + 1)).trim(),
+          funcao: ex.funcao,
+          usuario: u.usuario || u.login || u.nome,
+          isAdmin: !!ex.isAdmin,
+        };
+      });
       if(USERS.length) return;
     }
   }catch{ }
@@ -1794,7 +1867,18 @@ async function resolverIdentidade(){
     try{ await natalApi.saveConfig(changes); }catch{ }
     Object.assign(cfg, changes);
   }
-  _identidade = { machineId: cfg.machineId || '', kioskCode: cfg.kioskCode || '', lojaNome: cfg.lojaNome || '' };
+  _identidade = {
+    machineId: cfg.machineId || '',
+    kioskCode: cfg.kioskCode || '',
+    // Loja DEFINIDA NO APP (offline-first): o portal não sobrescreve esses
+    // campos — ele só autoriza a máquina (pareamento).
+    lojaId: cfg.lojaId || '',
+    lojaNome: cfg.lojaNome || '',
+    pdvNome: cfg.pdvNome || '',
+    pareadoEm: cfg.pareadoEm || '',
+    pareadoLojaId: cfg.pareadoLojaId || '',
+  };
+  if(typeof publicarIdentidade === 'function') publicarIdentidade();
   return _identidade;
 }
 // Single-flight: chamadas concorrentes (módulo + INIT + loop) compartilham UMA
@@ -1814,25 +1898,22 @@ function atualizarKioskUI(){
   if(st){
     const p = window.kioskPair;
     if(p && p.ok){
-      st.innerHTML = '<span class="pair-ok">✔ Emparelhado — ' + (p.loja ? p.loja.nome : '') + ' (' + (p.loja ? p.loja.id : '') + ')</span>';
+      const lojaPortal = (p.loja && (p.loja.nome + ' (' + p.loja.id + ')')) || '';
+      st.innerHTML = '<span class="pair-ok">✔ Máquina autorizada no portal' + (lojaPortal ? ' — ' + lojaPortal : '') + '</span>';
     } else {
-      st.innerHTML = '<span class="pair-no">Aguardando emparelhar — informe este código no portal de gestão</span>';
+      st.innerHTML = '<span class="pair-no">Aguardando autorizar esta máquina no portal — informe este código em Cadastros → Loja</span>';
     }
   }
   atualizarLojaHeader();
 }
-/* Mostra no topo o nome da loja EMPARELHADA no portal (kiosk.pair.loja.nome).
-   Antes de emparelhar, usa o último nome salvo no sidecar; senão, fica vazio. */
+/* Mostra no topo a loja DEFINIDA NO APP (⚙ Config). O nome do portal é apenas
+   informativo (o app manda o seu nome junto nos envios). */
 function atualizarLojaHeader(){
   const el = document.getElementById('loja-header');
   if(!el) return;
-  const p = window.kioskPair;
-  if(p && p.ok && p.loja){
-    el.textContent = '· ' + (p.loja.nome || '') + (p.loja.pdv ? ' — ' + p.loja.pdv : '');
-    return;
-  }
   const nome = (_identidade && _identidade.lojaNome) ? '· ' + _identidade.lojaNome : '';
-  el.textContent = nome;
+  const pdv = (_identidade && _identidade.pdvNome) ? ' — ' + _identidade.pdvNome : '';
+  el.textContent = nome + pdv;
 }
 async function emparelharKiosk(){
   try{
@@ -1841,13 +1922,30 @@ async function emparelharKiosk(){
     const res = await portalApi.pair({ kioskCode: ident.kioskCode, machineId: ident.machineId });
     if(res && res.ok){
       window.kioskPair = res;
-      try{ await natalApi.saveConfig({ lojaId: res.loja.id, lojaNome: res.loja.nome || '' }); }catch{ }
-      if(window.natal && window.natal.saveConfig) window.natal.saveConfig({ lojaId: res.loja.id, lojaNome: res.loja.nome || '' }).catch(()=>{});
-      if(_identidade) _identidade.lojaNome = res.loja.nome || '';
-      console.log('[pair] kiosk emparelhado:', res.loja.id, res.pareamento);
+      // A loja é definida NO APP: o pareamento só autoriza a MÁQUINA. Guardamos
+      // a autorização (para a fila saber que pode enviar) sem sobrescrever o
+      // nome/id local da loja. Só faz o SEED quando a loja ainda está vazia
+      // (1º boot do kiosk) — depois disso, quem define a loja é o app.
+      const seed = {};
+      if(!_identidade || !_identidade.lojaId) seed.lojaId = res.loja.id;
+      if((!_identidade || !_identidade.lojaNome) && res.loja && res.loja.nome) seed.lojaNome = res.loja.nome;
+      try{
+        await natalApi.saveConfig({
+          pareadoEm: new Date().toISOString(),
+          pareadoLojaId: res.loja.id,
+          machineId: ident.machineId,
+          ...seed,
+        });
+      }catch{ }
+      if(_identidade){
+        _identidade.pareadoEm = new Date().toISOString();
+        _identidade.pareadoLojaId = res.loja.id;
+        Object.assign(_identidade, seed);
+      }
+      publicarIdentidade();
+      console.log('[pair] kiosk autorizado:', res.loja.id, res.pareamento);
       carregarEquipe().then(() => renderLoginUsers());
-      agendarSnapshotVendas(3000); // 1º snapshot logo após emparelhar
-      agendarPedidosPortal(1500);  // histórico pedido-a-pedido logo após emparelhar
+      agendarSincronizacao(1500); // manda o que estiver pendente assim que liberar
       carregarPrecosPortal();
     } else if(res && !res.offline && res.error && res.error !== 'KIOSK_NAO_EMPARELELHADO'){
       console.warn('[pair] falha:', res.error);
@@ -1864,56 +1962,89 @@ garantirIdentidade().then(async () => {
   }catch{ }
 }).catch(()=>{});
 
-/* ---------------- SYNC DE VENDAS → PORTAL (snapshot diário por loja) ----------------
-   Envia o resumo do dia da loja (vendas.push) ao portal de gestão. É um snap do
-   estado atual — o portal sobrescreve o snapshot do mesmo (loja, data); não é pedido
-   a pedido. Só envia se o kiosk estiver EMPARELHADO (senão nem tem loja canônica).
-   Of-line/erro: tenta de novo no próximo tick (evento ou intervalo de 5 min). */
-let _snapTimer = null;
-function agendarSnapshotVendas(msec = 8000){
-  if(_snapTimer) clearTimeout(_snapTimer);
-  _snapTimer = setTimeout(enviarSnapshotVendas, msec);
+/* ═══════════════════════════════════════════════════════════════════════
+   SYNC PDV → PORTAL — OFFLINE-FIRST (fila durável no sidecar)
+   ═══════════════════════════════════════════════════════════════════════
+   O PDV NUNCA envia direto do balcão. Tudo que o portal precisa registrar
+   entra numa OUTBOX persistida no sidecar (fila-portal.json):
+     • 'vendas'    → snapshot do dia (vendas.push)
+     • 'pedido'    → pedido completo (pedido.push)
+     • 'auditoria' → uso de senha master (auditoria.push)
+   Sem internet a fila só CRESCE. Quando a rede volta, o drain envia tudo
+   (o portal é idempotente: pedido por pedido.id, snapshot por loja+data,
+   auditoria por uso.id) e o item só sai da fila DEPOIS do "ok" do portal.
+   ─────────────────────────────────────────────────────────────────────── */
+
+/* Identidade usada nos envios: a LOJA é a LOCAL (definida no app, ⚙ Config)
+   e a MÁQUINA é a pareada (persistida no sidecar). Não depende do
+   window.kioskPair (que vive na memória) → o app sincroniza mesmo depois
+   de reiniciar sem internet. */
+function identidadeSync(){
+  const par = window.kioskPair && window.kioskPair.ok ? window.kioskPair : null;
+  const machineId = (_identidade && _identidade.machineId) || (par && par.pareamento && par.pareamento.machineId) || '';
+  const lojaId = (_identidade && _identidade.lojaId) || (par && par.loja && par.loja.id) || '';
+  const lojaNome = (_identidade && _identidade.lojaNome) || (par && par.loja && par.loja.nome) || '';
+  const pdvNome = (_identidade && _identidade.pdvNome) || (par && par.pareamento && par.pareamento.pdvNome) || '';
+  if(!machineId || !lojaId) return null;
+  return { machineId, lojaId, lojaNome, pdvNome };
 }
-async function enviarSnapshotVendas(){
-  _snapTimer = null;
-  // Envolve TUDO: uma exceção em qualquer ponto (inclusive no push
-  // pedido-a-pedido) impedia o snapshot de ir ao portal e o Financeiro só
-  // corrigia no próximo tick de 5 min — sem log nenhum do motivo.
-  try{ await _montarEEnviarSnapshot(); }
-  catch(e){ console.warn('[sync] falha ao montar/enviar o snapshot:', e); }
+
+/* Publica a identidade local para o portalApi (que enxerga só o window).
+   Chamado quando a identidade é resolvida/alterada (⚙, emparelhamento). */
+function publicarIdentidade(){
+  try{ window.portalIdentidade = identidadeSync(); }catch{ /* sem window */ }
 }
-async function _montarEEnviarSnapshot(){
-  const par = window.kioskPair;
-  if(!par || !par.ok || !par.loja || !par.pareamento) return; // sem loja canônica (ainda não emparelhado)
-  try{ await Promise.all([carregarPedidos(), carregarSessoes(), carregarCaixa()]); }catch{ }
-  try{ await carregarRibbon(); }catch{ } // papel REAL da impressora (10x15/15x20) — o que o chip do PDV mostra
-  try{ enviarPedidosDia(); }catch(e){ console.warn('[sync] falha no push dos pedidos:', e); }
-  try{ enviarAuditoriaPendente(); }catch(e){ console.warn('[sync] falha no push da auditoria:', e); }
-  const hojeIso = isoDataLocal(new Date());
-  const key = new Date().toDateString();
-  const pagos = pedidosRealizados.filter(p => p.status === 'pago' && p.horario && p.horario.toDateString() === key);
+
+/* Status da sincronização (chip da topbar + painel do ⚙). */
+let _sync = { pendentes: 0, ultimoEnvio: null, ultimoErro: '', enviando: false };
+
+function renderSyncChip(){
+  const el = document.getElementById('sync-chip');
+  if(!el) return;
+  const p = _sync.pendentes || 0;
+  let cls = 'sync-ok', txt = 'Sincronizado';
+  if(_sync.enviando){ cls = 'sync-busy'; txt = 'Sincronizando…'; }
+  else if(p > 0){ cls = 'sync-warn'; txt = (p === 1 ? '1 pendente' : p + ' pendentes'); }
+  else if(_sync.ultimoEnvio){ txt = 'Sincronizado ' + new Date(_sync.ultimoEnvio).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' }); }
+  el.className = 'op-chip sync-chip ' + cls;
+  el.textContent = (p > 0 ? '◌ ' : '● ') + txt;
+  el.title = _sync.ultimoErro ? 'Último erro: ' + _sync.ultimoErro
+    : (p > 0 ? 'Envios aguardando internet no kiosk' : 'Portal em dia');
+}
+
+/* Enfileira um registro para o portal (dedup no sidecar por tipo+chave). */
+async function enfileirarPortal(tipo, chave, payload){
+  try{
+    const r = await natalApi.filaPortalAdd({ tipo, chave, payload });
+    return !!(r && r.criado);
+  }catch(e){ console.warn('[sync] não consegui enfileirar', tipo, chave, e); return false; }
+}
+
+/* Monta o snapshot (vendas.push) de UM dia. `dataIso` = YYYY-MM-DD.
+   O dia de um pedido é o dia da CRIAÇÃO (mesmo critério do pedido.push),
+   para o portal conseguir reconciliar snapshot × pedidos. Ribbon/papel são
+   o valor ATUAL (o portal não guarda histórico de estoque). */
+function montarSnapshotDia(dataIso){
+  const pagos = pedidosRealizados.filter(p =>
+    p.status === 'pago' && p.horario instanceof Date && !isNaN(p.horario) && isoDataLocal(p.horario) === dataIso);
   const meios = { dinheiro: 0, debito: 0, credito: 0, pix: 0 };
   pagos.forEach(p => (p.pagamentosEfetivos || []).forEach(pg => {
     const m = String(pg.meio || meioInfoDeForma(pg.forma).meio || '').toLowerCase();
     if(meios[m] != null) meios[m] += (+pg.valor || 0);
   }));
-  const sessoesHoje = sessions.filter(s => s.data === hojeIso);
-  const vendidasHoje = sessoesHoje.filter(s => ['VENDIDA', 'FINALIZADA'].includes(s.estado)).length;
+  const sessoesDia = sessions.filter(s => s.data === dataIso);
   const comCombo = pagos.filter(p => p.desconto && p.desconto.tipo === 'combo').length;
-  // Última venda do dia usa a hora REAL do pagamento (pagoEm); o horario (criação)
-  // só serve de fallback quando o sidecar ainda não gravou o pagoEm.
+  // Última venda do dia usa a hora REAL do pagamento (pagoEm); o horario
+  // (criação) só serve de fallback quando o sidecar ainda não gravou o pagoEm.
   const instantePagamento = p => (p.pagoEm instanceof Date && !isNaN(p.pagoEm)) ? p.pagoEm : p.horario;
   const ultima = pagos.length ? pagos.reduce((a, b) => (instantePagamento(b) > instantePagamento(a) ? b : a)) : null;
   const ultimaHora = ultima ? instantePagamento(ultima) : null;
-  const snap = {
-    lojaId: par.loja.id,
-    machineId: par.pareamento.machineId || '',
-    pdvNome: par.pareamento.pdvNome || '',
-    data: hojeIso,
+  return {
+    data: dataIso,
     totalVendido: pagos.reduce((s, p) => s + (+p.total || 0), 0),
     pedidos: pagos.length,
-    sessoesCriadas: sessoesHoje.length,
-    sessoesVendidas: vendidasHoje,
+    sessoesCriadas: sessoesDia.length,
+    sessoesVendidas: sessoesDia.filter(s => ['VENDIDA', 'FINALIZADA'].includes(s.estado)).length,
     taxacombo: pagos.length ? +((100 * comCombo) / pagos.length).toFixed(1) : 0,
     meios,
     // null quando o contador de ribbon não está disponível (portal não força 0)
@@ -1924,23 +2055,158 @@ async function _montarEEnviarSnapshot(){
     // número sequencial do caixa (não o id CX-...) — volta ao id se o numero não existir
     caixa: { numero: (caixaReal && (caixaReal.numero || caixaReal.id)) || '', aberto: !!caixaAberto },
   };
+}
+
+/* Garante que tudo que precisa ir ao portal está NA FILA (e não só enviado).
+   Pedidos e auditoria: 1 item por registro. Snapshots: 1 item por dia.
+   O sidecar guarda o registro do que JÁ foi confirmado pelo portal
+   (enviados-portal.json) para não reenviar o histórico a cada boot. */
+async function enfileirarPendentesPortal(){
+  const res = await natalApi.filaPortalList();
+  if(!res || !res.success) return 0;
+  const naFila = new Set((res.itens || []).map(i => i.tipo + ':' + i.chave));
+  const enviados = new Set(res.enviados || []);
+  const hoje = isoDataLocal(new Date());
+  let novos = 0;
+
+  // 1) pedidos (pagos e cancelados)
+  for(const p of pedidosRealizados){
+    if(p.status !== 'pago' && p.status !== 'cancelado') continue;
+    const id = p._realId || p.id;
+    const k = 'pedido:' + id;
+    if(naFila.has(k) || enviados.has(k)) continue;
+    if(await enfileirarPortal('pedido', id, montarPedidoPortal(p))) novos++;
+  }
+
+  // 2) auditoria (uso de senha master)
+  for(const u of usosSenhaLog){
+    const k = 'auditoria:' + u.id;
+    if(naFila.has(k) || enviados.has(k)) continue;
+    const quando = u.data instanceof Date ? u.data : new Date(u.data || Date.now());
+    if(await enfileirarPortal('auditoria', u.id, {
+      id: u.id,
+      titulo: u.titulo || 'Uso de senha master',
+      operador: u.operador || '—',
+      motivo: u.motivo || '',
+      data: isoDataLocal(quando),
+      criadoEm: quando.toISOString(),
+      pedidoContexto: u.pedidoContexto || '',
+      pedidoGeradoId: u.pedidoGeradoId || '',
+    })) novos++;
+  }
+
+  // 3) snapshots: hoje (sempre, para o painel do portal ficar vivo) + dias
+  //    antigos que ainda não subiram (recuperação de dias offline).
+  const dias = new Set(pedidosRealizados
+    .filter(p => p.status === 'pago' && p.horario instanceof Date && !isNaN(p.horario))
+    .map(p => isoDataLocal(p.horario)));
+  dias.add(hoje);
+  for(const d of dias){
+    const k = 'vendas:' + d;
+    if(d === hoje){
+      // hoje: o payload é sempre atualizado (a fila dedup por chave)
+      await enfileirarPortal('vendas', d, montarSnapshotDia(d));
+      continue;
+    }
+    if(naFila.has(k) || enviados.has(k)) continue;
+    if(await enfileirarPortal('vendas', d, montarSnapshotDia(d))) novos++;
+  }
+  if(novos) console.log('[sync] ' + novos + ' registro(s) na fila do portal');
+  return novos;
+}
+
+/* Envia UM item da fila. Só sai da fila com o "ok" do portal. */
+async function enviarItemFila(item, ident){
+  const payload = item.payload || {};
+  const base = { lojaId: ident.lojaId, lojaNome: ident.lojaNome, machineId: ident.machineId };
   try{
-    const res = await portalApi.vendasPush(snap);
-    if(res && res.ok) console.log('[sync] snapshot enviado:', par.loja.id, hojeIso);
-    else console.warn('[sync] portal nao aceitou snapshot:', res && res.error);
+    let res = null;
+    if(item.tipo === 'vendas'){
+      res = await portalApi.vendasPush({ ...base, ...payload, pdvNome: payload.pdvNome || ident.pdvNome });
+    } else if(item.tipo === 'pedido'){
+      res = await portalApi.pedidoPush({ ...base, pedido: { ...payload, pdvNome: payload.pdvNome || ident.pdvNome } });
+    } else if(item.tipo === 'auditoria'){
+      res = await portalApi.auditoriaPush({ ...base, uso: { ...payload, pdvNome: payload.pdvNome || ident.pdvNome } });
+    } else {
+      await natalApi.filaPortalConfirmar({ id: item.id }); // tipo desconhecido → descarta
+      return true;
+    }
+    if(res && res.ok){
+      await natalApi.filaPortalConfirmar({ id: item.id });
+      _sync.ultimoEnvio = Date.now();
+      _sync.ultimoErro = '';
+      return true;
+    }
+    const err = (res && res.error) || 'portal recusou o envio';
+    await natalApi.filaPortalErro({ id: item.id, erro: err });
+    _sync.ultimoErro = err;
+    return false;
   }catch(e){
-    console.warn('[sync] erro ao enviar snapshot:', e);
+    const err = (e && e.message) || String(e);
+    try{ await natalApi.filaPortalErro({ id: item.id, erro: err }); }catch{ }
+    _sync.ultimoErro = err;
+    return false;
   }
 }
 
-/* ---------------- PEDIDO-A-PEDIDO → PORTAL (Pedidos/Ranking/DRE) ---------------- */
-/* O snapshot diário manda o agregado; aqui o PDV manda cada pedido por completo
-   (idempotente pelo id do sidecar — reenvio só sobrescreve no portal). No boot
-   envia TODO o histórico PAGO; depois só o dia atual, a cada venda e no tick
-   de 5 min (dentro de enviarSnapshotVendas). */
+/* Envia a fila para o portal. Para no primeiro erro (a rede caiu de novo) e
+   devolve tudo para a próxima rodada — nada se perde. */
+async function drenarFilaPortal(){
+  const res = await natalApi.filaPortalList().catch(() => null);
+  if(!res || !res.success){ renderSyncChip(); return { ok: 0, pendentes: _sync.pendentes }; }
+  const itens = res.itens || [];
+  _sync.pendentes = itens.length;
+  renderSyncChip();
+  if(!itens.length) return { ok: 0, pendentes: 0 };
 
-let _pushHistoricoPedidos = false;
-let _pushPedidosTimer = null;
+  const ident = identidadeSync();
+  if(!ident){
+    // Sem loja/máquina definida não dá para enviar: o ⚙ Config explica o que fazer.
+    _sync.ultimoErro = 'Loja ou máquina não configurada neste kiosk';
+    renderSyncChip();
+    return { ok: 0, pendentes: itens.length };
+  }
+
+  _sync.enviando = true; renderSyncChip();
+  let ok = 0, falhas = 0;
+  try{
+    for(const item of itens.slice(0, 30)){
+      if(await enviarItemFila(item, ident)) ok++;
+      else { falhas++; break; } // rede caiu → para a rodada, tenta no próximo tick
+    }
+  } finally {
+    _sync.enviando = false;
+  }
+  const depois = await natalApi.filaPortalList().catch(() => null);
+  _sync.pendentes = (depois && depois.total) || Math.max(0, itens.length - ok);
+  renderSyncChip();
+  if(ok) console.log('[sync] ' + ok + ' registro(s) enviados ao portal');
+  return { ok, falhas, pendentes: _sync.pendentes };
+}
+
+/* Sincronização completa: enfileira o que falta e tenta enviar. */
+let _syncTimer = null;
+let _sincronizando = false;
+async function sincronizarComPortal(){
+  if(_sincronizando) return { ok: 0, pendentes: _sync.pendentes };
+  _sincronizando = true;
+  try{
+    await enfileirarPendentesPortal();
+    await drenarFilaPortal();
+  }catch(e){ console.warn('[sync] falha na sincronização:', e); }
+  finally{ _sincronizando = false; }
+  return { ok: 0, pendentes: _sync.pendentes };
+}
+function agendarSincronizacao(msec = 800){
+  if(_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(() => { _syncTimer = null; sincronizarComPortal(); }, msec);
+}
+/* Mantidos os nomes antigos (gatilhos já existentes no app): agora todos
+   passam pela outbox. */
+function agendarSnapshotVendas(msec = 8000){ agendarSincronizacao(msec); }
+function enviarSnapshotVendas(){ return sincronizarComPortal(); }
+function agendarPedidosPortal(msec = 800){ agendarSincronizacao(msec); }
+function enviarPedidosDia(){ return sincronizarComPortal(); }
 
 function unidadesItemPortal(item){
   if(item.tipo !== 'tamanho') return 0;
@@ -1955,7 +2221,7 @@ const TIPOS_DESCONTO_CARRINHO = new Set([
 ]);
 
 function montarPedidoPortal(p){
-  const par = window.kioskPair && window.kioskPair.ok ? window.kioskPair : null;
+  const ident = identidadeSync();
   const pagamentos = (p.pagamentosEfetivos || []).map(r => ({
     meio: String(r.meio || meioInfoDeForma(r.forma).meio || '').toLowerCase(),
     forma: r.forma || '—', valor: +(r.valor || 0), parcelas: r.parcelas || 0,
@@ -1984,7 +2250,7 @@ function montarPedidoPortal(p){
   return {
     id: p._realId || p.id,
     numero: p.numero || p.id,
-    pdvNome: (par && par.pareamento && par.pareamento.pdvNome) || '',
+    pdvNome: (ident && ident.pdvNome) || '',
     data: horario instanceof Date && !isNaN(horario) ? isoDataLocal(horario) : '',
     criadoEm: (horario instanceof Date && !isNaN(horario) ? horario : new Date()).toISOString(),
     // pagoEm é o momento real do pagamento; preserva no reenvio de cancelado
@@ -2003,67 +2269,16 @@ function montarPedidoPortal(p){
   };
 }
 
-async function enviarPedidosDia(){
-  const par = window.kioskPair;
-  if(!par || !par.ok || !par.loja || !par.pareamento) return; // ainda não emparelhado
-  let alvos = pedidosRealizados.filter(p => p.status === 'pago' || p.status === 'cancelado');
-  if(!alvos.length) return;
-  if(_pushHistoricoPedidos){
-    // depois do boot: só o dia atual (idosos já foram empurrados no primeiro envio)
-    alvos = alvos.filter(p => {
-      const d = p.horario instanceof Date ? p.horario : new Date(p.horario);
-      return d instanceof Date && !isNaN(d) && isoDataLocal(d) === isoDataLocal(new Date());
-    });
-    if(!alvos.length) return;
-  }
-  let ok = 0, falhas = 0;
-  for(const p of alvos){
-    try{
-      const res = await portalApi.pedidoPush(montarPedidoPortal(p));
-      if(res && res.ok) ok++; else { falhas++; if(res && res.error) console.warn('[sync] pedido nao aceito:', res.error); }
-    }catch{ falhas++; }
-  }
-  // Só considera o histórico enviado se TUDO subiu. Com falhas, mantém false
-  // para o próximo tick reenviar todo o histórico (pedidos que falharam).
-  if(!falhas) _pushHistoricoPedidos = true;
-  if(ok) console.log(`[sync] ${ok} pedido(s) enviado(s) ao portal${falhas ? ` (${falhas} falha(s))` : ''}`);
-}
-
-function agendarPedidosPortal(msec = 800){
-  if(_pushPedidosTimer) clearTimeout(_pushPedidosTimer);
-  _pushPedidosTimer = setTimeout(() => { _pushPedidosTimer = null; enviarPedidosDia(); }, msec);
-}
-
 /* ---------------- AUDITORIA (uso de senha master) → PORTAL ---------------- */
-/* Grava no sidecar (sobrevive a restart) e empurra ao portal (auditoria.push,
-   idempotente pelo id). O portal reenvia os não enviados no tick. */
+/* Grava no sidecar (sobrevive a restart) e enfileira na outbox — o item só
+   sai da fila depois do "ok" do portal (auditoria.push, idempotente por id). */
 function persistirAuditoria(){
   try{ natalApi.auditoriaSave(usosSenhaLog.map(u => ({ id: u.id, titulo: u.titulo, operador: u.operador, motivo: u.motivo, data: u.data.toISOString(), pedidoContexto: u.pedidoContexto, pedidoGeradoId: u.pedidoGeradoId }))); }catch{ }
 }
 
 async function enviarAuditoriaPendente(){
-  const par = window.kioskPair;
-  if(!par || !par.ok || !par.loja || !par.pareamento) return;
-  const pendentes = usosSenhaLog.filter(u => !u._portalEnviado);
-  if(!pendentes.length) return;
-  let ok = 0;
-  for(const u of pendentes){
-    try{
-      const res = await portalApi.auditoriaPush({
-        id: u.id,
-        pdvNome: (par && par.pareamento && par.pareamento.pdvNome) || '',
-        titulo: u.titulo,
-        operador: u.operador,
-        motivo: u.motivo,
-        data: isoDataLocal(u.data instanceof Date ? u.data : new Date(u.data)),
-        criadoEm: (u.data instanceof Date ? u.data : new Date(u.data)).toISOString(),
-        pedidoContexto: u.pedidoContexto || '',
-        pedidoGeradoId: u.pedidoGeradoId || '',
-      });
-      if(res && res.ok){ u._portalEnviado = true; ok++; }
-    }catch{ }
-  }
-  if(ok) console.log(`[sync] ${ok} uso(s) de senha enviado(s) ao portal`);
+  // Vai para a fila (outbox) e o drain manda ao portal assim que houver net.
+  return sincronizarComPortal();
 }
 
 async function carregarAuditoria(){
@@ -2077,7 +2292,8 @@ async function carregarAuditoria(){
         senha: '••••', motivo: u.motivo || '', operador: u.operador || '—',
         data: new Date(u.data || Date.now()),
         pedidoContexto: u.pedidoContexto || null, pedidoGeradoId: u.pedidoGeradoId || null,
-        _portalEnviado: true, // já veio do sidecar (presumido enviado; o portal confirma no reenvio)
+        // NÃO marca como enviado: quem manda ao portal é a outbox (a fila só
+        // remove o item depois do "ok" do portal).
       });
     });
   }catch{ }
@@ -2107,12 +2323,21 @@ async function carregarPrecosPortal(){
     if(res && res.ok && res.precos && Object.keys(res.precos).length){
       aplicarPrecosPortal(res.precos);
       console.log('[precos] catálogo atualizado pelo portal:', Object.keys(res.precos).length, 'chaves');
-    } else {
-      console.warn('[precos] portal sem preços, mantendo catálogo local');
+      natalApi.cachePortalSave({ precos: res.precos }).catch(()=>{}); // cache offline-first
+      return;
     }
+    console.warn('[precos] portal sem preços, mantendo catálogo local');
   }catch(e){
     console.warn('[precos] portal indisponível, mantendo catálogo local');
   }
+  // offline → aplica o último catálogo salvo pelo sidecar
+  try{
+    const c = await natalApi.cachePortalGet();
+    if(c && c.cache && c.cache.precos && Object.keys(c.cache.precos).length){
+      aplicarPrecosPortal(c.cache.precos);
+      console.log('[precos] catálogo do cache local aplicado');
+    }
+  }catch{ }
 }
 
 /* ---------------- LOGIN (portal com fallback offline) ---------------- */
@@ -2123,15 +2348,29 @@ async function tentarLogin(getSelecionado){
   let autenticado = false, offline = false;
   try{
     const res = await portalApi.login(u.usuario || u.nome, senha);
-    if(res && res.ok) autenticado = true;
+    if(res && res.ok){
+      autenticado = true;
+      // TOFU: login online aceito → guarda a credencial (hash SHA-256 no
+      // sidecar, nunca em texto claro) para o MESMO usuário conseguir logar
+      // quando a internet cair.
+      natalApi.cachePortalSave({ credenciais: { [(u.usuario || u.nome)]: senha } }).catch(()=>{});
+    }
     else if(res && (res.offline || res.error === 'LOJA_INVALIDA' || /^HTTP \d+/.test(res.error || ''))) offline = true;
     else if(res && res.ok === false){ document.getElementById('login-error').textContent = 'Senha incorreta.'; return; }
     else offline = true;
   }catch{ offline = true; }
   if(!autenticado && offline){
     // Portal fora do ar/falhando ou loja não configurada nele → valida localmente
-    // (usuário local ou senha master do PDV) para o quiosque nunca travar.
-    if(!(senha === u.senha || senha === SENHA_MASTER_PDV)){
+    // para o quiosque nunca travar: senha master do PDV OU credencial já
+    // confirmada online (cache TOFU do sidecar). Senha nova exige internet 1x.
+    let localOk = (senha === SENHA_MASTER_PDV) || (!!u.senha && senha === u.senha);
+    if(!localOk && senha){
+      try{
+        const conf = await natalApi.cachePortalConferir(u.usuario || u.nome, senha);
+        localOk = !!(conf && conf.ok);
+      }catch{ }
+    }
+    if(!localOk){
       document.getElementById('login-error').textContent = 'Senha incorreta.'; return;
     }
   }
@@ -2580,7 +2819,6 @@ function renderSlideFotos(s){
   s.fotos.forEach((f, i)=>{
     const thumb = document.createElement('img');
     thumb.className = 'isv-thumb' + (i===slideIndiceAtual ? ' active' : '');
-    thumb.src = PLACEHOLDER_IMG;
     thumb.loading = 'lazy';
     thumb.decoding = 'async';
     thumb.alt = '';
@@ -2589,17 +2827,21 @@ function renderSlideFotos(s){
       slideIndiceAtual = i;
       renderSlideFotos(s);
     });
-    swapImg(thumb, thumbUrl(f));
+    photoInto(thumb, 'thumb', f);
     thumbs.appendChild(thumb);
   });
 
   const foto = s.fotos[slideIndiceAtual];
   document.getElementById('isv-atual').textContent = slideIndiceAtual+1;
   document.getElementById('isv-total').textContent = s.fotos.length;
-  imagem.src = PLACEHOLDER_IMG;
   const tok = ++_slideToken;
   imagem.dataset.tok = String(tok);
-  mediumUrl(foto).then(u=>{ if(imagem.dataset.tok===String(tok)) imagem.src = u; }).catch(()=>{});
+  const _med = _imgGet('medium', foto.seed);
+  if(_med){ imagem.dataset.pd = '1'; imagem.src = _med; }
+  else{
+    imagem.src = PLACEHOLDER_BLANK;
+    mediumUrl(foto).then(u=>{ if(imagem.dataset.tok===String(tok)) imagem.src = u; }).catch(()=>{});
+  }
 
   thumbs.scrollLeft = thumbParaScrollar(thumbs, slideIndiceAtual);
   document.getElementById('isv-fechar').onclick = fecharSlideFotosSessao;
@@ -2628,6 +2870,15 @@ function openVenda(sessionId){
   renderFrame();
   renderCart();
   updateRibbonBanner();
+  // pré-aquece a cache de miniaturas em background (lotes de 6) pra faixa e o
+  // editor já trocarem a foto quase sem o espaço em branco
+  const _fotos = currentSession.fotos;
+  let _i = 0;
+  (function warmNext(){
+    const fim = Math.min(_i + 6, _fotos.length);
+    for(; _i < fim; _i++) thumbUrl(_fotos[_i]);
+    if(_i < _fotos.length) setTimeout(warmNext, 80);
+  })();
 }
 
 document.getElementById('btn-voltar').addEventListener('click', ()=>{
@@ -2655,7 +2906,7 @@ function renderThumbs(){
     const div = document.createElement('div');
     div.className='thumb'+(f.seed===currentFoto.seed?' selected':'');
     const im = document.createElement('img');
-    im.src = PLACEHOLDER_IMG; im.loading='lazy'; im.decoding='async';
+    im.loading='lazy'; im.decoding='async';
     div.appendChild(im);
     if(inCart){
       const badge = document.createElement('div');
@@ -2663,7 +2914,7 @@ function renderThumbs(){
       badge.textContent='✓';
       div.appendChild(badge);
     }
-    swapImg(im, thumbUrl(f));
+    photoInto(im, 'thumb', f);
     div.addEventListener('click', ()=>{
       currentFoto=f; currentTamanho=null; resetCrop();
       renderThumbs(); renderOptions(); renderFrame();
@@ -2675,7 +2926,7 @@ function renderThumbs(){
 /* ---------------- OPTIONS (tamanhos + extras) ---------------- */
 /* miniaturas dos produtos nos botões da coluna da direita (mockups montados em CSS) */
 function miniThumb(cls='', styleAttr=''){
-  const src = currentFoto ? img(currentFoto.seed) : PLACEHOLDER_IMG;
+  const src = currentFoto ? img(currentFoto.seed) : PLACEHOLDER_BLANK;
   return `<span class="oc-thumb ${cls}" ${styleAttr}><img src="${src}" alt=""></span>`;
 }
 function miniThumbTamanho(t){
@@ -2985,9 +3236,8 @@ function renderFrame(){
     box.style.width='560px'; box.style.height='640px';
 
     const im=document.createElement('img');
-    im.src = PLACEHOLDER_IMG;
     box.appendChild(im);
-    swapImg(im, mediumUrl(currentFoto));
+    photoInto(im, 'medium', currentFoto);
 
     controls.classList.add('disabled');
     return;
@@ -3032,11 +3282,10 @@ function renderFrame(){
 
   im = document.createElement('img');
   im.id='crop-img';
-  im.src = PLACEHOLDER_IMG;
   box.appendChild(im);
+  photoInto(im, 'medium', currentFoto);
   // com molde de célula, o alvo do cover é a JANELA da foto (não o cartão todo)
   setupCover(im, W, H, temMoldeCelula ? config.windowInBox(t.id) : null);
-  swapImg(im, mediumUrl(currentFoto));
   cropContainer = box;
 
   if(temMoldeCelula){
@@ -3285,18 +3534,13 @@ document.getElementById('btn-add-cart').addEventListener('click', ()=>{
 function updateRibbonBanner(){
   const banner = document.getElementById('ribbon-banner');
   if(!banner) return;
-  /* com a impressora real os contadores de papel (10x15/15x20) substituem a paridade do ribbon */
-  const usarImpressora = printerReal && printerReal.connected !== false
-    && (Number.isFinite(+printerReal.paper10x15) || Number.isFinite(+printerReal.paper15x20));
-  if(usarImpressora){ banner.style.display='none'; return; }
   const saldo = saldoRibbonProjetado();
   if(saldo === null){ banner.style.display='none'; return; }
-  const tem15x20 = cart.some(c=>c.produtoId==='15x20');
-  const temImparNoCarrinho = cart.some(c=>c.tipo==='tamanho' && ['10x15','bolinha','polaroide'].includes(c.produtoId));
-  // dispara se tem 15x20 (a próxima pode não fechar em par) OU se algo já deixou o saldo ímpar agora
-  if((tem15x20 || temImparNoCarrinho) && saldo % 2 !== 0){
+  // paridade por slots consumidos no carrinho (10x15=1, 15x20=2): se o que sobra depois
+  // de imprimir o carrinho fecha ímpar, o papel resta 1 unidade perdida — empurra uma 10x15.
+  if(unidadesNoCarrinho() > 0 && saldo % 2 === 1){
     banner.style.display='flex';
-    banner.innerHTML = `<span class="rb-icon">⚠️</span> Saldo de ribbon ficará ÍMPAR (${saldo} unidade${saldo===1?'':'s'} restante${saldo===1?'':'s'}) — ofereça uma <strong>foto 10x15</strong>, uma <strong>Bolinha</strong> ou uma <strong>Polaroide</strong> para melhor aproveitamento do material. <span class="rb-cta">Sugerir ao cliente</span>`;
+    banner.textContent = `Dica: sobrará ${saldo} unidade${saldo===1?'':'s'} de ribbon (ímpar) — ofereça mais uma foto 10x15 ao cliente.`;
   } else {
     banner.style.display='none';
   }
@@ -3407,8 +3651,8 @@ function showItemReviewModal(cartId){
 function renderEnquadramentoEstatico(wrap, c){
   const t = TAMANHOS.find(x=>x.id===c.produtoId);
   if(!t){
-    wrap.innerHTML = `<img src="${PLACEHOLDER_IMG}" style="max-width:100%;border-radius:10px;">`;
-    swapImg(wrap.querySelector('img'), mediumUrl({ seed: c.fotoSeed }));
+    wrap.innerHTML = `<img style="max-width:100%;border-radius:10px;">`;
+    photoInto(wrap.querySelector('img'), 'medium', { seed: c.fotoSeed });
     return;
   }
 
@@ -3433,9 +3677,8 @@ function renderEnquadramentoEstatico(wrap, c){
   const im = document.createElement('img');
   im.style.position='absolute'; im.style.top='50%'; im.style.left='50%';
   im.style.maxWidth='none'; im.style.transformOrigin='center center';
-  im.src = PLACEHOLDER_IMG;
   card.appendChild(im);
-  swapImg(im, mediumUrl({ seed: c.fotoSeed }));
+  photoInto(im, 'medium', { seed: c.fotoSeed });
 
   // O card é o box do editor reduzido (k), e `c.offX/offY` + `c.zoom` foram
   // salvos na escala do editor. Espelha o setupCover: cover da JANELA do molde
@@ -3492,7 +3735,7 @@ function renderCart(){
       div.className='cart-item';
       div.innerHTML = `
         <div class="ci-top">
-          <img src="${PLACEHOLDER_IMG}" loading="lazy" decoding="async">
+          <img loading="lazy" decoding="async">
           <div class="ci-info">
             <div class="ci-label">${c.label} · #${c.sessionSenha}</div>
             <div class="ci-price">${isZeradoPorCombo
@@ -3508,7 +3751,7 @@ function renderCart(){
           <button class="ci-qty-plus">+</button>
         </div>`}
       `;
-      swapImg(div.querySelector('img'), thumbUrl({ seed: c.fotoSeed }));
+      if(c.fotoSeed) photoInto(div.querySelector('img'), 'thumb', { seed: c.fotoSeed });
       if(!semStepper){
         div.querySelector('.ci-qty-minus').addEventListener('click', ev=>{
           ev.stopPropagation();
@@ -3642,7 +3885,7 @@ function showUpsellModal(opcoes, next){
 function showConferenceModal(){
   const linhas = cart.map(c=>`
     <div class="conf-item" data-cartid="${c.cartId}" ondblclick="showItemReviewModal('${c.cartId}')">
-      <img src="${PLACEHOLDER_IMG}" loading="lazy" decoding="async" class="conf-img">
+      <img loading="lazy" decoding="async" class="conf-img">
       <div class="conf-info">
         <div class="conf-label">${c.qtd>1?c.qtd+'x ':''}${c.label}</div>
         <div class="conf-sub">Sessão #${c.sessionSenha} · duplo clique para conferir</div>
@@ -3664,7 +3907,7 @@ function showConferenceModal(){
   `);
   document.querySelectorAll('.conf-img').forEach((gi, i)=>{
     const c = cart[i];
-    if(gi && c) swapImg(gi, thumbUrl({ seed: c.fotoSeed }));
+    if(gi && c && c.fotoSeed) photoInto(gi, 'thumb', { seed: c.fotoSeed });
   });
   document.getElementById('btn-conf-continuar').addEventListener('click', ()=>{
     closeModal();
@@ -3689,6 +3932,96 @@ window.openModal = openModal;
 let modalBloqueado = false;
 document.getElementById('modal-overlay').addEventListener('click', e=>{
   if(e.target.id==='modal-overlay' && !modalBloqueado) closeModal();
+});
+
+/* ---------------- TECLADO NUMÉRICO NA TELA ---------------- */
+// Campos numéricos (PIN de 4 dígitos, busca de sessão e valores de caixa) abrem
+// um teclado só de números — o kiosk é touch, sem teclado físico obrigatório.
+const NUM_FIELDS = '#login-senha,#busca-sessao,#sm-senha,#ac-fundo,.fc-real,#fc-envelope,.pr-valor';
+let numpadTarget = null;
+let numpadAllowDot = false;
+
+const _npTitles = {
+  '#login-senha': 'Senha do PDV (4 dígitos)',
+  '#busca-sessao': 'Buscar sessão nº',
+  '#sm-senha': 'Senha master (4 dígitos)',
+  '#ac-fundo': 'Abertura de caixa — fundo de troco',
+  '#fc-envelope': 'Envelope de depósito',
+};
+function atualizarNumpad(){
+  const disp = document.getElementById('numpad-display');
+  if(!numpadTarget){ disp.innerHTML = '&nbsp;'; return; }
+  const v = numpadTarget.value || '';
+  disp.innerHTML = v === '' ? '&nbsp;' : v.replace(/[^\d.,]+/g, '').replace(/</g, '&#60;');
+}
+function abrirNumpad(el){
+  numpadTarget = el;
+  numpadAllowDot = (el.type === 'number');
+  const key = '#' + el.id;
+  const titulo = _npTitles[key]
+    || (el.classList.contains('fc-real') ? 'Valor real no caixa — ' + (el.dataset.forma || '') : 'Digite os números');
+  document.getElementById('numpad-title').textContent = titulo;
+  document.getElementById('numpad-overlay').style.display = 'flex';
+  atualizarNumpad();
+}
+function fecharNumpad(blur){
+  document.getElementById('numpad-overlay').style.display = 'none';
+  if(blur && numpadTarget) numpadTarget.blur();
+  numpadTarget = null;
+}
+// Enter: confirma a ação do campo em foco (mesmo comportamento do teclado físico)
+function numpadEnter(){
+  const el = numpadTarget;
+  fecharNumpad(false);
+  if(!el) return;
+  const map = { '#login-senha': 'login-entrar', '#ac-fundo': 'ac-confirmar', '#fc-envelope': 'fc-confirmar' };
+  const btnId = map['#' + el.id] || (el.classList.contains('fc-real') ? 'fc-confirmar' : null);
+  if(btnId){
+    const btn = document.getElementById(btnId);
+    if(btn && !btn.disabled){ btn.click(); return; }
+  }
+  if(el.id === 'sm-senha'){ // senha master → próximo passo é o motivo
+    const M = document.getElementById('sm-motivo');
+    if(M) M.focus();
+    return;
+  }
+  el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+}
+// apertou um campo numérico → abre o teclado
+document.addEventListener('focusin', e=>{
+  const el = e.target;
+  if(el && el.matches && el.matches(NUM_FIELDS)) abrirNumpad(el);
+});
+// teclado físico digitando com o pad aberto → espelha no visor
+document.addEventListener('input', e=>{
+  if(numpadTarget && e.target === numpadTarget) atualizarNumpad();
+});
+/* pointerdown (com preventDefault) pra o clique nas teclas NÃO roubar o foco
+   do campo — o valor é gravado direto e o campo segue "focado" por baixo */
+document.getElementById('numpad-overlay').addEventListener('pointerdown', e=>{
+  if(e.target.id === 'numpad-overlay'){ fecharNumpad(true); return; }
+  const btn = e.target.closest('button');
+  if(!btn || !numpadTarget) return;
+  e.preventDefault();
+  const el = numpadTarget;
+  const k = btn.dataset.k;
+  if(k === 'close'){ fecharNumpad(true); return; }
+  if(k === 'enter'){ numpadEnter(); return; }
+  if(k === 'clear'){ el.value = ''; }
+  else if(k === 'bc'){ el.value = (el.value || '').slice(0, -1); }
+  else if(k === '.'){
+    if(!numpadAllowDot || (el.value || '').includes('.')) return;
+    el.value += '.';
+  }
+  else{
+    if(el.value.length >= (+el.maxLength || Infinity)) return;
+    el.value += k;
+  }
+  const limite = el.maxLength ? +el.maxLength : Infinity;
+  if(el.value.length > limite) el.value = el.value.slice(0, limite);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  atualizarNumpad();
 });
 
 /* ---------------- CONFIGURAÇÕES (modal) ---------------- */
@@ -3789,6 +4122,17 @@ async function showConfigModal(){
     </div>
 
     <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Loja desta máquina</div>
+      <div style="display:flex;gap:8px;">
+        <input id="cfg-loja-id" type="text" value="${String(cfg.lojaId||'').replace(/"/g,'&quot;')}" placeholder="id da loja (ex.: teste)"
+          style="flex:0 0 160px;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:Arial,sans-serif;outline:none;" />
+        <input id="cfg-loja-nome" type="text" value="${String(cfg.lojaNome||'').replace(/"/g,'&quot;')}" placeholder="nome exibido (ex.: Loja 01)"
+          style="flex:1;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:Arial,sans-serif;outline:none;" />
+      </div>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">A loja é definida AQUI no app (offline-first). É esse id que os envios ao portal usam — o portal só autoriza a máquina, não muda a loja.</div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Emparelhamento com o portal</div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span style="font-size:16px;font-weight:800;color:var(--gold-300);font-family:ui-monospace,Consolas,monospace;letter-spacing:3px;">${kk}</span>
@@ -3797,6 +4141,16 @@ async function showConfigModal(){
         <button id="cfg-new-code" style="padding:8px 14px;border:1px solid var(--slate-600);border-radius:8px;background:transparent;color:var(--slate-400);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;" title="Gera um código novo e desemparelha — só use em PDV novo, código perdido ou troca de loja">Gerar novo código</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Informe este código na loja do portal de gestão (campo "código do kiosk"). O PDV reconhece sozinho a cada 30s.</div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Sincronização com o portal</div>
+      <div id="cfg-sync-info" style="font-size:12px;color:var(--slate-300);margin-bottom:8px;">—</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button id="cfg-sync-now" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">Sincronizar agora</button>
+        <button id="cfg-sync-clear" style="padding:8px 14px;border:1px solid var(--slate-600);border-radius:8px;background:transparent;color:var(--slate-400);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;" title="Descarta o que está aguardando envio (exige senha)">Limpar fila de envio</button>
+      </div>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Vendas, pedidos e auditoria feitos offline ficam numa fila local e vão ao portal sozinhos quando a internet voltar (o portal aceita reenvio sem duplicar).</div>
     </div>
 
     <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
@@ -3869,6 +4223,43 @@ async function showConfigModal(){
     }
   };
 
+  // ─── Sincronização (offline-first): fila de envio ao portal ───
+  const syncInfo = document.getElementById('cfg-sync-info');
+  const setSyncInfo = (txt)=>{ if(syncInfo) syncInfo.textContent = txt; };
+  (async ()=>{
+    try{
+      const r = await natalApi.filaPortalList();
+      const n = (r && r.total) || 0;
+      const ult = _sync.ultimoEnvio ? ' · último envio ' + new Date(_sync.ultimoEnvio).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '';
+      setSyncInfo(n ? (n + ' registro(s) aguardando internet' + ult) : ('Tudo em dia com o portal.' + (_sync.ultimoErro ? ' (último erro: ' + _sync.ultimoErro + ')' : '')));
+    }catch{ setSyncInfo('Não foi possível ler a fila de envio.'); }
+  })();
+  const syncNowBtn = document.getElementById('cfg-sync-now');
+  if(syncNowBtn) syncNowBtn.onclick = async ()=>{
+    syncNowBtn.disabled = true; setSyncInfo('Sincronizando…');
+    try{ await enfileirarPendentesPortal(); await drenarFilaPortal(); }catch{ }
+    try{
+      const r = await natalApi.filaPortalList();
+      const n = (r && r.total) || 0;
+      setSyncInfo(n ? (n + ' registro(s) ainda pendente(s)') : 'Tudo em dia com o portal.');
+    }catch{ setSyncInfo('Sem resposta do sidecar.'); }
+    renderSyncChip(); syncNowBtn.disabled = false;
+  };
+  const syncClearBtn = document.getElementById('cfg-sync-clear');
+  if(syncClearBtn) syncClearBtn.onclick = async ()=>{
+    const senha = window.prompt('Senha de manutenção para limpar a fila de envio:');
+    if(!senha) return;
+    syncClearBtn.disabled = true;
+    try{
+      const r = await natalApi.filaPortalLimpar(senha);
+      if(r && r.success){
+        toast('Fila de envio limpa (' + (r.removidos || 0) + ' registro(s))');
+        _sync.pendentes = 0; renderSyncChip(); setSyncInfo('Fila de envio limpa.');
+      } else toast('⚠ ' + ((r && r.error) || 'Erro ao limpar a fila'));
+    }catch(e){ toast('⚠ ' + (e && e.message ? e.message : 'Erro ao limpar a fila')); }
+    syncClearBtn.disabled = false;
+  };
+
   document.querySelectorAll('[data-limpa-fila]').forEach(btn => {
     btn.onclick = async ()=>{
       const pedidoId = btn.getAttribute('data-limpa-fila');
@@ -3934,11 +4325,25 @@ const r = await natalApi.limparFila({ pedidoId });
     const val = document.getElementById('cfg-folder').value.trim();
     const logoEl = document.getElementById('cfg-logo');
     const logoVal = (logoEl ? logoEl.value.trim() : '') || 'SHOPPING PALLADIUM';
+    const lojaIdEl = document.getElementById('cfg-loja-id');
+    const lojaNomeEl = document.getElementById('cfg-loja-nome');
+    const lojaIdVal = (lojaIdEl ? lojaIdEl.value.trim() : '');
+    const lojaNomeVal = (lojaNomeEl ? lojaNomeEl.value.trim() : '');
     try{
       const partial = { photosFolder: val, logoTexto: logoVal };
+      if(lojaIdEl) partial.lojaId = lojaIdVal;
+      if(lojaNomeEl) partial.lojaNome = lojaNomeVal;
       await natalApi.saveConfig(partial);
       if(window.natal?.saveConfig) await window.natal.saveConfig(partial);
       logoTexto = logoVal;
+      // identidade local mudou → republica e (re)agenda o envio da fila
+      if(_identidade){
+        if(lojaIdEl) _identidade.lojaId = lojaIdVal;
+        if(lojaNomeEl) _identidade.lojaNome = lojaNomeVal;
+      }
+      publicarIdentidade();
+      atualizarLojaHeader();
+      if(lojaIdEl && lojaIdVal) agendarSincronizacao(1000);
       toast('Configurações salvas');
       closeModal();
     }catch(e){
@@ -4226,9 +4631,9 @@ function renderIdleMarquee(){
   if(capped.length === 0){ track.innerHTML = ''; return; }
   const loop = [...capped, ...capped];
   track.innerHTML = loop.map(seed =>
-    `<img src="${PLACEHOLDER_IMG}" loading="lazy" decoding="async" data-seed="${seed}">`
+    `<img loading="lazy" decoding="async" data-seed="${seed}">`
   ).join('');
-  track.querySelectorAll('img').forEach(gi=> swapImg(gi, thumbUrl({ seed: gi.dataset.seed })));
+  track.querySelectorAll('img').forEach(gi=> photoInto(gi, 'thumb', { seed: gi.dataset.seed }));
 }
 
 /* ---------------- CARRINHO GLOBAL (flutuante) ---------------- */
@@ -5515,6 +5920,7 @@ async function INIT(){
   renderGlobalCart();
   renderRibbonChip();
   renderCaixaChip();
+  renderSyncChip(); // estado de sync com o portal (fila de envio)
   setInterval(carregarRibbon, 15000); // ribbon real do sidecar (igual ao React)
   setInterval(enviarSnapshotVendas, 300000); // sync de vendas → portal a cada 5 min (e nos eventos abaixo)
   setInterval(async ()=>{
@@ -5717,5 +6123,35 @@ function checarAlertaHorario(){
   syncRibbonChip(); // a barra já nasce retraída
 })();
 </script>
+
+<!-- ================= TECLADO NUMÉRICO NA TELA (kiosk touch) ================= -->
+<div class="numpad-overlay" id="numpad-overlay" style="display:none;">
+  <div class="numpad" id="numpad">
+    <div class="numpad-head">
+      <div class="numpad-title" id="numpad-title">Digite os números</div>
+      <button class="numpad-close" data-k="close">×</button>
+    </div>
+    <div class="numpad-display" id="numpad-display">&nbsp;</div>
+    <div class="numpad-grid" id="numpad-grid">
+      <button class="np-k" data-k="7">7</button>
+      <button class="np-k" data-k="8">8</button>
+      <button class="np-k" data-k="9">9</button>
+      <button class="np-k" data-k="4">4</button>
+      <button class="np-k" data-k="5">5</button>
+      <button class="np-k" data-k="6">6</button>
+      <button class="np-k" data-k="1">1</button>
+      <button class="np-k" data-k="2">2</button>
+      <button class="np-k" data-k="3">3</button>
+      <button class="np-k np-bc" data-k="bc">⌫</button>
+      <button class="np-k" data-k="0">0</button>
+      <button class="np-k np-dec" data-k=".">.</button>
+    </div>
+    <div class="numpad-actions">
+      <button class="np-btn" data-k="clear">Limpar</button>
+      <button class="np-btn" data-k="close">Fechar</button>
+      <button class="np-btn np-ok" data-k="enter">Enter</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

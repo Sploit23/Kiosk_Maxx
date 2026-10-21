@@ -48,13 +48,37 @@ const portalApi = {
     });
   },
 
-  // Loja canônica: prefere a que veio do emparelhamento, senão a configurada.
-  lojaIdAtivo() {
+  // Identidade ativa (offline-first): a LOJA é a DEFINIDA NO APP (persistida
+  // no sidecar / electron-config) e a MÁQUINA é a pareada. O portal só
+  // autoriza a máquina — ele não devolve mais a identidade da loja.
+  // Cai no par do portal (memória) e por fim no default da config.
+  identidadeAtiva() {
+    try {
+      const i = window && window.portalIdentidade;
+      if (i && i.lojaId) return i;
+    } catch { /* browser puro */ }
     try {
       const p = window && window.kioskPair;
-      if (p && p.ok && p.loja && p.loja.id) return p.loja.id;
-    } catch { /* browser puro sem window.kioskPair */ }
-    return LOJA_ID;
+      if (p && p.ok && p.loja) {
+        return {
+          lojaId: p.loja.id,
+          lojaNome: p.loja.nome || '',
+          machineId: (p.pareamento && p.pareamento.machineId) || '',
+          pdvNome: (p.pareamento && p.pareamento.pdvNome) || '',
+        };
+      }
+    } catch { /* browser puro */ }
+    return { lojaId: LOJA_ID, lojaNome: '', machineId: '', pdvNome: config.pdvNome || '' };
+  },
+
+  // Loja canônica: a definida no app (emparelhada ou configurada).
+  lojaIdAtivo() {
+    return portalApi.identidadeAtiva().lojaId;
+  },
+
+  // Máquina que o portal autorizou (vai em todo push).
+  machineIdAtivo() {
+    return portalApi.identidadeAtiva().machineId;
   },
 
   // Valida credenciais do operador na loja (emparelhada ou configurada).
@@ -75,13 +99,15 @@ const portalApi = {
   },
 
   // Sobe o snapshot diário de vendas da loja (vendas.push). O portal só aceita
-  // de máquina PAREDA com a loja (machineId do pareamento). Depois de
+  // de máquina PAREADA com a loja (machineId do pareamento). Depois de
   // emparelhado, o PDV envia a cada evento de venda/fechamento de caixa e em
   // intervalos regulares — aqui é o resumo-agregado, não pedido a pedido.
   vendasPush(snap = {}) {
+    const ident = portalApi.identidadeAtiva();
     return post('vendas.push', {
-      lojaId: portalApi.lojaIdAtivo(),
-      machineId: (window && window.kioskPair && window.kioskPair.ok && window.kioskPair.pareamento && window.kioskPair.pareamento.machineId) || '',
+      lojaId: ident.lojaId,
+      lojaNome: ident.lojaNome,
+      machineId: ident.machineId,
       ...snap,
     });
   },
@@ -89,18 +115,22 @@ const portalApi = {
   // Sobe um pedido por completo (pedido.push). Idempotente pelo id do pedido:
   // reenvio só sobrescreve. O portal só aceita da máquina pareada com a loja.
   pedidoPush(pedido = {}) {
+    const ident = portalApi.identidadeAtiva();
     return post('pedido.push', {
-      lojaId: portalApi.lojaIdAtivo(),
-      machineId: (window && window.kioskPair && window.kioskPair.ok && window.kioskPair.pareamento && window.kioskPair.pareamento.machineId) || '',
+      lojaId: ident.lojaId,
+      lojaNome: ident.lojaNome,
+      machineId: ident.machineId,
       pedido,
     });
   },
 
   // Sobe um uso de senha master (auditoria.push). Idempotente pelo id.
   auditoriaPush(uso = {}) {
+    const ident = portalApi.identidadeAtiva();
     return post('auditoria.push', {
-      lojaId: portalApi.lojaIdAtivo(),
-      machineId: (window && window.kioskPair && window.kioskPair.ok && window.kioskPair.pareamento && window.kioskPair.pareamento.machineId) || '',
+      lojaId: ident.lojaId,
+      lojaNome: ident.lojaNome,
+      machineId: ident.machineId,
       uso,
     });
   },
