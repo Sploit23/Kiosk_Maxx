@@ -4,14 +4,22 @@
  * Backend single-file para hospedagem compartilhada (PHP 7.4+/8.x).
  * Dados em JSON sob /data (bloqueado na web via .htaccess).
  *
- * Ações públicas : health, login, equipe, kiosk.pair, precos, vendas.push,
- *                  pedido.push, auditoria.push
+ * Ações públicas : health, login, equipe, kiosk.seed, kiosk.pair, precos,
+ *                  vendas.push, pedido.push, auditoria.push
  * Ações admin    : exigem X-Token (header) ou campo "token":
  *   admin.login, lojas.list, lojas.save, lojas.delete,
  *   usuarios.list, usuarios.save, usuarios.delete, admin.changePassword,
  *   precos.save, vendas.resumo, pedido.list, auditoria.list,
  *   despesas.list, despesas.save, despesas.delete,
  *   parametros.get, parametros.save
+ *
+ * Wizard de 1º uso (kiosk.seed + lojas.save com código-only):
+ *   1) o PDV registra o NOME DO LOCAL em `pendentes[kioskCode]` (rascunho,
+ *      não cria loja);
+ *   2) o admin abre "Nova loja" no portal, cola SÓ o código que aparece na
+ *      tela do PDV e salva — lojas.save resolve nome/pdv/máquina do rascunho,
+ *      gera o id (slug do nome) e grava o pareamento na hora;
+ *   3) em seguida o admin cadastra os colaboradores da nova loja.
  *
  * Emparelhamento (kiosk.pair): cada loja tem um pairingCode gerado no admin.
  * O PDV envia { lojaId, pairingCode, pdvNome, machineId } e o portal valida
@@ -259,6 +267,18 @@ function findLoja(array $data, string $id): ?array
         if (($l['id'] ?? '') === $id) return $l;
     }
     return null;
+}
+
+// Slug do nome da loja → id estável e legível (Royal Plaza → royal-plaza).
+// Usado pelo wizard de 1º uso (lojas.save com só o código).
+function slugLoja(string $nome): string
+{
+    $s = mb_strtolower($nome, 'UTF-8');
+    $s = (function_exists('iconv') ? @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s) : false) ?: $s;
+    $s = preg_replace('/[^a-z0-9]+/', '-', (string) $s);
+    $s = trim((string) $s, '-');
+    if ($s === '') $s = 'loja';
+    return substr($s, 0, 48);
 }
 
 // Valida que o kiosk que está chamando é a máquina pareada com a loja
@@ -533,6 +553,46 @@ try {
                     return userVisible($u);
                 }, $users),
             ]);
+        }
+
+        // Wizard de 1º uso do PDV: o operador digita o NOME DO LOCAL no
+        // kiosk; aqui guardamos um RASCUNHO por código (não cria loja —
+        // senão o kiosk.pair casaria antes de o admin confirmar). O admin
+        // depois cola o mesmo código no "Nova loja" do portal e a loja é
+        // criada com este nome + a máquina já fica emparelhada.
+        case 'kiosk.seed': {
+            $db = db();
+            $kioskCode = preg_replace('/[^A-Z0-9]/', '', strtoupper(trim((string) ($p['kioskCode'] ?? ''))));
+            $nome = trim((string) ($p['nome'] ?? ''));
+            $pdvNome = trim((string) ($p['pdvNome'] ?? ''));
+            $machineId = trim((string) ($p['machineId'] ?? ''));
+            if ($kioskCode === '' || $nome === '') fail('DADOS_INCOMPLETOS: kioskCode e nome são obrigatórios', 400);
+            if (mb_strlen($nome, 'UTF-8') > 80) fail('NOME_INVALIDO', 400);
+
+            // Já existe loja com este código? Então nada a fazer (pareamento
+            // segue pelo kiosk.pair normal) — responde ok para o PDV parar.
+            $existe = false;
+            foreach ($db['lojas'] as $l) {
+                if ((string) ($l['kioskCode'] ?? '') === $kioskCode) { $existe = true; break; }
+            }
+            if ($existe) {
+                respond(['ok' => true, 'jaRegistrado' => true]);
+            }
+
+            usleep(200000); // leve trava de força-bruta (mesma linha dos atos de login)
+            if (!isset($db['pendentes']) || !is_array($db['pendentes'])) $db['pendentes'] = [];
+            $agora = gmdate('c');
+            $atual = $db['pendentes'][$kioskCode] ?? null;
+            $db['pendentes'][$kioskCode] = [
+                'kioskCode' => $kioskCode,
+                'nome' => $nome,
+                'pdvNome' => $pdvNome,
+                'machineId' => $machineId,
+                'criadoEm' => is_array($atual) && !empty($atual['criadoEm']) ? $atual['criadoEm'] : $agora,
+                'atualizadoEm' => $agora,
+            ];
+            saveDb($db);
+            respond(['ok' => true, 'pendente' => $db['pendentes'][$kioskCode]]);
         }
 
         case 'kiosk.pair': {
@@ -838,6 +898,56 @@ try {
             $id = trim((string) ($p['id'] ?? ''));
             $nome = trim((string) ($p['nome'] ?? ''));
             $pdv = trim((string) ($p['pdv'] ?? ''));
+            $kioskCode = preg_replace('/[^A-Z0-9]/', '', strtoupper(trim((string) ($p['kioskCode'] ?? ''))));
+
+            // ── Wizard de 1º uso: loja criada só com o CÓDIGO ──────────────
+            // O admin colou o código que aparece na tela do PDV; o nome/pdv/
+            // máquina vêm do rascunho gravado pelo kiosk.seed. O id nasce do
+            // slug do nome (royal-plaza, royal-plaza-2...). O pareamento é
+            // gravado agora — o PDV é autorizado sem esperar o próximo poll.
+            if ($id === '' && $nome === '' && $kioskCode !== '') {
+                $pend = $db['pendentes'][$kioskCode] ?? null;
+                if (!is_array($pend) || empty($pend['nome'])) {
+                    usleep(250000);
+                    fail('RASCUNHO_NAO_ENCONTRADO: nenhum PDV registrou este código — cadastre a loja manualmente', 404);
+                }
+                $nome = trim((string) $pend['nome']);
+                $pdv = trim((string) ($pend['pdvNome'] ?? '')) ?: $pdv;
+                $id = slugLoja($nome);
+                $base = $id;
+                $n = 2;
+                while (findLoja($db, $id) !== null) { $id = $base . '-' . $n; $n++; }
+
+                $loja = [
+                    'id' => $id,
+                    'nome' => $nome,
+                    'pdv' => $pdv,
+                    'pairingCode' => strtoupper(substr(bin2hex(random_bytes(8)), 0, 8)),
+                    'kioskCode' => $kioskCode,
+                    'ativo' => true,
+                ];
+                $machineId = trim((string) ($pend['machineId'] ?? ''));
+                if ($machineId !== '') {
+                    // Mesma trava de clone do kiosk.pair: uma máquina só numa loja.
+                    foreach ($db['lojas'] as $l) {
+                        if (($l['id'] ?? '') === $id) continue;
+                        if (!empty($l['pareamento']['machineId'])
+                            && hash_equals((string) $l['pareamento']['machineId'], $machineId)) {
+                            fail('MAQUINA_JA_EMPARELHADA', 409);
+                        }
+                    }
+                    $loja['pareamento'] = [
+                        'pdvNome' => $pdv,
+                        'machineId' => $machineId,
+                        'emparelhadoEm' => gmdate('c'),
+                    ];
+                }
+                $db['lojas'][] = $loja;
+                unset($db['pendentes'][$kioskCode]);
+                saveDb($db);
+                respond(['ok' => true, 'loja' => $loja, 'criada' => true]);
+            }
+
             if ($id === '' || $nome === '') {
                 fail('DADOS_INCOMPLETOS: id e nome são obrigatórios');
             }
@@ -859,7 +969,6 @@ try {
 
             // Código do kiosk (é o que aparece na TELA do PDV — o admin digita aqui).
             // Cadastro: pode ficar vazio (preencher depois que o kiosk exibir o código).
-            $kioskCode = preg_replace('/[^A-Z0-9]/', '', strtoupper(trim((string) ($p['kioskCode'] ?? ''))));
             if ($kioskCode === '' && $anterior) {
                 $kioskCode = (string) ($anterior['loja']['kioskCode'] ?? '');
             }
@@ -890,6 +999,11 @@ try {
                 $db['lojas'][$anterior['i']] = $loja;
             } else {
                 $db['lojas'][] = $loja;
+            }
+            // Cadastro manual com o mesmo código do wizard → consome o rascunho
+            // (senão sobra em `pendentes` pra sempre).
+            if ($kioskCode !== '' && isset($db['pendentes'][$kioskCode])) {
+                unset($db['pendentes'][$kioskCode]);
             }
             saveDb($db);
             respond(['ok' => true, 'loja' => $loja]);

@@ -205,6 +205,15 @@ select.form-input{appearance:none;}
 .pair-tutorial summary{cursor:pointer;color:var(--gold-300);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;}
 .pair-tutorial ol{margin:8px 0 0;padding-left:18px;line-height:1.7;}
 .pair-tutorial b{color:var(--cream-100);}
+/* wizard de 1º uso: nova loja só-com-código + painel de sucesso */
+.nw-passos{font-size:12.5px;line-height:1.65;color:var(--slate-400);background:var(--navy-850);border:1px solid var(--navy-line);border-radius:8px;padding:10px 12px;margin-bottom:14px;}
+.nw-passos b{color:var(--gold-300);}
+.nw-sucesso{text-align:center;padding:6px 0 4px;}
+.nw-check{width:56px;height:56px;line-height:56px;margin:0 auto 12px;border-radius:50%;background:rgba(79,174,127,.15);border:1px solid rgba(79,174,127,.45);color:var(--green-500);font-size:26px;font-weight:700;}
+.nw-nome{font-size:17px;font-weight:700;color:var(--cream-100);}
+.nw-id{font-size:12px;color:var(--slate-500);margin-top:2px;font-family:ui-monospace,Consolas,monospace;}
+.nw-sucesso p{font-size:12.5px;color:var(--slate-400);margin-top:12px;line-height:1.6;}
+.nw-sucesso .nw-destaque{color:var(--gold-300);font-weight:600;background:rgba(214,178,74,.08);border:1px solid rgba(214,178,74,.3);border-radius:8px;padding:10px 12px;margin-top:14px;}
 
 .mf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin:16px 0;}
 .mf-box{background:var(--navy-850);border:1px solid var(--navy-line);border-radius:8px;padding:10px 12px;}
@@ -1774,13 +1783,92 @@ function fmtKiosk(s){
   s = String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
   return s.length > 4 ? s.slice(0,4)+'-'+s.slice(4) : s;
 }
-$('#btn-nova-loja').addEventListener('click', function(){ modalLoja(null); });
+$('#btn-nova-loja').addEventListener('click', function(){ modalNovaLoja(); });
+
+/* ── Wizard de 1º uso do PDV ───────────────────────────────────────────
+   O nome do local foi digitado NO KIOSK (kiosk.seed → rascunho). Aqui o
+   admin só cola o código que aparece na tela do PDV; o portal cria a loja
+   com aquele nome e grava o pareamento na hora. Sem rascunho → cai no
+   form completo (cadastro manual, caminho antigo). */
+function modalNovaLoja(){
+  openPortalModal(
+    '<div class="modal-head"><h3>Nova loja</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
+    '<div class="nw-passos">1) No PDV, digite o <b>nome do local</b> no assistente de 1º uso · '+
+    '2) copie o <b>código</b> que aparece na tela dele · 3) cole aqui e salve.</div>'+
+    '<div class="form-row"><label class="form-label">Código do kiosk (aparece na tela do PDV)</label>'+
+    '<input class="form-input" id="f-nw-kiosk" placeholder="ex.: K8XQ-4B9D" autocomplete="off" '+
+    'style="letter-spacing:3px;text-transform:uppercase;font-family:ui-monospace,Consolas,monospace;font-size:17px;text-align:center;"></div>'+
+    '<div class="pair-status muted" id="nw-aviso">O nome da loja vem do PDV — este formulário cria a loja e emparelha a máquina de uma vez.</div>'+
+    '<details class="pair-tutorial"><summary>Como funciona? (mini tutorial)</summary>'+
+    '<ol><li>Ligue o PDV. O assistente de 1º uso pede o <b>nome do local</b> e depois mostra o <b>Código do kiosk</b>.</li>'+
+    '<li>Cole este código no campo acima e clique em <b>Salvar</b> — a loja é criada com o nome digitado no PDV e a máquina já fica emparelhada.</li>'+
+    '<li>Na sequência, cadastre os <b>colaboradores</b> da loja (eles aparecem no login do PDV).</li>'+
+    '<li>Proteção contra imagem clonada: o mesmo código/máquina não vale para duas lojas.</li></ol></details>'+
+    '<div class="modal-actions"><button class="btn btn-primary" id="nw-salvar">Salvar</button>'+
+    '<button class="btn btn-ghost" id="nw-manual">Cadastrar manualmente</button>'+
+    '<button class="btn btn-ghost" onclick="nacCloseModal()">Cancelar</button></div>'
+  );
+  var inp = $('#f-nw-kiosk');
+  inp.addEventListener('input', function(){ inp.value = fmtKiosk(inp.value); });
+  setTimeout(function(){ inp.focus(); }, 60);
+  $('#nw-manual').addEventListener('click', function(){ modalLoja(null); });
+  $('#nw-salvar').addEventListener('click', async function(){
+    var btn = this;
+    var codigo = fmtKiosk(inp.value).replace(/-/g,'');
+    if(!codigo){ toast('Cole o código que aparece na tela do PDV', true); return; }
+    btn.disabled = true;
+    var res = await call('lojas.save', { kioskCode: codigo });
+    btn.disabled = false;
+    if(!res.ok){
+      var err = String(res.error||'Falha ao salvar');
+      if(err.indexOf('RASCUNHO_NAO_ENCONTRADO') === 0){
+        toast('Este código ainda não veio do PDV — cadastre a loja manualmente', true);
+        modalLoja(null); // form completo (ID/Nome/PDV) — caminho antigo
+        return;
+      }
+      toast(err.split(':')[0], true);
+      return;
+    }
+    await loadAll();
+    renderLojas();
+    if(res.criada) modalPareamentoConcluido(res.loja);
+    else { toast('Loja salva'); notif('🏪','Loja salva', (res.loja&&res.loja.id)||''); closePortalModal(); }
+  });
+}
+
+/* Painel pós-criação: pareamento pronto → chama o admin pra aba Colaboradores. */
+function modalPareamentoConcluido(loja){
+  loja = loja || {};
+  var pareado = !!(loja.pareamento && loja.pareamento.machineId);
+  openPortalModal(
+    '<div class="modal-head"><h3>'+ (pareado ? 'Pareamento concluído' : 'Loja criada') +'</h3>'+
+    '<button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
+    '<div class="nw-sucesso">'+
+      '<div class="nw-check">✔</div>'+
+      '<div class="nw-nome">'+esc(loja.nome||'')+'</div>'+
+      '<div class="nw-id">'+esc(loja.id||'')+(loja.kioskCode?' · código '+esc(fmtKiosk(loja.kioskCode)):'')+'</div>'+
+      (pareado
+        ? '<p>A máquina <b>'+esc((loja.pareamento.pdvNome||'PDV')+'')+'</b> já está autorizada nesta loja.</p>'
+        : '<p>Aguardando o PDV confirmar o pareamento (até 30s).</p>')+
+      '<p class="nw-destaque">Agora cadastre os funcionários para esta rede — eles aparecem na tela de login do PDV.</p>'+
+    '</div>'+
+    '<div class="modal-actions"><button class="btn btn-primary" id="nw-ir-equipe">👥 Cadastrar colaboradores</button>'+
+    '<button class="btn btn-ghost" onclick="nacCloseModal()">Fechar</button></div>'
+  );
+  notif('🏪', pareado ? 'Pareamento concluído' : 'Loja criada', (loja.nome||'')+' ('+(loja.id||'')+')');
+  $('#nw-ir-equipe').addEventListener('click', function(){
+    closePortalModal();
+    state.filtroLoja = loja.id || ''; // já filtra a equipe pela loja nova
+    goScreen('equipe');
+    setTimeout(function(){ $('#btn-novo-colaborador').click(); }, 120); // abre direto o cadastro
+  });
+}
 
 function modalLoja(l){
   l = l || {};
   var pm = l.pareamento;
   openPortalModal(
-    '<div class="modal-head"><h3>'+(l.id?'Editar loja':'Nova loja')+'</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
+    '<div class="modal-head"><h3>'+(l.id?'Editar loja':'Nova loja — manual')+'</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
     '<div class="form-row"><label class="form-label">ID (identificação do kiosk)</label>'+
     '<input class="form-input" id="f-loja-id" value="'+escAttr(l.id||'')+'" placeholder="ex.: royal-plaza"'+(l.id?' disabled':'')+'></div>'+
     '<div class="form-row"><label class="form-label">Nome</label>'+

@@ -40,6 +40,39 @@ vinda só de `window.kioskPair` (`par()`), sem fila persistente — ver
 `sync-debug`. Erro de pair pode sobrescrever `window.kioskPair` mesmo com
 `res.ok === false` (`src/App.jsx:77`).
 
+## Wizard de 1º uso (`kiosk.seed` + `lojas.save` só-com-código)
+
+Fluxo de setup do kiosk novo (decisão: **gatilho = `cfg.lojaNome` vazio** no
+PDV; máquina já configurada nunca vê o wizard):
+
+1. **PDV** (`vendas.html`, overlay `#wizard-overlay`, funções `wz*`): operador
+   digita o **nome do local** → `natalApi.saveConfig({lojaNome})` + então
+   `portalApi.seed({kioskCode, nome, pdvNome, machineId})` →
+   `kiosk.seed` (pública) grava rascunho em `db['pendentes'][kioskCode]`
+   (`{kioskCode, nome, pdvNome, machineId, criadoEm, atualizadoEm}`).
+   - Se a loja **já existe** com aquele código → `{ok, jaRegistrado:true}`
+     (não cria rascunho; o pair normal resolve).
+   - Não cria loja — senão o `kiosk.pair` casaria antes de o admin confirmar.
+   - Flag `wzSeedOk` (módulo `vendas.html`) garante **1 seed por boot** e é
+     também reenviada pelo hook de `KIOSK_NAO_EMPARELELHADO` em
+     `emparelharKiosk`.
+2. **Portal** (`admin.html`, `modalNovaLoja`): admin cola **só o código**
+   (`lojas.save {kioskCode}` sem `id`/`nome`) → caminho código-only do
+   `lojas.save` resolve nome/pdv/máquina no rascunho, gera
+   `id = slugLoja(nome)` (`royal-plaza`, `-2`, `-3`…), grava
+   `pareamento {pdvNome, machineId, emparelhadoEm}` na hora e **apaga o
+   rascunho** → `{ok, loja, criada:true}` → `modalPareamentoConcluido`.
+   - Sem rascunho → `RASCUNHO_NAO_ENCONTRADO` (404) → admin cai no form
+     completo (caminho manual ID+Nome, que também consome o rascunho se o
+     código bater).
+   - Máquina já pareada em outra loja → `MAQUINA_JA_EMPARELHADA` (409).
+3. **PDV** vê o pair ok (hook em `emparelharKiosk`: `_wz.etapa===2 → 3`) e
+   espera a equipe (`portalApi.equipe()` a cada 5s) → etapa 4 → login normal
+   → abertura de caixa. Mensagem "Pareamento concluído — cadastre os
+   funcionários" aparece **nos dois lados** (PDV etapa 3 + modal no portal).
+4. "Pular" (`#wz-skip`) fecha **só nesta sessão**; o loop de 30s do pair
+   continua.
+
 ## Payload de `pedido.push`
 
 Mapeamento canônico está em `shared/api/portalSync.js:32` (`montarPedidoPortal`). O sidecar entrega o pedido **cru**:
@@ -123,9 +156,9 @@ reenviado depois — é isso que faz a venda do dia sair quando a internet volta
 - Resposta do **sidecar** é `{success:...}`; exceto `/api/health` que é
   `{ok:true}`. Resposta do **portal** é `{ok:...}`.
 - `natalApi.api()` (`natalApi.js`) **ignora HTTP status** e não tem timeout/retry.
-- Ações do portal: públicas `health, login, equipe, precos, kiosk.pair,
-  vendas.push, pedido.push, auditoria.push`; admin (token) as demais
-  (`api.php` — procurar `ACAO_DESCONHECIDA`).
+- Ações do portal: públicas `health, login, equipe, precos, kiosk.seed,
+  kiosk.pair, vendas.push, pedido.push, auditoria.push`; admin (token) as
+  demais (`api.php` — procurar `ACAO_DESCONHECIDA`).
 - **O portal publicado (maxxfoto.com.br) pode estar defasado** em relação ao
   `backend/api.php` deste repo (ex.: autorização por machineId, `lojaNome`) —
   em produção de erro estranho, conferir a versão publicada antes de caçar bug

@@ -34,6 +34,13 @@ async function post(action, data = {}) {
 }
 
 const portalApi = {
+  // Wizard de 1º uso: registra o NOME DO LOCAL no portal antes de existir
+  // loja lá (rascunho por código). O admin depois cola o mesmo código no
+  // "Nova loja" do portal e a loja nasce com este nome + pareamento pronto.
+  seed({ kioskCode = '', nome = '', pdvNome = '', machineId = '' } = {}) {
+    return post('kiosk.seed', { kioskCode, nome, pdvNome, machineId });
+  },
+
   // Emparelha este kiosk com a loja no portal. O kiosk envia o código que
   // aparece na tela dele (gerado e persistido localmente — zero config
   // manual); o portal devolve a loja canônica. Depois de pairar, login/equipe

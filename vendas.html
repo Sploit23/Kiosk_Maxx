@@ -244,6 +244,55 @@
   .sales-eye:hover{border-color:var(--gold-500);}
   .sales-eye.revealed{color:var(--gold-300);font-weight:700;border-color:var(--gold-500);}
 
+  /* ---- WIZARD DE 1º USO ---- */
+  .wizard-overlay{
+    position:fixed;inset:0;z-index:240; /* acima do login (200), abaixo do ⚙ (260) */
+    background:
+      radial-gradient(circle at 30% 20%, rgba(212,162,76,.10), transparent 45%),
+      radial-gradient(circle at 75% 80%, rgba(108,155,209,.08), transparent 40%),
+      var(--navy-950);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .wizard-overlay.hidden{display:none;}
+  .wz-box{
+    width:480px;max-width:92vw;text-align:center;
+    background:var(--navy-900);border:1px solid var(--navy-line);
+    border-radius:18px;padding:34px 34px 26px;box-shadow:var(--shadow-lift);
+  }
+  .wz-dots{display:flex;gap:7px;justify-content:center;margin-bottom:18px;}
+  .wz-dot{width:24px;height:5px;border-radius:3px;background:var(--navy-700);transition:background .2s;}
+  .wz-dot.on{background:var(--gold-500);}
+  .wz-dot.done{background:var(--green-500);}
+  .wz-box h2{font-size:20px;color:var(--gold-050);margin:14px 0 6px;}
+  .wz-sub{font-size:13px;color:var(--slate-400);line-height:1.6;margin:0 0 20px;}
+  .wz-sub b{color:var(--cream-100);}
+  .wz-input{
+    width:100%;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);
+    border-radius:10px;padding:15px 16px;font-size:17px;text-align:center;margin-bottom:16px;
+  }
+  .wz-input:focus{outline:none;border-color:var(--gold-500);}
+  .wz-code{
+    font-family:ui-monospace,Consolas,monospace;font-size:34px;font-weight:700;letter-spacing:5px;
+    color:var(--gold-300);background:var(--navy-850);border:1px dashed var(--gold-500);
+    border-radius:12px;padding:20px 14px;margin:0 0 16px;
+  }
+  .wz-status{font-size:12.5px;color:var(--slate-400);min-height:18px;margin:0 0 14px;line-height:1.55;}
+  .wz-status .spin{
+    display:inline-block;width:11px;height:11px;border:2px solid var(--navy-700);border-top-color:var(--gold-500);
+    border-radius:50%;animation:wzspin .8s linear infinite;vertical-align:-1px;margin-right:6px;
+  }
+  @keyframes wzspin{to{transform:rotate(360deg);}}
+  .wz-status.ok{color:var(--green-500);}
+  .wz-status.warn{color:var(--amber-500);}
+  .wz-foot{margin-top:16px;padding-top:12px;border-top:1px dashed var(--navy-line);}
+  .wz-skip{background:none;border:none;color:var(--slate-500);font-size:12px;cursor:pointer;font-family:inherit;padding:4px 8px;}
+  .wz-skip:hover{color:var(--gold-300);}
+  .wz-check{
+    width:58px;height:58px;line-height:58px;margin:6px auto 14px;border-radius:50%;
+    background:rgba(79,174,127,.14);border:1px solid rgba(79,174,127,.45);
+    color:var(--green-500);font-size:27px;font-weight:700;
+  }
+
   /* ---------- SCREENS ---------- */
   .screen{
     height:calc(100% - 56px);
@@ -1032,6 +1081,16 @@
     </div>
     <p class="login-error" id="login-error"></p>
     <p class="login-kiosk" id="login-kiosk">🖥️ Código do kiosk: <b id="kiosk-code-el">—</b><br><span id="kiosk-pair-st"></span></p>
+  </div>
+</div>
+
+<!-- ============ WIZARD DE 1º USO (só quando o local ainda não tem nome) ============ -->
+<div class="wizard-overlay hidden" id="wizard-overlay">
+  <div class="wz-box">
+    <div class="login-mark">M</div>
+    <div class="wz-dots" id="wz-dots"></div>
+    <div id="wz-content"></div>
+    <div class="wz-foot"><button class="wz-skip" id="wz-skip" type="button">Pular por enquanto</button></div>
   </div>
 </div>
 
@@ -1945,10 +2004,16 @@ async function emparelharKiosk(){
       publicarIdentidade();
       console.log('[pair] kiosk autorizado:', res.loja.id, res.pareamento);
       carregarEquipe().then(() => renderLoginUsers());
+      if(_wz.ativo && _wz.etapa === 2) wzIr(3); // wizard: pareou → próxima etapa
       agendarSincronizacao(1500); // manda o que estiver pendente assim que liberar
       carregarPrecosPortal();
     } else if(res && !res.offline && res.error && res.error !== 'KIOSK_NAO_EMPARELELHADO'){
       console.warn('[pair] falha:', res.error);
+    } else if(res && !res.offline && res.error === 'KIOSK_NAO_EMPARELELHADO'){
+      /* Portal acessível mas a loja ainda não existe: garante que o NOME
+         digitado no 1º uso esteja registrado (rascunho) para o admin criar
+         a loja colando só o código. Um envio por boot — wzSeedOk evita loop. */
+      if(!wzSeedOk && _identidade && _identidade.lojaNome) wzEnviarSeed();
     }
   }catch(e){ console.warn('[pair]', e); }
   atualizarKioskUI();
@@ -1959,8 +2024,152 @@ garantirIdentidade().then(async () => {
   try{
     const cfg = await natalApi.getConfig().catch(()=>({}));
     if(cfg && String(cfg.logoTexto || '').trim()) logoTexto = String(cfg.logoTexto).trim();
+    // Wizard de 1º uso: máquina sem NOME DO LOCAL e sem pareamento → assistente.
+    if(cfg && cfg.machineId && !String(cfg.lojaNome || '').trim()
+       && !(window.kioskPair && window.kioskPair.ok)){
+      setTimeout(() => { if(!(window.kioskPair && window.kioskPair.ok)) wzAbrir(); }, 700);
+    }
   }catch{ }
 }).catch(()=>{});
+
+/* ═══════════════════════════════════════════════════════════════════════
+   WIZARD DE 1º USO — só quando a máquina ainda não tem NOME DO LOCAL.
+   1) nome do local → grava no sidecar + registra no portal (kiosk.seed)
+   2) mostra o CÓDIGO DE PAREAMENTO e espera o admin criar a loja no portal
+   3) pareamento ok → espera o admin cadastrar os colaboradores
+   4) equipe visível → encerra e cai no login normal (→ abertura de caixa)
+   "Pular" fecha só nesta sessão; o loop de 30s do pair continua sozinho.
+   ═══════════════════════════════════════════════════════════════════════ */
+const _wz = { ativo: false, etapa: 0, tent: 0, timer: 0 };
+let wzSeedOk = false; // nome já aceito pelo portal (ou loja já existente)
+
+function wzStatus(html, cls){
+  const el = document.getElementById('wz-status');
+  if(el){ el.className = 'wz-status' + (cls ? ' ' + cls : ''); el.innerHTML = html; }
+}
+function wzDots(){
+  const el = document.getElementById('wz-dots');
+  if(el) el.innerHTML = [1,2,3,4].map(n =>
+    '<span class="wz-dot' + (_wz.etapa > n ? ' done' : _wz.etapa === n ? ' on' : '') + '"></span>').join('');
+}
+function wzFechar(){
+  _wz.ativo = false;
+  if(_wz.timer){ clearInterval(_wz.timer); _wz.timer = 0; }
+  document.getElementById('wizard-overlay').classList.add('hidden');
+}
+function wzAbrir(){
+  if(_wz.ativo) return;
+  _wz.ativo = true; _wz.etapa = 1; _wz.tent = 0;
+  document.getElementById('wizard-overlay').classList.remove('hidden');
+  wzRender();
+  _wz.timer = setInterval(wzTick, 5000);
+}
+function wzIr(etapa){
+  _wz.etapa = etapa;
+  wzRender();
+  if(etapa >= 2) setTimeout(wzTick, 0); // não espera 5s pra primeira tentativa
+}
+function wzRender(){
+  wzDots();
+  const box = document.getElementById('wz-content');
+  if(!box) return;
+  if(_wz.etapa === 1){
+    box.innerHTML =
+      '<h2>Bem-vindo! Como se chama este local?</h2>' +
+      '<p class="wz-sub">O nome identifica a loja no portal de gestão e no cabeçalho do PDV. Depois você pode mudar no <b>⚙ Config</b>.</p>' +
+      '<input class="wz-input" id="wz-nome" type="text" maxlength="60" placeholder="ex.: Royal Plaza" autocomplete="off">' +
+      '<p class="wz-status" id="wz-status"></p>' +
+      '<button class="btn-primary" id="wz-avanca">Salvar e continuar</button>';
+    const inp = document.getElementById('wz-nome');
+    inp.addEventListener('keydown', e => { if(e.key === 'Enter') wzSalvarNome(); });
+    document.getElementById('wz-avanca').addEventListener('click', wzSalvarNome);
+    setTimeout(() => inp.focus(), 80);
+  } else if(_wz.etapa === 2){
+    const id = _identidade || {};
+    box.innerHTML =
+      '<h2>Código de pareamento</h2>' +
+      '<p class="wz-sub">No portal, abra <b>Lojas → + Nova loja</b> e cole este código. A loja é criada com o nome que você digitou.</p>' +
+      '<div class="wz-code">' + (formatarCodigoKiosk(id.kioskCode) || '—') + '</div>' +
+      '<p class="wz-status" id="wz-status"><span class="spin"></span>Registrando o nome no portal…</p>';
+  } else if(_wz.etapa === 3){
+    box.innerHTML =
+      '<div class="wz-check">✔</div>' +
+      '<h2>Pareamento concluído</h2>' +
+      '<p class="wz-sub">Agora cadastre os <b>funcionários</b> deste local no portal: <b>Colaboradores → + Novo colaborador</b>. Eles aparecem aqui sozinhos.</p>' +
+      '<p class="wz-status" id="wz-status"><span class="spin"></span>Aguardando a equipe no portal…</p>';
+  } else {
+    box.innerHTML =
+      '<div class="wz-check">✔</div>' +
+      '<h2>Tudo pronto!</h2>' +
+      '<p class="wz-sub">Os colaboradores deste local já estão no login. Você pode abrir o caixa e começar a vender.</p>' +
+      '<button class="btn-primary" id="wz-entrar">Entrar</button>';
+    document.getElementById('wz-entrar').addEventListener('click', () => { wzFechar(); });
+  }
+}
+async function wzSalvarNome(){
+  const inp = document.getElementById('wz-nome');
+  const btn = document.getElementById('wz-avanca');
+  const nome = (inp ? inp.value : '').trim();
+  if(!nome){ wzStatus('Digite o nome do local para continuar.', 'warn'); return; }
+  if(btn) btn.disabled = true;
+  try{ await natalApi.saveConfig({ lojaNome: nome }); }catch{ /* sidecar fora — identidade local já aponta o nome */ }
+  if(!_identidade) _identidade = {};
+  _identidade.lojaNome = nome;
+  publicarIdentidade();
+  atualizarLojaHeader();
+  atualizarKioskUI();
+  console.log('[wz] nome do local gravado:', nome);
+  wzIr(2);
+}
+async function wzEnviarSeed(){
+  const id = _identidade || {};
+  if(!id.kioskCode || !id.lojaNome) return false;
+  try{
+    const res = await portalApi.seed({
+      kioskCode: id.kioskCode,
+      nome: id.lojaNome,
+      pdvNome: id.pdvNome || '',
+      machineId: id.machineId || '',
+    });
+    if(res && res.ok){
+      wzSeedOk = true;
+      console.log('[wz] seed ok:', id.kioskCode, res.jaRegistrado ? '(loja já existe)' : '');
+      return true;
+    }
+    if(res && res.offline){
+      wzStatus('<span class="spin"></span>Sem conexão — o nome será enviado quando a rede voltar.', 'warn');
+    } else if(res && res.error){
+      wzStatus('Portal respondeu: ' + String(res.error).split(':')[0] + ' — tentando de novo…', 'warn');
+    }
+  }catch{ /* retry no próximo tick */ }
+  return false;
+}
+async function wzChecarEquipe(){
+  const res = await portalApi.equipe();
+  const lista = (res && res.ok && Array.isArray(res.usuarios)) ? res.usuarios.filter(u => u.ativo !== false) : [];
+  if(lista.length){
+    await carregarEquipe();
+    renderLoginUsers();
+    wzIr(4);
+    return;
+  }
+  _wz.tent++;
+  wzStatus('<span class="spin"></span>Aguardando a equipe no portal — cadastre em <b>Colaboradores</b> (tentativa ' + _wz.tent + ')');
+}
+async function wzTick(){
+  if(!_wz.ativo) return;
+  if(_wz.etapa === 2){
+    if(window.kioskPair && window.kioskPair.ok){ wzIr(3); return; }
+    if(!wzSeedOk) await wzEnviarSeed();
+    if(wzSeedOk){
+      wzStatus('<span class="spin"></span>Nome registrado — aguardando o admin criar a loja no portal com este código…', 'ok');
+      emparelharKiosk();
+    }
+  } else if(_wz.etapa === 3){
+    if(!window.kioskPair || !window.kioskPair.ok){ wzIr(2); return; } // perdeu pareamento
+    wzChecarEquipe();
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════════════════
    SYNC PDV → PORTAL — OFFLINE-FIRST (fila durável no sidecar)
@@ -5869,6 +6078,10 @@ async function INIT(){
   document.getElementById('login-entrar').addEventListener('click', ()=>tentarLogin(()=>loginSelecionado));
   document.getElementById('login-senha').addEventListener('keydown', e=>{
     if(e.key==='Enter') tentarLogin(()=>loginSelecionado);
+  });
+  document.getElementById('wz-skip').addEventListener('click', ()=>{
+    wzFechar(); // só nesta sessão — loja sem nome volta a mostrar no próximo boot
+    toast('Assistente pulado — configure depois em ⚙ Config');
   });
   let isFullscreen = true; // o app abre em tela cheia — o botão serve pra sair/voltar
   const btnFullscreen = document.getElementById('btn-fullscreen');
