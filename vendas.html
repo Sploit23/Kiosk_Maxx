@@ -1141,7 +1141,6 @@
     <div class="op-chip sales-eye" id="sales-eye">
       <span id="sales-eye-icon">👁️</span> <span id="sales-eye-value">Vendas de hoje</span>
     </div>
-    <div class="op-chip sync-chip sync-ok" id="sync-chip" title="Sincronização com o portal">● Sincronizado</div>
     <div class="op-chip" id="ribbon-chip">🖨️ Ribbon: — un.</div>
     <button class="op-chip op-chip-btn" id="user-chip">👤 —</button>
     <button class="op-chip op-chip-btn" id="btn-config" title="Configurações">⚙</button>
@@ -4487,9 +4486,14 @@ async function showConfigModal(){
       <div><div class="modal-step-label">Configurações</div><h3>Painel do PDV</h3></div>
       <button class="modal-close" onclick="closeModal()">×</button>
     </div>
-    <p class="modal-sub">Configurações desta máquina. As alterações são salvas no sidecar local.</p>
+    <p class="modal-sub">Sincronize os envios ou ajuste as configurações desta máquina.</p>
 
-    <div style="margin-top:14px;">
+    <div style="display:flex;gap:6px;margin-top:14px;border-bottom:1px solid var(--navy-line);padding-bottom:0;">
+      <button type="button" data-cfg-tab="sync" style="padding:9px 16px;border:1px solid var(--navy-line);border-bottom:none;border-radius:8px 8px 0 0;background:var(--navy-800);color:var(--slate-200);font-size:12.5px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">Sincronizar</button>
+      <button type="button" data-cfg-tab="system" style="padding:9px 16px;border:1px solid var(--navy-line);border-bottom:none;border-radius:8px 8px 0 0;background:transparent;color:var(--slate-300);font-size:12.5px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">🔒 Sistema</button>
+    </div>
+
+    <div data-cfg-sec="system" style="margin-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Pasta de fotos</div>
       <div style="display:flex;gap:8px;align-items:center;">
         <input id="cfg-folder" type="text" value="${folder.replace(/"/g,'&quot;')}"
@@ -4500,7 +4504,7 @@ async function showConfigModal(){
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Onde o software do fotógrafo salva as fotos nesta máquina.</div>
     </div>
 
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Logo do shopping</div>
       <input id="cfg-logo" type="text" value="${logoTextoEsc}"
         placeholder="SHOPPING PALLADIUM"
@@ -4508,7 +4512,7 @@ async function showConfigModal(){
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Escrita na frente das fotos quando a opção "Incluir logo do shopping" estiver marcada no enquadramento.</div>
     </div>
 
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Status da impressora</div>
       <div style="display:flex;gap:18px;align-items:baseline;flex-wrap:wrap;">
         <div>
@@ -4527,7 +4531,7 @@ async function showConfigModal(){
       </div>
     </div>
 
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Fila de impressão</div>
       ${filaJobs.length===0
         ? `<div style="font-size:12px;color:var(--slate-500);">Nenhuma impressão pendente.</div>`
@@ -4551,7 +4555,7 @@ async function showConfigModal(){
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Impressões aguardando a impressora ficam nesta fila e retomam sozinhas. Limpar remove o pedido da fila (não cancela a venda).</div>
     </div>
 
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Loja desta máquina</div>
       <div style="display:flex;gap:8px;">
         <input id="cfg-loja-id" type="text" value="${String(cfg.lojaId||'').replace(/"/g,'&quot;')}" placeholder="id da loja (ex.: teste)"
@@ -4562,7 +4566,7 @@ async function showConfigModal(){
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">A loja é definida AQUI no app (offline-first). É esse id que os envios ao portal usam — o portal só autoriza a máquina, não muda a loja.</div>
     </div>
 
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Emparelhamento com o portal</div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span style="font-size:16px;font-weight:800;color:var(--gold-300);font-family:ui-monospace,Consolas,monospace;letter-spacing:3px;">${kk}</span>
@@ -4573,7 +4577,7 @@ async function showConfigModal(){
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Informe este código na loja do portal de gestão (campo "código do kiosk"). O PDV reconhece sozinho a cada 30s.</div>
     </div>
 
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+    <div data-cfg-sec="sync" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Sincronização com o portal</div>
       <div id="cfg-sync-info" style="font-size:12px;color:var(--slate-300);margin-bottom:8px;">—</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -4583,13 +4587,13 @@ async function showConfigModal(){
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Vendas, pedidos e auditoria feitos offline ficam numa fila local e vão ao portal sozinhos quando a internet voltar (o portal aceita reenvio sem duplicar).</div>
     </div>
 
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+    <div data-cfg-sec="sync" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Envio digital (fotos no celular)</div>
       <div id="cfg-digital-list" style="display:flex;flex-direction:column;gap:8px;"></div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Vendeu com o PC sem internet? As fotos ficam guardadas aqui. Quando a internet voltar, toque em <b>Sincronizar</b> para subir na hora.</div>
     </div>
 
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Versão e atualização</div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span style="font-size:13px;color:var(--slate-300);">Versão instalada: <b style="color:var(--gold-300);">v${versaoAtual||'—'}</b></span>
@@ -4599,7 +4603,7 @@ async function showConfigModal(){
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">O PDV verifica sozinho no boot e a cada 60s ocioso. Quando houver nova versão, aparece o aviso na tela com "Instalar agora".</div>
     </div>
 
-    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Manutenção</div>
       <div style="font-size:12px;color:var(--slate-400);margin-bottom:8px;">
         Zera os dados de teste desta máquina (sessões e fotos, pedidos, caixa, fila de impressão,
@@ -4609,11 +4613,42 @@ async function showConfigModal(){
       <button id="cfg-limpar" style="padding:10px 16px;border:1px solid var(--red-400);border-radius:8px;background:transparent;color:var(--red-400);font-size:13px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">🧹 Limpar dados</button>
     </div>
 
-    <div class="modal-actions" style="margin-top:20px;">
+    <div class="modal-actions" data-cfg-sec="system" style="margin-top:20px;">
       <button class="btn btn-primary" id="cfg-save"
         style="background:var(--green-500);color:var(--navy-950);border:none;padding:10px 28px;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;">Salvar</button>
     </div>
   `);
+
+  // Abas: "Sincronizar" (qualquer operador) e "Sistema" (senha do administrador).
+  // A senha é só uma trava de UI: as configurações reais ficam atrás dela para o
+  // operador não mexer em pasta/loja/impressora/manutenção sem querer.
+  const SENHA_CFG_SISTEMA = '8694';
+  let cfgUnlocked = false;
+  const cfgTabBtns = [...document.querySelectorAll('[data-cfg-tab]')];
+  const cfgSecs = [...document.querySelectorAll('[data-cfg-sec]')];
+  const ativarCfgTab = (tab)=>{
+    cfgTabBtns.forEach(b => {
+      const on = b.getAttribute('data-cfg-tab') === tab;
+      b.style.background = on ? 'var(--navy-800)' : 'transparent';
+      b.style.color = on ? 'var(--slate-200)' : 'var(--slate-300)';
+      b.style.borderColor = on ? 'var(--gold-500)' : 'var(--navy-line)';
+      b.style.boxShadow = on ? 'inset 0 -2px 0 var(--gold-500)' : 'none';
+    });
+    cfgSecs.forEach(s => { s.style.display = (s.getAttribute('data-cfg-sec') === tab) ? '' : 'none'; });
+  };
+  cfgTabBtns.forEach(btn => {
+    btn.onclick = ()=>{
+      const tab = btn.getAttribute('data-cfg-tab');
+      if(tab === 'system' && !cfgUnlocked){
+        const senha = window.prompt('Senha de administrador para abrir as configurações do sistema:');
+        if(senha == null) return;
+        if(String(senha).trim() !== SENHA_CFG_SISTEMA){ toast('⚠ Senha incorreta'); return; }
+        cfgUnlocked = true;
+      }
+      ativarCfgTab(tab);
+    };
+  });
+  ativarCfgTab('sync');
 
   document.getElementById('cfg-browse').onclick = async ()=>{
     try{

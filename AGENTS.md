@@ -402,8 +402,9 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   ~4s após o boot, `setInterval` de 5 min, eventos SSE, botão "Sincronizar
   agora" do ⚙ e logo após venda/caixa. `enviados-portal.json` impede reenvio
   já confirmado; para reenviar de propósito use "Limpar fila de envio" (⚙,
-  senha `HCss221087`) ou `POST /api/portal/enviados/limpar`. O chip da topbar
-  (`#sync-chip`) mostra o estado: sincronizado / N pendente(s) / sincronizando.
+  senha `HCss221087`) ou `POST /api/portal/enviados/limpar`. A topbar **não**
+  mostra mais pendências (`#sync-chip` removido); o estado aparece só no ⚙
+  Config → aba **Sincronizar** (pendentes / sincronizando).
 - **Sync pedido-a-pedido → portal (`vendas.html`)** — no mesmo tick do snapshot,
   o PDV envia cada pedido completo via `pedido.push` (`enviarPedidosDia` →
   `portalApi.pedidoPush` em `shared/api/portalApi.js`): no 1º boot emparelhado
@@ -426,13 +427,19 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   guarda `{ pdvNome, photosFolder, thermalPrinterName, machineId, lojaId,
   lojaNome, pairingCode }` via `GET/POST /api/config`; a UI salva também no
   `electron-config.json`.
-- **Botão ⚙ Config** (`vendas.html`) — abre modal com seletor de pasta nativa
-  (IPC `natal:selectFolder` → `dialog.showOpenDialog`) + status real da
-  impressora (10x15/15x20, connected, lastError) + seção "Loja desta máquina"
-  (`lojaId`/`lojaNome`) + painel "Sincronização com o portal" (pendentes,
-  "Sincronizar agora", "Limpar fila de envio") + painel "Envio digital" com um
-  botão **Sincronizar** por código pendente (força o upload na hora em que a
-  internet volta; o worker de 60s continua de fallback), e salva nos dois lugares.
+- **Botão ⚙ Config** (`vendas.html`) — modal `showConfigModal()` com **2 abas**:
+  **Sincronizar** (aberta por padrão, qualquer operador) = painel "Sincronização
+  com o portal" (pendentes, "Sincronizar agora", "Limpar fila de envio") +
+  painel "Envio digital" com um botão **Sincronizar** por código pendente (força
+  o upload na hora em que a internet volta; o worker de 60s continua de
+  fallback); **🔒 Sistema** (exige senha **`8694`** via `window.prompt`,
+  `SENHA_CFG_SISTEMA`) = pasta de fotos nativa (IPC `natal:selectFolder` →
+  `dialog.showOpenDialog`), logo do shopping, status real da impressora
+  (10x15/15x20, connected, lastError), fila de impressão, "Loja desta máquina"
+  (`lojaId`/`lojaNome`), emparelhamento/kioskCode, versão/atualização,
+  manutenção ("Limpar dados") e o botão **Salvar** (grava nos dois lugares). O
+  desbloqueio vale só enquanto o modal está aberto. As seções são marcadas com
+  `data-cfg-sec="sync|system"` e as abas com `data-cfg-tab`.
 - **Importador de pasta de fotos** (`natal-core.cjs`) — regra da drop zone em
   `photosFolder`: **1 subpasta = 1 sessão**. O programa externo cria uma
   subpasta por cliente e salva `*.jpg|*.jpeg|*.png` nela; o sidecar escaneia a
