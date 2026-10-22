@@ -224,8 +224,14 @@ function setMachineConfig(partial) {
 // conteúdo mudar.
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png']);
 const SKIP_TAILS = ['.part', '.tmp', '.crdownload', '.download'];
-const PHOTOS_POLL_MS = 1500;
-const PHOTOS_SETTLE_MS = 8000;
+// Reação rápida na chegada das fotos: varre a cada 900ms e importa com 3s
+// sem mudança (antes 1500/8000 — dava 5-6s de atraso aparente). Segurança
+// continua a mesma: qualquer troca de tamanho zera o cronômetro, arquivos
+// <1KB ou com cauda .part/.tmp são ignorados, e a JANELA SÓ GARANTE que a
+// cópia terminou — não mexe em qualidade: original entra byte a byte,
+// preview é normalizado e a impressão usa o original a 300 DPI na venda.
+const PHOTOS_POLL_MS = 900;
+const PHOTOS_SETTLE_MS = 3000;
 let photosWatcherTimer = null;
 let dropState = new Map(); // subpasta -> { first, lastChange, names: {nome:size} }
 let importingLock = false;
