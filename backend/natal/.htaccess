@@ -1,0 +1,12 @@
+Options -Indexes
+DirectoryIndex index.php
+
+<IfModule mod_headers.c>
+    <FilesMatch "\.(php)$">
+        Header set Cache-Control "no-store, max-age=0, must-revalidate"
+    </FilesMatch>
+</IfModule>
+
+<IfModule mod_expires.c>
+    ExpiresActive Off
+</IfModule>

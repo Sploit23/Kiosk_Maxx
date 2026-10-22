@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('natal', {
     thermalPrinterName: config.thermalPrinterName,
     pdvNome: config.pdvNome,
     portalApiUrl: config.portalApiUrl,
+    galeriaNatalUrl: config.galeriaNatalUrl || '',
     lojaId: config.lojaId,
     lojaNome: config.lojaNome || '',
     pairingCode: config.pairingCode || '',

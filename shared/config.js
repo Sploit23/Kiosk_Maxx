@@ -14,6 +14,8 @@ const DEFAULTS = {
   pdvNome: '',
   // Backend de cadastro (portal de gestão) publicado na web.
   portalApiUrl: 'https://maxxfoto.com.br/natalcontroler/api.php',
+  // Página pública onde o cliente digita o código e baixa as fotos digitais.
+  galeriaNatalUrl: 'https://maxxfoto.com.br/natal',
   // ID da loja/kiosk no portal (define o time de vendedores/fotógrafos).
   lojaId: 'teste',
   // Nome exibido da loja (definido no app no ⚙ Config — offline-first).
@@ -41,6 +43,7 @@ function resolveConfig() {
       thermalPrinterName: cfg.thermalPrinterName || DEFAULTS.thermalPrinterName,
       pdvNome: cfg.pdvNome || DEFAULTS.pdvNome,
       portalApiUrl: cfg.portalApiUrl || DEFAULTS.portalApiUrl,
+      galeriaNatalUrl: cfg.galeriaNatalUrl || DEFAULTS.galeriaNatalUrl,
       lojaId: cfg.lojaId || DEFAULTS.lojaId,
       lojaNome: cfg.lojaNome || DEFAULTS.lojaNome,
       pairingCode: cfg.pairingCode || DEFAULTS.pairingCode,
@@ -150,8 +153,10 @@ const PRICING = {
   'porta-retrato-10x15': { base: 35.0, bulk: null, bulkThreshold: null },
   'porta-retrato-15x20': { base: 50.0, bulk: null, bulkThreshold: null },
   ima: { base: 10.0, bulk: null, bulkThreshold: null },
-  'item-encarte': { base: 15.0, bulk: null, bulkThreshold: null },
-  'porta-cartao-postal': { base: 12.0, bulk: null, bulkThreshold: null },
+    'item-encarte': { base: 15.0, bulk: null, bulkThreshold: null },
+    'porta-cartao-postal': { base: 12.0, bulk: null, bulkThreshold: null },
+    // envio digital (produto): a foto escolhida vai para a galeria /natal por código
+    'foto-digital': { base: 10.0, bulk: null, bulkThreshold: null },
   // combos
   combo1: { base: 45.0, bulk: null, bulkThreshold: null },
   combo2: { base: 65.0, bulk: null, bulkThreshold: null },
@@ -238,6 +243,7 @@ const config = {
   thermalPrinterName: env.thermalPrinterName,
   pdvNome: env.pdvNome,
   portalApiUrl: env.portalApiUrl,
+  galeriaNatalUrl: env.galeriaNatalUrl,
   lojaId: env.lojaId,
   pairingCode: env.pairingCode,
   photosFolder: env.photosFolder || '',

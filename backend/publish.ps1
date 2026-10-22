@@ -3,9 +3,18 @@
 $ErrorActionPreference = 'Stop'
 
 $self = $PSScriptRoot
-$credFile = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'credencial.txt'
-if (-not (Test-Path -LiteralPath $credFile)) {
-    Write-Error "credencial.txt nao encontrado em $credFile"
+$raiz = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$credCandidates = @(
+    (Join-Path $raiz 'credencial.txt'),
+    (Join-Path $raiz 'credencial\credencial.txt'),
+    (Join-Path $self 'credencial.txt')
+)
+$credFile = $null
+foreach ($c in $credCandidates) {
+    if (Test-Path -LiteralPath $c) { $credFile = $c; break }
+}
+if (-not $credFile) {
+    Write-Error "credencial.txt nao encontrado (procurei em: $($credCandidates -join ' | '))"
 }
 
 $fields = @{}
@@ -51,8 +60,37 @@ if ($failed) {
     exit 1
 }
 
+# ── Pagina publica /natal (envio digital) ────────────────────
+# Sobe para a pasta irma da natalcontroler (ex.: /public_html/natal).
+$natalLocal = Join-Path $self 'natal'
+$natalFolder = ($folder -replace 'natalcontroler/?$', 'natal')
+if ((Test-Path -LiteralPath $natalLocal) -and ($natalFolder -ne $folder)) {
+    $natalFiles = @('index.php', '.htaccess', 'fotos/.htaccess')
+    foreach ($f in $natalFiles) {
+        $local = Join-Path $natalLocal $f
+        if (-not (Test-Path -LiteralPath $local)) { Write-Host "AVISO: $local nao existe (ignorado)"; continue }
+        $dest = "ftp://$($fields.host)/$natalFolder/$f"
+        Write-Host "-> $dest"
+        & curl.exe --silent --show-error --ftp-create-dirs --user "$($fields.user):$($fields.pass)" -T $local $dest
+        if ($LASTEXITCODE -ne 0) {
+            $failed = $true
+            Write-Host "ERRO ao enviar natal/$f (exit $LASTEXITCODE)"
+        }
+        else {
+            Write-Host "OK  natal/$f"
+        }
+    }
+}
+
+if ($failed) {
+    Write-Host ''
+    Write-Host 'Publicacao com erros. Verifique o FTP.'
+    exit 1
+}
+
 Write-Host ''
 Write-Host 'Publicacao concluida.'
 Write-Host 'Portal: https://maxxfoto.com.br/natalcontroler/admin.html'
 Write-Host 'API   : https://maxxfoto.com.br/natalcontroler/api.php?action=health'
+Write-Host 'Envio : https://maxxfoto.com.br/natal'
 exit 0

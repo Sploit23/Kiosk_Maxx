@@ -166,6 +166,24 @@
   .sync-chip.sync-ok{border-color:var(--green-500);color:var(--green-300);}
   .sync-chip.sync-warn{border-color:var(--amber-500);color:var(--amber-500);background:rgba(217,169,6,.10);}
   .sync-chip.sync-busy{border-color:var(--gold-500);color:var(--gold-300);animation:blink 1s infinite;}
+  /* envio digital (QR da galeria /natal) */
+  .digital-box{
+    display:flex;gap:14px;align-items:center;text-align:left;
+    background:var(--navy-900);border:1px solid var(--gold-500);
+    border-radius:12px;padding:12px;
+  }
+  .digital-box .qr{background:#fff;border-radius:8px;padding:6px;line-height:0;flex:0 0 auto;}
+  .digital-box .qr svg{width:126px;height:126px;display:block;}
+  .digital-box .qr-txt{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;}
+  .digital-box .leg{font-size:12.5px;color:var(--cream-100);font-weight:700;}
+  .digital-box .qr-code{
+    font-family:ui-monospace,Consolas,monospace;font-size:27px;font-weight:800;
+    letter-spacing:.18em;color:var(--gold-300);line-height:1.15;
+  }
+  .digital-box .qr-hint{font-size:11.5px;color:var(--slate-400);}
+  .digital-box .qr-hint b{color:var(--cream-100);}
+  .digital-box .qr-status{font-size:12px;color:var(--slate-300);margin-top:2px;}
+  .rc-digital{margin-top:10px;border-top:1px dashed var(--navy-line);padding-top:8px;}
   @keyframes blink { 50% { opacity: .25; } }
   .caixa-wrap{position:relative;}
   .caixa-fechado-destaque{
@@ -1365,6 +1383,7 @@ import portalApi from './shared/api/portalApi.js';
 import { connectSSE } from './shared/api/sse.js';
 import { numeroSessao } from './src/catalog.js';
 import { composePrintImage } from './shared/utils/printUtils.js';
+import { qrSvgTag } from './shared/utils/qr.js';
 import config from './shared/config.js';
 
 /* Erros globais (timers/SSE/callbacks fora de try) → terminal via bridge do main */
@@ -1404,6 +1423,7 @@ const EXTRAS = [
   {id:'porta-retrato-10x15', label:'Porta-retrato 10x15', preco:35},
   {id:'porta-retrato-15x20', label:'Porta-retrato 15x20', preco:50},
   {id:'ima', label:'Ímã de geladeira', preco:10, nota:'adicional a uma foto 10x15'},
+  {id:'foto-digital', label:'📲 Envio digital (foto)', preco:10, digital:true, nota:'a foto escolhida vai para o celular por código'},
 ];
 // "Item Encarte" e "Porta-cartão postal" são produtos físicos com estoque próprio (regra 3.2 do documento) —
 // nunca aparecem na fileira de extras, só existem dentro dos combos abaixo.
@@ -1755,6 +1775,7 @@ function mapearPedido(p){
     operador: p.operador || '—',
     origemPedidoId: p.origemPedidoId || null,
     guiaImpressa: !!p.guiaImpressa,
+    codigoDigital: p.codigoDigital || null,
     canceladoEm: p.canceladoEm ? new Date(p.canceladoEm) : null,
   };
 }
@@ -2481,6 +2502,7 @@ function montarPedidoPortal(p){
     caixaId: typeof caixaReal === 'object' && caixaReal && caixaReal.id ? caixaReal.id : '',
     origemPedidoId: p.origemPedidoId || null,
     guiaImpressa: !!p.guiaImpressa,
+    codigoDigital: p.codigoDigital || null,
   };
 }
 
@@ -2697,6 +2719,109 @@ async function iniciarImpressaoFotos(pedidoId, itens){
   }
 }
 
+/* ---------------- ENVIO DIGITAL (produto: foto no celular por código) ----------------
+   A foto escolhida (enquadramento atual) sobe para a galeria pública /natal
+   identificada por um CÓDIGO da venda (6 caracteres). No fim da venda o QR +
+   código aparecem no resumo; a página mostra SÓ as fotos daquele código. Sem
+   internet o sidecar segura numa fila durável e reenvia sozinho — a venda
+   nunca falha por causa do envio. */
+const CODIGO_DIGITAL_ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const CODIGO_DIGITAL_TAM = 6;
+
+function gerarCodigoDigital(){
+  const usados = new Set(pedidosRealizados.map(p => p.codigoDigital).filter(Boolean));
+  for(let tent = 0; tent < 20; tent++){
+    const bytes = new Uint8Array(CODIGO_DIGITAL_TAM);
+    crypto.getRandomValues(bytes);
+    let c = '';
+    for(let i = 0; i < CODIGO_DIGITAL_TAM; i++) c += CODIGO_DIGITAL_ALFABETO[bytes[i] % CODIGO_DIGITAL_ALFABETO.length];
+    if(!usados.has(c)) return c;
+  }
+  return 'X' + Date.now().toString(36).toUpperCase().slice(-5);
+}
+function urlNatal(codigo){
+  const base = String(config.galeriaNatalUrl || 'https://maxxfoto.com.br/natal').replace(/\/+$/, '');
+  return base + (codigo ? '/?c=' + encodeURIComponent(codigo) : '/');
+}
+function htmlQrDigital(codigo, titulo){
+  return `
+    <div class="qr">${qrSvgTag(urlNatal(codigo))}</div>
+    <div class="qr-txt">
+      <div class="leg">${titulo || '📲 Foto digital no seu celular'}</div>
+      <div class="qr-code">${codigo}</div>
+      <div class="qr-hint">Aponte a câmera ou acesse <b>${urlNatal('').replace(/^https?:\/\//, '').replace(/\/$/, '')}</b> e digite o código</div>
+      <div class="qr-status" data-status="${codigo}">Preparando…</div>
+    </div>`;
+}
+function statusDigitalTexto(d){
+  const fotos = Number(d && d.fotos) || 0;
+  const enviadas = Number(d && d.enviadas) || 0;
+  const pendentes = Math.max(0, fotos - enviadas);
+  if(d && d.manifestoEnviado) return `✅ ${fotos} foto${fotos === 1 ? '' : 's'} disponível${fotos === 1 ? '' : 'is'} no servidor`;
+  if(d && d.pendente) return `◌ ${pendentes || 1} foto${(pendentes || 1) === 1 ? '' : 's'} pendente${(pendentes || 1) === 1 ? '' : 's'} — sem internet. Envia sozinho quando a conexão voltar.`;
+  if(d && d.error) return `⚠ ${d.error}`;
+  return '⏳ Preparando o envio…';
+}
+function atualizarStatusDigital(codigo, dados){
+  document.querySelectorAll(`[data-status="${codigo}"]`).forEach(el => { el.textContent = statusDigitalTexto(dados); });
+}
+async function atualizarStatusDigitalRemoto(codigo){
+  try{
+    const f = await natalApi.galeriaFila();
+    const item = ((f && f.itens) || []).find(i => i.codigo === codigo);
+    if(item) atualizarStatusDigital(codigo, item);
+  }catch{ }
+}
+async function enviarDigitais(pedidoId, codigo, itens){
+  let enviadas = 0;
+  let erro = '';
+  const total = itens.length;
+  for(let i = 0; i < itens.length; i++){
+    const item = itens[i];
+    try{
+      const [sessId, fileName] = String(item.fotoSeed || '').split('/');
+      if(!sessId || !fileName) throw new Error('Foto sem referência');
+      const blob = await composePrintImage({
+        key: '10x15',
+        url: natalApi.fotoUrl(sessId, 'originais', fileName),
+        scale: item.zoom || 100, diffx: item.offX || 0, diffy: item.offY || 0,
+        angle: 0, orientation: item.orientation || 'paisagem',
+        pdv: true, single: true,
+      });
+      const up = await natalApi.enviarGaleria(codigo, i + 1, blob);
+      if(!up || (up.error && !up.salvo)) throw new Error((up && up.error) || 'Falha no envio');
+      enviadas++;
+      atualizarStatusDigital(codigo, { fotos: total, enviadas, ...up });
+    }catch(e){
+      erro = (e && e.message) || String(e);
+    }
+  }
+  try{
+    const fin = await natalApi.finalizarGaleria(codigo, { total, pedidoId });
+    if(fin && !fin.error){
+      atualizarStatusDigital(codigo, { ...fin, fotos: total, enviadas: fin.enviadas != null ? fin.enviadas : enviadas });
+    } else {
+      atualizarStatusDigital(codigo, { pendente: true, fotos: total, enviadas, error: erro });
+    }
+  }catch(e){
+    atualizarStatusDigital(codigo, { pendente: true, fotos: total, enviadas, error: erro || ((e && e.message) || String(e)) });
+  }
+  return { enviadas, total, erro };
+}
+function abrirQrDigital(codigo){
+  if(!codigo){ toast('⚠ Este pedido não tem envio digital'); return; }
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">Envio digital</div><h3>Código ${codigo}</h3></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="digital-box">${htmlQrDigital(codigo)}</div>
+    <p class="modal-sub" style="margin-top:12px;">No celular, acesse <b>${urlNatal('').replace(/^https?:\/\//, '').replace(/\/$/, '')}</b>, digite o código acima e baixe a foto.</p>
+    <button class="btn-secondary" style="width:100%;" onclick="closeModal()">Fechar</button>
+  `);
+  atualizarStatusDigitalRemoto(codigo);
+}
+
 async function finalizarVenda(){
   const total = cartTotal();
   const origemRealId = editingPedidoId
@@ -2710,6 +2835,13 @@ async function finalizarVenda(){
   closeCartDrawer();
   const pedidoId = novoPedido._realId || novoPedido.id;
   const itensResumo = [...cart];
+  const digitais = itensResumo.filter(c => c.produtoId === 'foto-digital');
+  const codigoDigital = digitais.length ? gerarCodigoDigital() : null;
+  if(codigoDigital){
+    novoPedido.codigoDigital = codigoDigital;
+    // Persiste no sidecar p/ reexibir o QR depois (Pedidos) e sobreviver a restart.
+    try{ natalApi.atualizarPedido(pedidoId, { codigoDigital }); }catch{ }
+  }
   const pagamentos = efetivoRows.map(r => r.forma + ': ' + fmt(r.valor)).join(' · ');
   const senhasResumo = [...new Set(cart.map(c => c.sessionSenha))];
 
@@ -2754,8 +2886,10 @@ async function finalizarVenda(){
         <div class="success-check">✓</div>
         <p>${fmt(total)} · originado do pedido ${pidOrigem}</p>
       </div>
+      ${codigoDigital ? `<div class="digital-box" style="margin-bottom:14px;">${htmlQrDigital(codigoDigital)}</div>` : ''}
       <button class="btn-primary" id="btn-voltar-apos-edicao">Voltar para Pedidos</button>
     `);
+    if(codigoDigital) enviarDigitais(pedidoId, codigoDigital, digitais);
     document.getElementById('btn-voltar-apos-edicao').addEventListener('click', () => {
       closeModal();
       document.getElementById('screen-venda').classList.remove('active');
@@ -2788,7 +2922,10 @@ async function finalizarVenda(){
       ${linhasResumo}
       <div class="rc-total"><span>Total</span><span>${fmt(total)}</span></div>
       <div class="rc-pay">Pago: ${pagamentos}</div>
+      ${codigoDigital ? `<div class="rc-digital"><div class="rc-line"><span>📲 Envio digital</span><span style="font-weight:800;letter-spacing:.12em;">${codigoDigital}</span></div><div class="rc-sub">Baixe em ${urlNatal('').replace(/^https?:\/\//, '').replace(/\/$/, '')} com este código</div></div>` : ''}
     </div>
+    ${codigoDigital ? `<div class="digital-box" style="margin-top:14px;">${htmlQrDigital(codigoDigital, '📲 Foto digital — mostre este QR para o cliente')}</div>
+      <button class="btn-secondary" id="btn-sync-digital" style="width:100%;margin-top:8px;">Sincronizar envio digital</button>` : ''}
     <button class="btn-primary resumo-action" id="btn-print-summary">🖨 Imprimir resumo</button>
     ${temFoto ? `<button id="btn-print-fotos" style="width:100%;margin-top:10px;padding:13px;border-radius:10px;border:1px solid var(--gold-400);background:linear-gradient(135deg,var(--gold-300),var(--gold-050));color:var(--navy-950);font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 3px 12px rgba(212,162,76,.35);">🖨️ Imprimir fotos na ASK-400</button>` : ''}
     <button class="btn-primary resumo-action" id="btn-nova-venda">Continuar vendendo nesta sessão</button>
@@ -2816,6 +2953,17 @@ async function finalizarVenda(){
   document.getElementById('btn-nova-venda').addEventListener('click', continuarVendendo);
   document.getElementById('btn-ir-painel').addEventListener('click', voltarPainel);
   document.getElementById('btn-close-summary').addEventListener('click', continuarVendendo);
+
+  if(codigoDigital){
+    const btnSync = document.getElementById('btn-sync-digital');
+    if(btnSync) btnSync.addEventListener('click', async ()=>{
+      toast('📲 Sincronizando envio digital…');
+      try{ await natalApi.sincronizarGaleria(); }catch{ }
+      atualizarStatusDigitalRemoto(codigoDigital);
+    });
+    // Compõe + envia em background (igual à impressão): o modal abre na hora.
+    enviarDigitais(pedidoId, codigoDigital, digitais);
+  }
 }
 
 function toast(msg){
@@ -3720,6 +3868,19 @@ async function _sincronizarEstadoFila(){
 }
 
 function addToCart(tipo, produtoId, label, precoUnit, qtd=1){
+  const digital = produtoId === 'foto-digital';
+  if(digital){
+    if(!currentSession || !currentFoto || !currentFoto.filename){
+      toast('⚠ Selecione a foto no enquadramento antes do envio digital');
+      return;
+    }
+    const jaTem = cart.some(c => c.produtoId === 'foto-digital' && c.fotoSeed === currentFoto.seed
+      && Math.round(c.zoom||100) === Math.round(zoom||100)
+      && Math.round(c.offX||0) === Math.round(offX||0)
+      && Math.round(c.offY||0) === Math.round(offY||0));
+    if(jaTem){ toast('📲 Essa foto já está no carrinho como envio digital'); return; }
+    qtd = 1;
+  }
   // estoque físico (bolinha de acrílico, porta-retrato, ímã, item encarte, porta-cartão postal)
   if(!temEstoqueFisico(produtoId, qtd)){
     toast(`⚠ Estoque insuficiente de ${label} (saldo: ${saldoFisico(produtoId)})`);
@@ -3732,11 +3893,12 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1){
     fotoSeed: currentFoto.seed,
     tipo, produtoId, label,
     qtd, precoUnit, preco: +(precoUnit*qtd).toFixed(2),
-    zoom: tipo==='tamanho'?zoom:100, offX: tipo==='tamanho'?offX:0, offY: tipo==='tamanho'?offY:0,
-    orientation: tipo==='tamanho'?currentOrientation:null,
+    zoom: (tipo==='tamanho'||digital)?zoom:100, offX: (tipo==='tamanho'||digital)?offX:0, offY: (tipo==='tamanho'||digital)?offY:0,
+    orientation: (tipo==='tamanho'||digital)?currentOrientation:null,
     // allowLogo do formato decide: a polaroide/bolinha nunca entram com logo,
     // mesmo com o checkbox marcado (o printUtils também checa, por segurança)
     logo: tipo==='tamanho' ? (includeLogo && config.allowsLogo(produtoId)) : false,
+    digital: digital || undefined,
     pdv: true,
   });
   baixarEstoqueFisico(produtoId, qtd);
@@ -3950,7 +4112,7 @@ function renderCart(){
     cart.forEach(c=>{
       const isComboDesconto = c.tipo==='combo-desconto' || c.tipo==='desconto-catalogo' || c.tipo==='desconto-senha-master';
       const isZeradoPorCombo = !!c.zeradoPorCombo;
-      const semStepper = isComboDesconto || isZeradoPorCombo;
+      const semStepper = isComboDesconto || isZeradoPorCombo || c.produtoId==='foto-digital';
       const div=document.createElement('div');
       div.className='cart-item';
       div.innerHTML = `
@@ -5052,7 +5214,7 @@ function renderPedidosScreen(){
         <td style="font-size:11.5px;">${formatarFormasPagamento(p.pagamentosEfetivos)}</td>
         <td><span class="ped-status ${p.status}">${p.status}</span></td>
         <td style="font-size:11px;">${vinculo}</td>
-        <td>${p.pedidoGeradoId ? '' : `<button class="ped-action-btn" data-reopen="${p.id}">Reabrir</button>`}</td>
+        <td>${p.pedidoGeradoId ? '' : `<button class="ped-action-btn" data-reopen="${p.id}">Reabrir</button>`}${p.codigoDigital ? `<button class="ped-action-btn" data-qr="${p.codigoDigital}">📲 QR</button>` : ''}</td>
       </tr>
     `;
     }).join('') +
@@ -5065,6 +5227,9 @@ function renderPedidosScreen(){
   });
   tabPed.querySelectorAll('[data-reopen]').forEach(btn=>{
     btn.addEventListener('click', e=>{ e.stopPropagation(); showReopenOrder(btn.dataset.reopen); });
+  });
+  tabPed.querySelectorAll('[data-qr]').forEach(btn=>{
+    btn.addEventListener('click', e=>{ e.stopPropagation(); abrirQrDigital(btn.dataset.qr); });
   });
 }
 
@@ -6176,6 +6341,7 @@ async function INIT(){
     }
     if(key==='printer:progress'){ if(data && data.total) _printProgress = { current: Math.min(data.current || 0, data.total), total: data.total }; renderRibbonChip(); }
     if(key==='print-fila:atualizada'){ _sincronizarEstadoFila(); }
+    if(key==='galeria:enviado' && data && data.codigo){ atualizarStatusDigitalRemoto(data.codigo); }
     if(key==='print-complete'){
       printando = false; _printProgress = null; _printFila = 0; _printFilaUltimoAviso = 0;
       if(data && data.success === false){ mostrarFalhaImpressao('Falha na impressão', data.error || 'Falha na impressão ASK-400'); }

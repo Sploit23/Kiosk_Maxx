@@ -380,6 +380,7 @@ const PRECOS_DEFAULT = [
     '10x15' => 15.0, '15x20' => 25.0, 'bolinha' => 12.0, 'polaroide' => 20.0,
     'porta-retrato-10x15' => 35.0, 'porta-retrato-15x20' => 50.0, 'ima' => 10.0,
     'item-encarte' => 15.0, 'porta-cartao-postal' => 12.0,
+    'foto-digital' => 10.0,
     'combo1' => 45.0, 'combo2' => 65.0, 'combo3' => 80.0,
     'combo4' => 52.0, 'combo5' => 38.0, 'combo6' => 38.0,
 ];

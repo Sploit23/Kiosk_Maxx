@@ -74,8 +74,18 @@ const natalApi = {
   cachePortalSave: (partial) => api('POST', '/api/cache/portal', partial),
   cachePortalConferir: (usuario, senha) => api('POST', '/api/cache/portal/conferir', { usuario, senha }),
 
-  // ─── Impressão ASK-400 (produção) ────────────────────────
-  // Envia o JPEG final de cada foto composta no PDV para a fila do pedido.
+  // ─── Envio digital (galeria pública /natal) ──────────────
+  // Sobe o JPEG final (pose única, já composto) com o CÓDIGO da venda + a
+  // sequência da foto. O sidecar sobe por FTP e, sem internet, guarda numa
+  // fila durável que reenvia sozinha (a venda nunca falha por causa disso).
+  enviarGaleria: (codigo, seq, blob) =>
+    api('POST', `/api/galeria/upload/${encodeURIComponent(codigo)}/${encodeURIComponent(seq)}`, blob, true),
+  finalizarGaleria: (codigo, dados) =>
+    api('POST', `/api/galeria/finalizar/${encodeURIComponent(codigo)}`, dados || {}),
+  galeriaFila: () => api('GET', '/api/galeria/fila'),
+  sincronizarGaleria: () => api('POST', '/api/galeria/fila/sincronizar', {}),
+
+  // ─── Impressão ASK-400 (produção) ────────────────────────  // Envia o JPEG final de cada foto composta no PDV para a fila do pedido.
   uploadImpressao: (pedidoId, filename, blob) =>
     api('POST', `/api/pedidos/${encodeURIComponent(pedidoId)}/impressao/${encodeURIComponent(filename)}`, blob, true),
   // Inicia a fila de impressão de um pedido PAGO. fotos: [{ key, filename, qty }]

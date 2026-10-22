@@ -7,6 +7,11 @@ import config from '../config';
 import { computeAutoFit, loadImage } from './imageUtils';
 import { overlayRect } from './overlayCalibration';
 
+// Converte um canvas em Blob JPEG na qualidade configurada.
+function canvasToBlob(canvas) {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', config.image.jpegQuality));
+}
+
 // Rotaciona um canvas 90° e retorna novo canvas (ccw=true → anti-horário).
 function rotateCanvas(src, ccw) {
   const rot = document.createElement('canvas');
@@ -86,6 +91,13 @@ export async function composePrintImage(photo) {
     && (overlayInfo.wholeSheet || overlayInfo.grid.rows * overlayInfo.grid.cols > 1);
   const multiCelula = temMolde && !overlayInfo.wholeSheet;
 
+  // ── Envio digital (photo.single) ──────────────────────────────────────────
+  // Devolve UMA célula — a MESMA pose que aparece no enquadramento —, em vez da
+  // folha inteira com as 2 poses ladrilhadas. O molde sai no tamanho natural do
+  // PNG (sem os offsets de calibração, que só compensam o corte da impressora) e
+  // a imagem não é girada: a galeria mostra exatamente o que a vendedora ajustou.
+  const celulaUnica = !!photo.single && multiCelula;
+
   if (!overlayInfo && photo.orientation) {
     const isNatLandscape = editorW > editorH;
     const swapTo = (photo.orientation === 'retrato' && isNatLandscape) || (photo.orientation === 'paisagem' && !isNatLandscape);
@@ -118,7 +130,13 @@ export async function composePrintImage(photo) {
     // célula inteira quando não há janela medida (10x15/15x20), o que preserva
     // o comportamento antigo sem nenhum desvio.
     const win = config.getOverlayWindow(photo.key);
-    const cover = Math.max(win.w / origW, win.h / origH) * 100;
+    // Giro de 90°/270° troca a largura/altura que a foto ocupa — o cover tem
+    // de usar as dimensões efetivas (trocadas), igual ao setupCover da tela.
+    const angPdv = ((photo.angle ?? 0) % 360 + 360) % 360;
+    const swapPdv = angPdv === 90 || angPdv === 270;
+    const effW = swapPdv ? origH : origW;
+    const effH = swapPdv ? origW : origH;
+    const cover = Math.max(win.w / effW, win.h / effH) * 100;
     const sd = cover * ((photo.scale ?? 100) / 100);
     const dw = (origW * sd) / 100;
     const dh = (origH * sd) / 100;
@@ -150,7 +168,7 @@ export async function composePrintImage(photo) {
   const scale = pdvScale ?? photo.scale ?? auto.scale;
   const diffx = pdvDiffX ?? photo.diffx ?? auto.diffX;
   const diffy = pdvDiffY ?? photo.diffy ?? auto.diffY;
-  const angle = photo.pdv ? 0 : (photo.scale != null ? (photo.angle ?? 0) : auto.angle);
+  const angle = photo.pdv ? (photo.angle ?? 0) : (photo.scale != null ? (photo.angle ?? 0) : auto.angle);
 
   const dispW = origW * (scale / 100) * S;
   const dispH = origH * (scale / 100) * S;
@@ -203,6 +221,19 @@ export async function composePrintImage(photo) {
       cellCtx.drawImage(img, imgX2, imgY2, dispW2, dispH2);
       cellCtx.restore();
 
+      // Digital: devolve SÓ esta célula, com o molde no tamanho natural do PNG
+      // (tela == galeria) — sem os offsets de corte nem o ladrilhamento das
+      // outras poses. É exatamente o enquadramento mostrado no editor.
+      if (celulaUnica) {
+        const out = document.createElement('canvas');
+        out.width = cellW;
+        out.height = cellH;
+        const octx = out.getContext('2d');
+        octx.drawImage(cellCanvas, 0, 0);
+        octx.drawImage(overlayImg, 0, 0, cellW, cellH);
+        return await canvasToBlob(out);
+      }
+
       // 2) ladrilha a MESMA foto na folha inteira
       ctx.fillStyle = config.image.canvasBackground;
       ctx.fillRect(0, 0, printW, printH);
@@ -243,7 +274,9 @@ export async function composePrintImage(photo) {
   // para o JPEG nascer retrato, casando ~1:1 com o BMP — sem crop lateral
   // massivo. O driver da ASK-400 gira de volta ao imprimir no papel.
   let printCanvas = canvas;
-  if (config.getPaper(photo.key) === '15x20' && printCanvas.width > printCanvas.height) {
+  // No envio digital a imagem sai fiel ao editor (na orientação ajustada); o giro
+  // 90° existe só para casar o JPEG com o BMP retrato que a ASK-400 gera.
+  if (!photo.single && config.getPaper(photo.key) === '15x20' && printCanvas.width > printCanvas.height) {
     printCanvas = rotateCanvas(canvas, true);
     console.log('[compose:rotate] 15x20 paisagem->retrato', printCanvas.width, 'x', printCanvas.height);
   } else if (printCanvas.height > printCanvas.width) {
@@ -251,6 +284,5 @@ export async function composePrintImage(photo) {
     printCanvas = rotateCanvas(canvas, false);
   }
 
-  const blob = await new Promise((resolve) => printCanvas.toBlob(resolve, 'image/jpeg', config.image.jpegQuality));
-  return blob;
+  return await canvasToBlob(printCanvas);
 }

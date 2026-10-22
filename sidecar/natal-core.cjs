@@ -17,6 +17,7 @@
 // Electron (ELECTRON_RUN_AS_NODE=1), igual ao kiosk-core.cjs.
 // ─────────────────────────────────────────────────────────────
 const http = require('node:http');
+const net = require('node:net');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -89,6 +90,7 @@ function bindPaths(dataDir) {
   CONFIG_FILE = path.join(DB_DIR, 'config.json');
   PASTA_IMPORTADAS_FILE = path.join(DB_DIR, 'pasta-importadas.json');
   FILA_IMPRESSAO_FILE = path.join(DB_DIR, 'fila-impressao.json');
+  GALERIA_DIR = path.join(dataDir, 'galeria');
   FILA_PORTAL_FILE = path.join(DB_DIR, 'fila-portal.json');
   CACHE_PORTAL_FILE = path.join(DB_DIR, 'cache-portal.json');
   ENVIADOS_PORTAL_FILE = path.join(DB_DIR, 'enviados-portal.json');
@@ -128,7 +130,7 @@ function persistFolderPointer(folder) {
 
 let DATA_DIR = computeDataDir(readBootstrapPhotosFolder());
 let DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR;
-let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE, FILA_IMPRESSAO_FILE, FILA_PORTAL_FILE, CACHE_PORTAL_FILE, ENVIADOS_PORTAL_FILE;
+let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE, FILA_IMPRESSAO_FILE, FILA_PORTAL_FILE, CACHE_PORTAL_FILE, ENVIADOS_PORTAL_FILE, GALERIA_DIR;
 bindPaths(DATA_DIR);
 moverDados(LEGACY_BOOT_DIR, DATA_DIR);
 
@@ -146,7 +148,7 @@ const ESTADOS = {
 
 // ─── Init de dados (idempotente) ─────────────────────────────
 function inicializarDados() {
-  for (const dir of [DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR]) {
+  for (const dir of [DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR, GALERIA_DIR]) {
     fs.mkdirSync(dir, { recursive: true });
   }
   if (!fs.existsSync(PEDIDOS_FILE)) fs.writeFileSync(PEDIDOS_FILE, '[]', 'utf-8');
@@ -211,6 +213,35 @@ function setMachineConfig(partial) {
   }
   writeJson(CONFIG_FILE, machineConfig);
   ensurePhotosWatcher();
+}
+
+// ─── Config do "Envio digital" (galeria pública /natal) ──────
+// O PDV manda o JPEG já composto; o sidecar sobe por FTP para a pasta da
+// galeria. A senha fica FORA do machineConfig devolvido à UI (nunca vai pro
+// renderer) — sobrescrevível por NATAL_FTP_PASS ou machineConfig.ftpPass.
+const FTP_DEFAULTS = {
+  host: process.env.NATAL_FTP_HOST || 'ftp.maxxfoto.com.br',
+  port: parseInt(process.env.NATAL_FTP_PORT, 10) || 21,
+  user: process.env.NATAL_FTP_USER || 'arenacaptour@maxxfoto.com.br',
+  pass: process.env.NATAL_FTP_PASS || 'HCss221087!',
+  folder: process.env.NATAL_FTP_FOLDER || '/public_html/natal/fotos',
+  galeriaUrl: process.env.NATAL_GALERIA_URL || 'https://maxxfoto.com.br/natal',
+};
+function getFtpConfig() {
+  return {
+    host: String(machineConfig.ftpHost || FTP_DEFAULTS.host || '').trim(),
+    port: parseInt(machineConfig.ftpPort, 10) || FTP_DEFAULTS.port || 21,
+    user: String(machineConfig.ftpUser || FTP_DEFAULTS.user || '').trim(),
+    pass: String(process.env.NATAL_FTP_PASS || machineConfig.ftpPass || FTP_DEFAULTS.pass || ''),
+    folder: String(machineConfig.ftpFolder || FTP_DEFAULTS.folder || '').trim(),
+    galeriaUrl: String(machineConfig.galeriaUrl || FTP_DEFAULTS.galeriaUrl || '').trim(),
+  };
+}
+// Versão da config segura para o renderer (sem a senha do FTP).
+function configPublica() {
+  const { ftpPass, ...resto } = machineConfig;
+  void ftpPass;
+  return { ...resto, ribbon: getRibbon() };
 }
 
 // ─── Importador de pasta de fotos (drop zone por sessão) ─────
@@ -692,6 +723,280 @@ function readBody(req, maxBytes = 200 * 1024 * 1024) {
   });
 }
 
+// ─── Envio digital — galeria pública /natal (FTP, fila durável) ────────────
+// O PDV compõe o JPEG da foto digital (pose única) e manda com o CÓDIGO da
+// venda + sequência. O sidecar grava em disco (galeria/<CODIGO>/<seq>.jpg),
+// sobe por FTP como <CODIGO>_<seq>.jpg e, por ÚLTIMO, o manifesto
+// <CODIGO>.json — a página /natal só lista as fotos quando o manifesto
+// existe, então nunca aparece meia venda. Sem internet nada se perde: tudo
+// fica na pasta local e um worker reenvia sozinho (60s + gatilhos). A venda
+// nunca depende do envio ter dado certo.
+const GALERIA_SYNC_MS = 60000;
+const galeriaLocks = new Set();
+let _galeriaWorkerRodando = false;
+
+function galeriaCodigoValido(codigo) {
+  return /^[A-Z0-9]{4,12}$/.test(String(codigo || ''));
+}
+function galeriaCodigoDir(codigo) { return path.join(GALERIA_DIR, sanitizeSegment(String(codigo || '').toUpperCase())); }
+function galeriaMetaPath(codigo) { return path.join(galeriaCodigoDir(codigo), 'meta.json'); }
+function lerGaleriaMeta(codigo) { return readJson(galeriaMetaPath(codigo), null); }
+function salvarGaleriaMeta(meta) { writeJson(galeriaMetaPath(meta.codigo), meta); }
+function galeriaArquivoRemoto(codigo, seq) { return `${codigo}_${seq}.jpg`; }
+function galeriaPendente(meta) {
+  if (!meta) return false;
+  if ((meta.fotos || []).some((f) => !f.enviadoEm)) return true;
+  // o manifesto só vale DEPOIS que o PDV finaliza a venda (todas as fotos já
+  // chegaram) — evita publicar uma venda pela metade se uma foto falhar.
+  return !!meta.finalizadoEm && !meta.manifestoEnviadoEm;
+}
+function listarGalerias() {
+  const out = [];
+  let entradas = [];
+  try { entradas = fs.readdirSync(GALERIA_DIR, { withFileTypes: true }); } catch { return out; }
+  for (const ent of entradas) {
+    if (!ent.isDirectory()) continue;
+    const meta = lerGaleriaMeta(ent.name);
+    if (meta && meta.codigo) out.push(meta);
+  }
+  return out.sort((a, b) => (b.criadoEm || 0) - (a.criadoEm || 0));
+}
+function galeriaStatusUI(meta) {
+  const fotos = Array.isArray(meta.fotos) ? meta.fotos : [];
+  return {
+    codigo: meta.codigo,
+    pedidoId: meta.pedidoId || null,
+    criadoEm: meta.criadoEm || null,
+    fotos: fotos.length,
+    enviadas: fotos.filter((f) => f.enviadoEm).length,
+    manifestoEnviado: !!meta.manifestoEnviadoEm,
+    pendente: galeriaPendente(meta),
+    tentativas: meta.tentativas || 0,
+    ultimoErro: meta.ultimoErro || '',
+    ultimoEnvioEm: meta.ultimoEnvioEm || null,
+  };
+}
+
+// Cliente FTP mínimo (USER/PASS/TYPE I/CWD/PASV/STOR) em cima de node:net —
+// zero deps, como o resto do sidecar. Usa PASV e conecta o canal de dados no
+// MESMO host do controle (não no IP anunciado no 227), que costuma ser
+// interno em servidores com NAT.
+function ftpUpload({ host, port = 21, user, pass, folder = '', filename, buffer, timeout = 45000 }) {
+  return new Promise((resolve, reject) => {
+    const sock = net.connect({ host, port });
+    sock.setTimeout(timeout);
+    let buf = '';
+    let cur = [];
+    const queue = [];
+    let pending = null;
+    let settled = false;
+
+    const settle = (err, val) => {
+      if (settled) return;
+      settled = true;
+      try { sock.destroy(); } catch {}
+      pending = null;
+      if (err) reject(err); else resolve(val);
+    };
+    const onData = (chunk) => {
+      buf += chunk.toString('utf8');
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl + 1);
+        buf = buf.slice(nl + 1);
+        const clean = line.replace(/\r?\n$/, '');
+        cur.push(clean);
+        // uma resposta termina quando a linha começa com "NNN " (espaço, não '-')
+        if (/^\d{3} /.test(clean)) {
+          const resp = cur.join('\n');
+          cur = [];
+          if (pending) { const p = pending; pending = null; p(resp); }
+          else queue.push(resp);
+        }
+      }
+    };
+    const readResp = () => {
+      if (queue.length) return Promise.resolve(queue.shift());
+      return new Promise((res) => { pending = res; });
+    };
+    const cmd = async (linha, ...ok) => {
+      sock.write(linha + '\r\n');
+      const resp = await readResp();
+      const code = resp.slice(0, 3);
+      if (ok.length && !ok.includes(code)) throw new Error(`${linha.split(' ')[0]}: ${resp.replace(/\s+/g, ' ')}`);
+      return resp;
+    };
+
+    sock.on('data', onData);
+    sock.on('timeout', () => settle(new Error('Timeout no FTP')));
+    sock.on('error', (e) => settle(e));
+    sock.on('close', () => { if (!settled) settle(new Error('FTP: conexão encerrada')); });
+
+    (async () => {
+      try {
+        const greeting = await readResp();
+        if (!greeting.startsWith('220')) throw new Error('FTP: ' + greeting.replace(/\s+/g, ' '));
+        let r = await cmd(`USER ${user}`);
+        if (r.startsWith('331')) r = await cmd(`PASS ${pass}`);
+        if (!r.startsWith('230')) throw new Error('FTP login: ' + r.replace(/\s+/g, ' '));
+        await cmd('TYPE I', '200');
+        if (folder) await cmd(`CWD ${folder}`, '250', '200');
+        const pasv = await cmd('PASV', '227');
+        const m = /\(([0-9,]+)\)/.exec(pasv);
+        if (!m) throw new Error('FTP PASV inválido');
+        const nums = m[1].split(',').map(Number);
+        const dataPort = nums[4] * 256 + nums[5];
+
+        const dataSock = net.connect({ host, port: dataPort });
+        dataSock.setTimeout(timeout);
+        await new Promise((res, rej) => {
+          dataSock.once('connect', res);
+          dataSock.once('error', rej);
+          dataSock.once('timeout', () => rej(new Error('Timeout no canal de dados FTP')));
+        });
+
+        sock.write(`STOR ${filename}\r\n`);
+        const st = await readResp();
+        if (!(st.startsWith('150') || st.startsWith('125'))) {
+          dataSock.destroy();
+          throw new Error('FTP STOR: ' + st.replace(/\s+/g, ' '));
+        }
+        dataSock.end(buffer);
+        await new Promise((res) => dataSock.once('close', res));
+        const fin = await readResp();
+        if (!(fin.startsWith('226') || fin.startsWith('250'))) throw new Error('FTP upload: ' + fin.replace(/\s+/g, ' '));
+        try { sock.write('QUIT\r\n'); } catch {}
+        settle(null, true);
+      } catch (e) {
+        settle(e);
+      }
+    })();
+  });
+}
+
+// Sobe um código inteiro: fotos que faltam + manifesto por último.
+async function sincronizarGaleria(codigo, { forcar = false } = {}) {
+  const c = String(codigo || '').toUpperCase();
+  if (!galeriaCodigoValido(c)) return { success: false, error: 'Código inválido' };
+  if (galeriaLocks.has(c)) return { success: false, sincronizando: true, pendente: true };
+  let meta = lerGaleriaMeta(c);
+  if (!meta) return { success: false, error: 'Código desconhecido' };
+  if (!galeriaPendente(meta) && !forcar) {
+    return { success: true, jaEnviado: true, pendente: false, codigo: c, fotos: (meta.fotos || []).length, manifestoEnviado: true };
+  }
+  galeriaLocks.add(c);
+  const ftp = getFtpConfig();
+  let falhou = false;
+  let ultimoErro = '';
+  try {
+    if (!ftp.host || !ftp.user) throw new Error('Envio digital não configurado (FTP)');
+    meta = lerGaleriaMeta(c); // relê (pode ter recebido foto nova enquanto esperava)
+    for (const foto of meta.fotos || []) {
+      if (foto.enviadoEm) continue;
+      try {
+        const file = path.join(galeriaCodigoDir(c), `${foto.seq}.jpg`);
+        const buffer = fs.readFileSync(file);
+        await ftpUpload({ host: ftp.host, port: ftp.port, user: ftp.user, pass: ftp.pass, folder: ftp.folder, filename: galeriaArquivoRemoto(c, foto.seq), buffer });
+        foto.enviadoEm = Date.now();
+        foto.erro = '';
+        salvarGaleriaMeta(meta);
+      } catch (e) {
+        falhou = true;
+        ultimoErro = (e && e.message) || String(e);
+        foto.erro = ultimoErro;
+        salvarGaleriaMeta(meta);
+        break; // sem internet: para aqui e tenta de novo no próximo ciclo
+      }
+    }
+    const fotos = meta.fotos || [];
+    const todasOk = !!meta.finalizadoEm && fotos.length > 0
+      && fotos.length >= Number(meta.total || 0) && fotos.every((f) => f.enviadoEm);
+    if (!falhou && todasOk && !meta.manifestoEnviadoEm) {
+      const manifesto = {
+        codigo: c,
+        criadoEm: meta.criadoEm || Date.now(),
+        pedidoId: meta.pedidoId || null,
+        total: fotos.length,
+        fotos: fotos.map((f) => ({ seq: f.seq, arquivo: galeriaArquivoRemoto(c, f.seq) })),
+      };
+      try {
+        await ftpUpload({ host: ftp.host, port: ftp.port, user: ftp.user, pass: ftp.pass, folder: ftp.folder, filename: `${c}.json`, buffer: Buffer.from(JSON.stringify(manifesto), 'utf-8') });
+        meta.manifestoEnviadoEm = Date.now();
+        meta.ultimoErro = '';
+        salvarGaleriaMeta(meta);
+        console.log(`[natal-core] Envio digital OK: ${c} (${fotos.length} foto${fotos.length === 1 ? '' : 's'})`);
+        emit('galeria:enviado', { codigo: c, fotos: fotos.length });
+      } catch (e) {
+        falhou = true;
+        ultimoErro = (e && e.message) || String(e);
+      }
+    }
+  } catch (e) {
+    falhou = true;
+    ultimoErro = (e && e.message) || String(e);
+  } finally {
+    galeriaLocks.delete(c);
+  }
+  meta = lerGaleriaMeta(c) || meta;
+  meta.atualizadoEm = Date.now();
+  meta.ultimoEnvioEm = Date.now();
+  meta.tentativas = (meta.tentativas || 0) + (falhou ? 1 : 0);
+  if (falhou) {
+    meta.ultimoErro = ultimoErro;
+    console.warn(`[natal-core] Envio digital pendente (${c}): ${ultimoErro}`);
+  }
+  salvarGaleriaMeta(meta);
+  return {
+    success: !falhou && !!meta.manifestoEnviadoEm,
+    codigo: c,
+    pendente: galeriaPendente(meta),
+    fotos: (meta.fotos || []).length,
+    enviadas: (meta.fotos || []).filter((f) => f.enviadoEm).length,
+    manifestoEnviado: !!meta.manifestoEnviadoEm,
+    error: falhou ? ultimoErro : undefined,
+  };
+}
+
+async function sincronizarGaleriasPendentes() {
+  if (_galeriaWorkerRodando) return;
+  _galeriaWorkerRodando = true;
+  try {
+    for (const meta of listarGalerias()) {
+      if (!galeriaPendente(meta)) continue;
+      try { await sincronizarGaleria(meta.codigo); } catch {}
+    }
+  } finally {
+    _galeriaWorkerRodando = false;
+  }
+}
+
+function galeriaReceberFoto(codigo, seq, buffer) {
+  const c = String(codigo || '').toUpperCase();
+  if (!galeriaCodigoValido(c)) return { error: 'Código inválido' };
+  if (!Number.isFinite(seq) || seq < 1 || seq > 50) return { error: 'Sequência inválida' };
+  if (!buffer || !buffer.length) return { error: 'Imagem vazia' };
+  const dir = galeriaCodigoDir(c);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${seq}.jpg`), buffer);
+  const meta = lerGaleriaMeta(c) || {
+    codigo: c, criadoEm: Date.now(), pedidoId: null, total: 0,
+    fotos: [], manifestoEnviadoEm: null, tentativas: 0, ultimoErro: '',
+  };
+  meta.fotos = Array.isArray(meta.fotos) ? meta.fotos : [];
+  const existente = meta.fotos.find((f) => f.seq === seq);
+  if (existente) {
+    existente.enviadoEm = null; // reenvio (ex.: "Tentar novamente")
+    existente.erro = '';
+  } else {
+    meta.fotos.push({ seq, enviadoEm: null, erro: '' });
+    if (meta.manifestoEnviadoEm) meta.manifestoEnviadoEm = null; // manifesto precisa incluir a nova foto
+  }
+  meta.fotos.sort((a, b) => a.seq - b.seq);
+  meta.atualizadoEm = Date.now();
+  salvarGaleriaMeta(meta);
+  return { meta };
+}
+
 // ─── Impressão ASK-400 ───────────────────────────────────────
 // FILA PERSISTENTE de impressão: quando a impressora está desligada, o pedido
 // PAGO fica enfileirado (fila-impressao.json) e um worker (a cada 15s + kick no
@@ -1013,7 +1318,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true, pdv: machineConfig.pdvNome || os.hostname(), time: Date.now(), ribbon: getRibbon(), filaPortal: filaPortal.length, build: BUILD_ID, pid: process.pid });
     }
     if (method === 'GET' && p === '/api/config') {
-      return sendJson(res, 200, { ...machineConfig, ribbon: getRibbon() });
+      return sendJson(res, 200, configPublica());
     }
     // Status real da impressora ASK-400 (proxy do Java sidecar na porta 8080)
     if (method === 'GET' && p === '/api/printer/status') {
@@ -1059,7 +1364,7 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST' && p === '/api/config') {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
       setMachineConfig(body);
-      return sendJson(res, 200, { success: true, config: machineConfig });
+      return sendJson(res, 200, { success: true, config: configPublica() });
     }
 
     // ── Outbox do portal (fila durável de envio) ──────────────
@@ -1132,6 +1437,53 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 401, { success: false, error: 'SENHA', message: 'Senha incorreta.' });
       }
       return sendJson(res, 200, limparDadosLocais(body));
+    }
+
+    // ── Envio digital (galeria pública /natal) ─────────────────
+    // O PDV manda: POST /api/galeria/upload/<CODIGO>/<seq> (JPEG binário) por
+    // foto e depois POST /api/galeria/finalizar/<CODIGO> { total, pedidoId }.
+    // O manifesto só sobe depois de todas as fotos → a página nunca mostra
+    // uma venda pela metade. Sem FTP, fica em fila local e reenvia sozinho.
+    const galeriaUpload = p.match(/^\/api\/galeria\/upload\/([^/]+)\/([^/]+)$/);
+    if (method === 'POST' && galeriaUpload) {
+      const codigo = String(galeriaUpload[1] || '').toUpperCase();
+      const seq = parseInt(galeriaUpload[2], 10);
+      const buffer = await readBody(req);
+      const r = galeriaReceberFoto(codigo, seq, buffer);
+      if (r.error) return sendJson(res, 400, { success: false, error: r.error });
+      const sync = await sincronizarGaleria(codigo);
+      return sendJson(res, 200, { success: true, salvo: true, ...sync });
+    }
+    const galeriaFinalizar = p.match(/^\/api\/galeria\/finalizar\/([^/]+)$/);
+    if (method === 'POST' && galeriaFinalizar) {
+      const codigo = String(galeriaFinalizar[1] || '').toUpperCase();
+      if (!galeriaCodigoValido(codigo)) return sendJson(res, 400, { success: false, error: 'Código inválido' });
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      const meta = lerGaleriaMeta(codigo);
+      if (!meta) return sendJson(res, 404, { success: false, error: 'Código desconhecido' });
+      meta.total = Math.max(Number(body.total || 0) || 0, (meta.fotos || []).length);
+      meta.finalizadoEm = meta.finalizadoEm || Date.now();
+      if (body.pedidoId) meta.pedidoId = String(body.pedidoId);
+      meta.atualizadoEm = Date.now();
+      salvarGaleriaMeta(meta);
+      const sync = await sincronizarGaleria(codigo, { forcar: true });
+      return sendJson(res, 200, { success: true, ...sync });
+    }
+    if (method === 'GET' && p === '/api/galeria/fila') {
+      const itens = listarGalerias().map(galeriaStatusUI);
+      const pendentes = itens.filter((i) => i.pendente);
+      return sendJson(res, 200, {
+        success: true,
+        itens,
+        pendentes: pendentes.length,
+        fotosPendentes: pendentes.reduce((s, i) => s + (i.fotos - i.enviadas), 0),
+        urlBase: getFtpConfig().galeriaUrl,
+      });
+    }
+    if (method === 'POST' && p === '/api/galeria/fila/sincronizar') {
+      await sincronizarGaleriasPendentes();
+      const itens = listarGalerias().map(galeriaStatusUI);
+      return sendJson(res, 200, { success: true, itens, pendentes: itens.filter((i) => i.pendente).length });
     }
 
     // ── Sessões ──
@@ -1355,6 +1707,7 @@ const server = http.createServer(async (req, res) => {
       if (Array.isArray(body.produtos)) pedido.produtos = body.produtos;
       if (body.desconto !== undefined) pedido.desconto = body.desconto || null;
       if (typeof body.guiaImpressa === 'boolean') pedido.guiaImpressa = body.guiaImpressa;
+      if (body.codigoDigital !== undefined) pedido.codigoDigital = body.codigoDigital ? String(body.codigoDigital) : null;
       if (Array.isArray(body.sessoes) && body.sessoes.length) {
         pedido.sessoes = body.sessoes.map((s) => ({ id: String((s && s.id) || s) }));
       }
@@ -1503,6 +1856,7 @@ server.listen(PORT, HOST, () => {
   }
   ensurePhotosWatcher();
   kickFila(); // fila persistente do disco → retoma impressões que ficaram pra trás
+  sincronizarGaleriasPendentes().catch(() => {}); // envio digital que ficou na fila offline
 });
 
 server.on('error', (e) => {
@@ -1515,6 +1869,9 @@ setInterval(() => {
     try { client.write(': keepalive\n\n'); } catch { sseClients.delete(client); }
   }
 }, 25000);
+
+// Reenvio automático das fotos digitais que ficaram sem internet na venda.
+setInterval(() => { sincronizarGaleriasPendentes().catch(() => {}); }, GALERIA_SYNC_MS);
 
 // Se o pai (electron-main) morrer, o stdin fecha -> sai junto (evita orphan).
 process.stdin.on('end', () => {

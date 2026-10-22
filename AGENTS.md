@@ -90,7 +90,11 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 | POST | `/api/pedidos/:id/pagamento` | Registra pagamento → `PAGO`, sessão `VENDIDA`. Exige pedido `AGUARDANDO` e soma dos pagamentos == total |
 | POST | `/api/pedidos/:id/impressao/:filename` | Upload da imagem final de impressão (fila) |
 | POST | `/api/pedidos/:id/imprimir` | Dispara pipeline de impressão (exige `PAGO`, fotos não vazia, lock anti-impressão dupla) |
-| PUT | `/api/pedidos/:id` | Persiste correções pós-pagamento feitas no PDV (total, pagamentos/meio, itens/produtos, desconto, status `CANCELADO`) |
+| PUT | `/api/pedidos/:id` | Persiste correções pós-pagamento feitas no PDV (total, pagamentos/meio, itens/produtos, desconto, status `CANCELADO`, `codigoDigital` do envio digital) |
+| POST | `/api/galeria/upload/:codigo/:seq` | Upload do JPEG final do envio digital (pose única) — grava em disco e tenta FTP |
+| POST | `/api/galeria/finalizar/:codigo` | Fecha o envio digital `{total, pedidoId}` → libera o manifesto (sobe por último) |
+| GET | `/api/galeria/fila` | Estado dos envios digitais `{itens, pendentes, fotosPendentes, urlBase}` |
+| POST | `/api/galeria/fila/sincronizar` | Força o reenvio das galerias pendentes (worker também roda a cada 60s) |
 | GET | `/api/pdv/caixa` | Estado do caixa atual |
 | GET | `/api/pdv/caixas` | Histórico de caixas fechados (persistido em `caixas.json`, ordenado do mais recente primeiro) |
 | POST | `/api/pdv/caixa/abrir` | Abre caixa (`CX-...`) |
@@ -108,7 +112,7 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 
 **Eventos SSE emitidos:** `sessao:criada`, `sessao:status`, `sessao:concluida`,
 `pedido:criado`, `pedido:pago`, `print-start`, `printer:progress`,
-`print-complete`, `caixa:aberto`, `caixa:fechado`. Cliente:
+`print-complete`, `caixa:aberto`, `caixa:fechado`, `galeria:enviado`. Cliente:
 `shared/api/sse.js` `connectSSE(onEvent, onStatus)` é **multi-listener** (portado
 do kiosk-app) — cada chamada registra um callback no mesmo `EventSource`, em vez
 de reabrir a conexão.
@@ -205,14 +209,18 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 │   │   ├── portalApi.js     # Adapter REST → portal PHP
 │   │   └── sse.js           # Cliente EventSource com retry/backoff
 │   ├── components/AdjustFraming.jsx  # Editor de enquadramento React
-│   └── utils/               # imageUtils, pricing, printUtils (300 DPI), thumbnailUtils
+│   ├── utils/               # imageUtils, pricing, printUtils (300 DPI), thumbnailUtils, qr
+│   └── vendor/qrcode.js     # Gerador de QR offline (MIT, Kazuhiko Arase)
 ├── sidecar/
 │   └── natal-core.cjs       # Backend local (Node http, 0 deps)
 ├── backend/
 │   ├── api.php              # API cloud single-file
 │   ├── config.php           # APP_DATA_DIR + ADMIN_SENHA_SHA
 │   ├── admin.html           # Portal de gestão (SPA vanilla JS)
-│   ├── publish.ps1          # Deploy FTP (HostGator)
+│   ├── natal/               # Página pública /natal (código → fotos digitais)
+│   │   ├── index.php        # consulta do código + downloads (sem cache)
+│   │   └── fotos/           # JPEGs <CODIGO>_<n>.jpg + manifesto <CODIGO>.json
+│   ├── publish.ps1          # Deploy FTP (HostGator) — portal + /natal
 │   └── data/                # JSONs (bloqueado por .htaccess)
 ├── impressora/
 │   ├── native_libs/picgo-ask400/   # DLLs da ASK-400 + perfil ICC
@@ -236,7 +244,7 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   unitPrice, subtotal}], produtos: [{key, qty, unitPrice, subtotal}], total,
   caixaId, status: AGUARDANDO|PAGO|IMPRESSO, criadoEm, meio, pagamentos:
   [{meio, valor, parcelas?}], origemPedidoId?, operador?, desconto?, pagoEm?,
-  guiaImpressa, impressoEm? }`
+  guiaImpressa, impressoEm?, codigoDigital? }`
 - **Caixa** (`database/caixa.json`): `{ id: 'CX-*', operador, valorInicial,
   abertoEm, fechadoEm?, pedidos: [], meios: {}, totalVendido?, totalPorMeio?,
   meiosDeclarados?, totalRecebido?, diferenca?, valorEnvelope?, saldoRestante?,
@@ -255,6 +263,14 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 - **Cache offline (`database/cache-portal.json`):**
   `{ precos, equipe, credenciais, atualizadoEm }`; credenciais são
   `{ usuario: {hash: sha256(senha), atualizadoEm} }` (nunca senha em claro).
+- **Envio digital (`galeria/<CODIGO>/`):** fila durável do produto
+  `foto-digital`. `meta.json` = `{ codigo, criadoEm, pedidoId, total,
+  finalizadoEm?, manifestoEnviadoEm?, fotos: [{seq, enviadoEm, erro}],
+  tentativas, ultimoErro, atualizadoEm }` + os JPEGs `<seq>.jpg`. O sidecar sobe
+  por FTP como `<CODIGO>_<seq>.jpg` para `/public_html/natal/fotos` e, **por
+  último**, o manifesto `<CODIGO>.json` — a página pública `/natal` só lista as
+  fotos quando o manifesto existe (nunca publica venda pela metade). Worker
+  reenvia pendentes a cada 60s e no boot.
 
 **Portal PHP — `backend/data/app.json`:**
 
@@ -307,6 +323,7 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 
 - **`shared/config.js`** — fonte única: `serverUrl` (default
   `http://localhost:9877`), `portalApiUrl` (`https://maxxfoto.com.br/natalcontroler/api.php`),
+  `galeriaNatalUrl` (`https://maxxfoto.com.br/natal`),
   `lojaId` (`teste`), `lojaNome`, `pairingCode`, `pdvNome`, formatos de foto,
   produtos, pricing, overlays, estados, meios de pagamento (`dinheiro`, `pix`,
   `debito`, `credito`) e timers.
@@ -317,6 +334,19 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   oficiais do evento). **Offline:** o último catálogo recebido é salvo no
   `cache-portal.json` (`POST /api/cache/portal {precos}`) e reaplicado no
   próximo boot ("[precos] catálogo do cache local aplicado").
+- **Envio digital (`foto-digital`)** — produto extra do PDV: a foto escolhida é
+  composta em **10x15 pose única** (`composePrintImage({ key:'10x15', single:true })`)
+  e sobe para a galeria por **código da venda** (6 chars, alfabeto sem ambíguos).
+  O resumo mostra QR + código, o QR fica reabrível em **Pedidos** e a comanda
+  térmica imprime o código. A página `backend/natal/index.php` (`/natal`) só
+  lista as fotos depois do **manifesto**; antes disso mostra "aguarde" e o
+  telefone (41) 3053-2223 (nota fixa: se não aparecer em até 8h, ligue).
+  FTP: `FTP_DEFAULTS` no sidecar (`ftp.maxxfoto.com.br`,
+  `arenacaptour@maxxfoto.com.br`, pasta `/public_html/natal/fotos`, URL
+  `https://maxxfoto.com.br/natal`), sobrescritos por
+  `NATAL_FTP_HOST/PORT/USER/PASS/FOLDER`, `NATAL_GALERIA_URL` ou pela config da
+  máquina; a senha **nunca** vai ao renderer (`configPublica`). O upload nunca
+  bloqueia a venda: falha → fila local (`galeria/<CODIGO>/`) + retry a cada 60s.
 - **`electron-config.template.json`** — `renderServerUrl`, `serverUrl`,
   `thermalPrinterName`, `pdvNome` (`VENDA-01`), `portalApiUrl`, `lojaId`,
   `lojaNome`, `pairingCode` (código gerado no admin do portal; vazio = sem
@@ -423,7 +453,7 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 - `npm run build:win` — build + empacotador (NSIS)
 - `npm run release` — build + publish GitHub (release)
 - `npm run lint` — ESLint
-- `backend/publish.ps1` — deploy FTP do portal PHP (credenciais em `../../credencial.txt`)
+- `backend/publish.ps1` — deploy FTP do portal PHP **+ página `/natal`** (credenciais em `../../credencial.txt`)
 - `tools/limpar-dados-pdv.ps1` — zera os dados de teste do PDV (sessões, pedidos, caixa, fila de impressão, auditoria, contador de ribbon) com backup automático. Acha a pasta de dados sozinho (API `:9877/api/config` → ponteiro `%APPDATA%\natal-kiosk\database\fotos-folder.txt` → `electron-config.json` → `config.json`) e **recusa rodar com o app aberto** (o sidecar reescreve os arquivos em memória). Flags: `-DryRun` (só mostra), `-Completo` (apaga `database\config.json` → novo `machineId`/`kioskCode`, exigindo re-emparelhamento no portal), `-Forcar`. Depois de limpar é preciso **abrir um novo caixa** no PDV.
 
 - **Auto-update (electron-updater):** o main checa atualizações no boot (10s) e
