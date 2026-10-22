@@ -147,6 +147,13 @@ Write-Host ("  database/       {0} arquivo(s): {1}" -f $dbAlvo.Count, ($dbAlvo -
 Write-Host ("  pedidos.json    {0} pedido(s) no historico" -f $nPed)
 if (-not $Completo) { Write-Host '  PRESERVADO      database\config.json (machineId, kioskCode, pasta de fotos)' -ForegroundColor DarkGray }
 if ($Completo) { Write-Host '  ATENCAO: -Completo apaga config.json -> maquina nova (re-emparelhar no portal)' -ForegroundColor Yellow }
+
+# Backup externo da identidade (gravado pelo sidecar em C:\ProgramData\MaxxNatal).
+# So sai no -Completo, senao o proximo boot restauraria a identidade antiga.
+$identityBackup = Join-Path (Join-Path $env:ProgramData 'MaxxNatal') 'kiosk-identity.json'
+if ($Completo -and (Test-Path -LiteralPath $identityBackup)) {
+  Write-Host "  ATENCAO: -Completo apaga tambem $identityBackup (backup da identidade)" -ForegroundColor Yellow
+}
 Write-Host ''
 Write-Host "Backup sera criado em: $backup"
 
@@ -167,6 +174,11 @@ foreach ($d in $dirsAlvo) {
 foreach ($f in $dbAlvo) {
   $p = Join-Path $dbDir $f
   if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force }
+}
+if ($Completo -and (Test-Path -LiteralPath $identityBackup)) {
+  Copy-Item -LiteralPath $identityBackup -Destination (Join-Path $backup 'kiosk-identity.json') -Force
+  Remove-Item -LiteralPath $identityBackup -Force
+  Write-Host 'Backup da identidade (ProgramData) apagado.' -ForegroundColor DarkGray
 }
 # recria as pastas que o sidecar espera encontrar
 foreach ($d in $dirsAlvo) {

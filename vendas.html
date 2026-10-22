@@ -2011,14 +2011,23 @@ async function emparelharKiosk(){
       // a autorização (para a fila saber que pode enviar) sem sobrescrever o
       // nome/id local da loja. Só faz o SEED quando a loja ainda está vazia
       // (1º boot do kiosk) — depois disso, quem define a loja é o app.
+      // EXCEÇÃO: no modo "vincular a uma loja existente" do wizard, o portal
+      // é a fonte da verdade e preenche lojaId/lojaNome desta máquina.
+      const vincular = _wz.ativo && _wz.modo === 'vincular';
       const seed = {};
-      if(!_identidade || !_identidade.lojaId) seed.lojaId = res.loja.id;
-      if((!_identidade || !_identidade.lojaNome) && res.loja && res.loja.nome) seed.lojaNome = res.loja.nome;
+      if(vincular){
+        seed.lojaId = res.loja.id;
+        if(res.loja && res.loja.nome) seed.lojaNome = res.loja.nome;
+      } else {
+        if(!_identidade || !_identidade.lojaId) seed.lojaId = res.loja.id;
+        if((!_identidade || !_identidade.lojaNome) && res.loja && res.loja.nome) seed.lojaNome = res.loja.nome;
+      }
       try{
         await natalApi.saveConfig({
           pareadoEm: new Date().toISOString(),
           pareadoLojaId: res.loja.id,
           machineId: ident.machineId,
+          ...(vincular ? { _allowLojaChange: true } : {}),
           ...seed,
         });
       }catch{ }
@@ -2050,9 +2059,10 @@ garantirIdentidade().then(async () => {
   try{
     const cfg = await natalApi.getConfig().catch(()=>({}));
     if(cfg && String(cfg.logoTexto || '').trim()) logoTexto = String(cfg.logoTexto).trim();
-    // Wizard de 1º uso: máquina sem NOME DO LOCAL e sem pareamento → assistente.
-    if(cfg && cfg.machineId && !String(cfg.lojaNome || '').trim()
-       && !(window.kioskPair && window.kioskPair.ok)){
+    // Wizard de 1º uso: SÓ quando a máquina nunca foi pareada. Uma atualização
+    // do app não pode reabrir o assistente nem pedir o nome da loja de novo.
+    const jaPareadoBoot = !!(cfg && (cfg.pareadoEm || cfg.pareadoLojaId || (window.kioskPair && window.kioskPair.ok)));
+    if(cfg && cfg.machineId && cfg.kioskCode && !jaPareadoBoot){
       setTimeout(() => { if(!(window.kioskPair && window.kioskPair.ok)) wzAbrir(); }, 700);
     }
   }catch{ }
@@ -2066,7 +2076,7 @@ garantirIdentidade().then(async () => {
    4) equipe visível → encerra e cai no login normal (→ abertura de caixa)
    "Pular" fecha só nesta sessão; o loop de 30s do pair continua sozinho.
    ═══════════════════════════════════════════════════════════════════════ */
-const _wz = { ativo: false, etapa: 0, tent: 0, timer: 0 };
+const _wz = { ativo: false, etapa: 0, tent: 0, timer: 0, modo: null };
 let wzSeedOk = false; // nome já aceito pelo portal (ou loja já existente)
 
 function wzStatus(html, cls){
@@ -2075,7 +2085,9 @@ function wzStatus(html, cls){
 }
 function wzDots(){
   const el = document.getElementById('wz-dots');
-  if(el) el.innerHTML = [1,2,3,4].map(n =>
+  if(!el) return;
+  if(_wz.etapa === 0){ el.innerHTML = ''; return; }
+  el.innerHTML = [1,2,3,4].map(n =>
     '<span class="wz-dot' + (_wz.etapa > n ? ' done' : _wz.etapa === n ? ' on' : '') + '"></span>').join('');
 }
 function wzFechar(){
@@ -2085,7 +2097,7 @@ function wzFechar(){
 }
 function wzAbrir(){
   if(_wz.ativo) return;
-  _wz.ativo = true; _wz.etapa = 1; _wz.tent = 0;
+  _wz.ativo = true; _wz.etapa = 0; _wz.tent = 0; _wz.modo = null;
   document.getElementById('wizard-overlay').classList.remove('hidden');
   wzRender();
   _wz.timer = setInterval(wzTick, 5000);
@@ -2099,9 +2111,24 @@ function wzRender(){
   wzDots();
   const box = document.getElementById('wz-content');
   if(!box) return;
-  if(_wz.etapa === 1){
+  if(_wz.etapa === 0){
     box.innerHTML =
-      '<h2>Bem-vindo! Como se chama este local?</h2>' +
+      '<h2>Primeiro acesso deste PDV</h2>' +
+      '<p class="wz-sub">Escolha como este terminal entra na operação.</p>' +
+      '<div style="display:flex;flex-direction:column;gap:10px;margin:18px 0;">' +
+        '<button class="btn-primary" id="wz-escolhe-novo">Cadastrar novo local</button>' +
+        '<button class="btn-primary" id="wz-escolhe-vincular" style="background:transparent;border:1px solid var(--navy-line);color:var(--cream-100);">Vincular a uma loja já existente</button>' +
+      '</div>' +
+      '<p class="wz-status" id="wz-status"></p>';
+    document.getElementById('wz-escolhe-novo').addEventListener('click', () => { _wz.modo = 'novo'; wzIr(1); });
+    document.getElementById('wz-escolhe-vincular').addEventListener('click', () => {
+      _wz.modo = 'vincular';
+      wzSeedOk = true; // não cria rascunho de nome novo
+      wzIr(2);
+    });
+  } else if(_wz.etapa === 1){
+    box.innerHTML =
+      '<h2>Como se chama este local?</h2>' +
       '<p class="wz-sub">O nome identifica a loja no portal de gestão e no cabeçalho do PDV. Depois você pode mudar no <b>⚙ Config</b>.</p>' +
       '<input class="wz-input" id="wz-nome" type="text" maxlength="60" placeholder="ex.: Royal Plaza" autocomplete="off">' +
       '<p class="wz-status" id="wz-status"></p>' +
@@ -2112,11 +2139,19 @@ function wzRender(){
     setTimeout(() => inp.focus(), 80);
   } else if(_wz.etapa === 2){
     const id = _identidade || {};
-    box.innerHTML =
-      '<h2>Código de pareamento</h2>' +
-      '<p class="wz-sub">No portal, abra <b>Lojas → + Nova loja</b> e cole este código. A loja é criada com o nome que você digitou.</p>' +
-      '<div class="wz-code">' + (formatarCodigoKiosk(id.kioskCode) || '—') + '</div>' +
-      '<p class="wz-status" id="wz-status"><span class="spin"></span>Registrando o nome no portal…</p>';
+    if(_wz.modo === 'vincular'){
+      box.innerHTML =
+        '<h2>Vincular a uma loja existente</h2>' +
+        '<p class="wz-sub">Peça para o administrador <b>adicionar este PDV</b> à loja desejada no portal, usando o código abaixo. Quando ele salvar, esta tela avança sozinha e a loja do portal passa a valer aqui.</p>' +
+        '<div class="wz-code">' + (formatarCodigoKiosk(id.kioskCode) || '—') + '</div>' +
+        '<p class="wz-status" id="wz-status"><span class="spin"></span>Aguardando vinculação no portal…</p>';
+    } else {
+      box.innerHTML =
+        '<h2>Código de pareamento</h2>' +
+        '<p class="wz-sub">No portal, abra <b>Lojas → + Nova loja</b> e cole este código. A loja é criada com o nome que você digitou.</p>' +
+        '<div class="wz-code">' + (formatarCodigoKiosk(id.kioskCode) || '—') + '</div>' +
+        '<p class="wz-status" id="wz-status"><span class="spin"></span>Registrando o nome no portal…</p>';
+    }
   } else if(_wz.etapa === 3){
     box.innerHTML =
       '<div class="wz-check">✔</div>' +
@@ -2186,6 +2221,11 @@ async function wzTick(){
   if(!_wz.ativo) return;
   if(_wz.etapa === 2){
     if(window.kioskPair && window.kioskPair.ok){ wzIr(3); return; }
+    if(_wz.modo === 'vincular'){
+      wzStatus('<span class="spin"></span>Aguardando o administrador adicionar este PDV a uma loja no portal…', 'warn');
+      emparelharKiosk();
+      return;
+    }
     if(!wzSeedOk) await wzEnviarSeed();
     if(wzSeedOk){
       wzStatus('<span class="spin"></span>Nome registrado — aguardando o admin criar a loja no portal com este código…', 'ok');
@@ -4017,16 +4057,17 @@ function showDescontoVendaModal(){
   });
   document.getElementById('btn-desconto-senha-master').addEventListener('click', ()=>{
     askSenhaMotivo('Desconto fora do catálogo', 'Caso excepcional — informe a senha master da loja e o motivo.', (senha,motivo)=>{
-      const valorStr = prompt('Valor do desconto em R$ (ex: 15.00):');
-      const valor = parseFloat((valorStr||'0').replace(',','.'));
-      if(!valor || valor<=0){ toast('Valor inválido — desconto não aplicado'); return; }
-      cart.push({
-        cartId:'desc-sm-'+Date.now(), tipo:'desconto-senha-master', produtoId:'senha-master', label:`Desconto fora do catálogo (senha ${senha})`,
-        qtd:1, precoUnit:-valor, preco:-valor,
-        sessionId: currentSession.id, sessionSenha: currentSession.senha, fotoSeed: currentFoto ? currentFoto.seed : currentSession.fotos[0].seed
+      askValor('Valor do desconto', 'Informe o valor do desconto em reais (ex: 15,00).', (valorStr)=>{
+        const valor = parseFloat((valorStr||'0').replace(',','.'));
+        if(!valor || valor<=0){ toast('Valor inválido — desconto não aplicado'); return; }
+        cart.push({
+          cartId:'desc-sm-'+Date.now(), tipo:'desconto-senha-master', produtoId:'senha-master', label:`Desconto fora do catálogo (senha ${senha})`,
+          qtd:1, precoUnit:-valor, preco:-valor,
+          sessionId: currentSession.id, sessionSenha: currentSession.senha, fotoSeed: currentFoto ? currentFoto.seed : currentSession.fotos[0].seed
+        });
+        renderCart(); updateRibbonBanner();
+        toast(`Desconto de ${fmt(valor)} aplicado — motivo registrado`);
       });
-      renderCart(); updateRibbonBanner();
-      toast(`Desconto de ${fmt(valor)} aplicado — motivo registrado`);
     });
   });
 }
@@ -4358,6 +4399,7 @@ function closeModal(){
    em script de módulo a função não é global, então expomos no window */
 window.closeModal = closeModal;
 window.openModal = openModal;
+window.showConfigModal = showConfigModal;
 let modalBloqueado = false;
 document.getElementById('modal-overlay').addEventListener('click', e=>{
   if(e.target.id==='modal-overlay' && !modalBloqueado) closeModal();
@@ -4493,6 +4535,17 @@ async function showConfigModal(){
       <button type="button" data-cfg-tab="system" style="padding:9px 16px;border:1px solid var(--navy-line);border-bottom:none;border-radius:8px 8px 0 0;background:transparent;color:var(--slate-300);font-size:12.5px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">🔒 Sistema</button>
     </div>
 
+    <div id="cfg-senha-box" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--navy-line);border-radius:10px;background:var(--navy-900);">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Senha do administrador</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="cfg-senha-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Digite a senha"
+          style="flex:1;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:16px;font-family:Arial,sans-serif;outline:none;" />
+        <button id="cfg-senha-ok" type="button"
+          style="padding:10px 18px;border:1px solid var(--gold-500);border-radius:8px;background:var(--gold-500);color:var(--navy-950);font-size:13px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">Entrar</button>
+      </div>
+      <div id="cfg-senha-erro" style="display:none;font-size:12px;color:var(--red-400);font-weight:600;margin-top:6px;">Senha incorreta.</div>
+    </div>
+
     <div data-cfg-sec="system" style="margin-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Pasta de fotos</div>
       <div style="display:flex;gap:8px;align-items:center;">
@@ -4621,11 +4674,22 @@ async function showConfigModal(){
 
   // Abas: "Sincronizar" (qualquer operador) e "Sistema" (senha do administrador).
   // A senha é só uma trava de UI: as configurações reais ficam atrás dela para o
-  // operador não mexer em pasta/loja/impressora/manutenção sem querer.
+  // operador não mexer em pasta/loja/impressora/manutenção sem querer. Nada de
+  // window.prompt aqui: o Electron não implementa prompt() (lança erro), então a
+  // senha é pedida num campo dentro do próprio modal.
   const SENHA_CFG_SISTEMA = '8694';
   let cfgUnlocked = false;
   const cfgTabBtns = [...document.querySelectorAll('[data-cfg-tab]')];
   const cfgSecs = [...document.querySelectorAll('[data-cfg-sec]')];
+  const senhaBox = document.getElementById('cfg-senha-box');
+  const senhaInput = document.getElementById('cfg-senha-input');
+  const senhaErro = document.getElementById('cfg-senha-erro');
+  const mostrarSenha = (mostrar)=>{
+    senhaBox.style.display = mostrar ? 'block' : 'none';
+    senhaErro.style.display = 'none';
+    senhaInput.value = '';
+    if(mostrar) setTimeout(() => senhaInput.focus(), 30);
+  };
   const ativarCfgTab = (tab)=>{
     cfgTabBtns.forEach(b => {
       const on = b.getAttribute('data-cfg-tab') === tab;
@@ -4636,15 +4700,26 @@ async function showConfigModal(){
     });
     cfgSecs.forEach(s => { s.style.display = (s.getAttribute('data-cfg-sec') === tab) ? '' : 'none'; });
   };
+  const tentarDesbloquear = ()=>{
+    if(String(senhaInput.value || '').trim() === SENHA_CFG_SISTEMA){
+      cfgUnlocked = true;
+      mostrarSenha(false);
+      ativarCfgTab('system');
+      return;
+    }
+    senhaErro.style.display = 'block';
+    senhaInput.value = '';
+    senhaInput.focus();
+  };
+  document.getElementById('cfg-senha-ok').onclick = tentarDesbloquear;
+  senhaInput.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter'){ e.preventDefault(); tentarDesbloquear(); }
+  });
   cfgTabBtns.forEach(btn => {
     btn.onclick = ()=>{
       const tab = btn.getAttribute('data-cfg-tab');
-      if(tab === 'system' && !cfgUnlocked){
-        const senha = window.prompt('Senha de administrador para abrir as configurações do sistema:');
-        if(senha == null) return;
-        if(String(senha).trim() !== SENHA_CFG_SISTEMA){ toast('⚠ Senha incorreta'); return; }
-        cfgUnlocked = true;
-      }
+      if(tab === 'system' && !cfgUnlocked){ mostrarSenha(true); return; }
+      if(tab === 'sync') mostrarSenha(false);
       ativarCfgTab(tab);
     };
   });
@@ -4718,18 +4793,19 @@ async function showConfigModal(){
     renderDigitalConfigPanel();
   };
   const syncClearBtn = document.getElementById('cfg-sync-clear');
-  if(syncClearBtn) syncClearBtn.onclick = async ()=>{
-    const senha = window.prompt('Senha de manutenção para limpar a fila de envio:');
-    if(!senha) return;
-    syncClearBtn.disabled = true;
-    try{
-      const r = await natalApi.filaPortalLimpar(senha);
-      if(r && r.success){
-        toast('Fila de envio limpa (' + (r.removidos || 0) + ' registro(s))');
-        _sync.pendentes = 0; renderSyncChip(); setSyncInfo('Fila de envio limpa.');
-      } else toast('⚠ ' + ((r && r.error) || 'Erro ao limpar a fila'));
-    }catch(e){ toast('⚠ ' + (e && e.message ? e.message : 'Erro ao limpar a fila')); }
-    syncClearBtn.disabled = false;
+  if(syncClearBtn) syncClearBtn.onclick = ()=>{
+    askSenhaTexto('Limpar fila de envio', 'Descarta os registros que ainda não foram enviados ao portal. Informe a senha de manutenção.', async (senha)=>{
+      syncClearBtn.disabled = true;
+      try{
+        const r = await natalApi.filaPortalLimpar(senha);
+        if(r && r.success){
+          toast('Fila de envio limpa (' + (r.removidos || 0) + ' registro(s))');
+          _sync.pendentes = 0; renderSyncChip(); setSyncInfo('Fila de envio limpa.');
+        } else toast('⚠ ' + ((r && r.error) || 'Erro ao limpar a fila'));
+      }catch(e){ toast('⚠ ' + (e && e.message ? e.message : 'Erro ao limpar a fila')); }
+      syncClearBtn.disabled = false;
+      await showConfigModal(); // volta ao ⚙ para o operador ver a fila zerada
+    });
   };
 
   renderDigitalConfigPanel();
@@ -4844,7 +4920,7 @@ async function abrirConfirmacaoLimparDados(){
   openModal(`
     <div class="modal-head">
       <div><div class="modal-step-label">Manutenção</div><h3>Limpar todos os dados</h3></div>
-      <button class="modal-close" onclick="abrirConfirmacaoLimparDados();showConfigModal()">×</button>
+      <button class="modal-close" onclick="showConfigModal()">×</button>
     </div>
     <p class="modal-sub">Use para zerar uma máquina com dados de teste. Não dá para desfazer.</p>
 
@@ -4999,17 +5075,18 @@ function renderCheckoutStep(total){
 
   const aplicarDesconto = (tipo, titulo)=>{
     askSenhaMotivo(titulo, `Código e motivo ficam registrados nesse pedido.`, (senha,motivo)=>{
-      const valorStr = prompt('Valor do desconto em R$ (ex: 15.00):');
-      const valor = parseFloat((valorStr||'0').replace(',','.'));
-      if(!valor || valor<=0){ toast('Valor inválido — desconto não aplicado'); return; }
-      cart.push({
-        cartId:'desc-'+tipo+'-'+Date.now(), tipo, produtoId:tipo, label:`${titulo} (senha ${senha})`,
-        qtd:1, precoUnit:-valor, preco:-valor,
-        sessionId: currentSession.id, sessionSenha: currentSession.senha, fotoSeed: currentFoto ? currentFoto.seed : currentSession.fotos[0].seed
+      askValor('Valor do desconto', 'Informe o valor do desconto em reais (ex: 15,00).', (valorStr)=>{
+        const valor = parseFloat((valorStr||'0').replace(',','.'));
+        if(!valor || valor<=0){ toast('Valor inválido — desconto não aplicado'); return; }
+        cart.push({
+          cartId:'desc-'+tipo+'-'+Date.now(), tipo, produtoId:tipo, label:`${titulo} (senha ${senha})`,
+          qtd:1, precoUnit:-valor, preco:-valor,
+          sessionId: currentSession.id, sessionSenha: currentSession.senha, fotoSeed: currentFoto ? currentFoto.seed : currentSession.fotos[0].seed
+        });
+        const novoTotal = cartTotal();
+        toast(`${titulo}: ${fmt(valor)} aplicado — motivo registrado`);
+        renderCheckoutStep(novoTotal);
       });
-      const novoTotal = cartTotal();
-      toast(`${titulo}: ${fmt(valor)} aplicado — motivo registrado`);
-      renderCheckoutStep(novoTotal);
     });
   };
   document.getElementById('btn-desc-falha').addEventListener('click', ()=>aplicarDesconto('desconto-falha-operacional','Desconto por falha operacional'));
@@ -5435,6 +5512,62 @@ function registrarUsoSenhaContexto(pedidoOrigemId, pedidoGeradoId){
   });
 }
 
+/* Modais de entrada — substituem window.prompt, que o Electron NÃO implementa
+   (chamar prompt() lança "prompt() is not supported" e a ação morria em silêncio). */
+function askValor(titulo, subtitulo, onConfirm, opts = {}){
+  const rotulo = opts.rotulo || 'Valor';
+  const placeholder = opts.placeholder || '0,00';
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">${rotulo}</div><h3>${titulo}</h3></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <p class="modal-sub">${subtitulo}</p>
+    <div class="pay-rows" style="margin-bottom:14px;">
+      <input type="text" id="av-valor" inputmode="decimal" autocomplete="off" placeholder="${placeholder}"
+        style="background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:12px 14px;font-size:18px;font-weight:700;text-align:center;width:100%;">
+    </div>
+    <button class="btn-primary" id="av-confirmar">Confirmar</button>
+  `);
+  const input = document.getElementById('av-valor');
+  const btn = document.getElementById('av-confirmar');
+  setTimeout(()=>{ try{ input.focus(); }catch{} }, 30);
+  const confirmar = ()=>{
+    const valorStr = String(input.value || '').trim();
+    if(!valorStr){ toast('Informe um valor'); return; }
+    closeModal();
+    onConfirm(valorStr);
+  };
+  btn.addEventListener('click', confirmar);
+  input.addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); confirmar(); } });
+}
+
+function askSenhaTexto(titulo, subtitulo, onConfirm){
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">Autorização</div><h3>${titulo}</h3></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <p class="modal-sub">${subtitulo}</p>
+    <div class="pay-rows" style="margin-bottom:14px;">
+      <input type="password" id="st-senha" autocomplete="off" placeholder="Senha"
+        style="background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:12px 14px;font-size:16px;text-align:center;width:100%;">
+    </div>
+    <button class="btn-primary" id="st-confirmar">Confirmar</button>
+  `);
+  const input = document.getElementById('st-senha');
+  const btn = document.getElementById('st-confirmar');
+  setTimeout(()=>{ try{ input.focus(); }catch{} }, 30);
+  const confirmar = ()=>{
+    const senha = String(input.value || '').trim();
+    if(!senha){ toast('Informe a senha'); return; }
+    closeModal();
+    onConfirm(senha);
+  };
+  btn.addEventListener('click', confirmar);
+  input.addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); confirmar(); } });
+}
+
 function askSenhaMotivo(titulo, subtitulo, onConfirm){
   openModal(`
     <div class="modal-head">
@@ -5573,31 +5706,32 @@ function showReopenOrder(pedidoId){
         return;
       }
       askSenhaMotivo('Cobrar diferença', `Pedido ${p.id} — ex: cliente trocou uma 10x15 por 15x20, cobrar a diferença de valor.`, (senha,motivo)=>{
-        const valorStr = prompt('Valor da diferença a cobrar em R$ (ex: 10.00):');
-        const valor = parseFloat((valorStr||'0').replace(',','.'));
-        if(!valor || valor<=0){ toast('Valor inválido — cobrança não aplicada'); return; }
-        showPaymentPickerModal(valor, null, 'Forma de pagamento da diferença',
-          `Pode ser uma forma diferente do restante do pedido — ${fmt(valor)} a cobrar.`,
-          (rows)=>{
-            p.itens.push({tipo:'ajuste', produtoId:'diferenca', label:`Diferença cobrada (senha ${senha})`, qtd:1, precoUnit:valor, preco:valor, sessionSenha:p.sessoes[0].senha, fotoSeed:p.itens[0].fotoSeed});
-            p.total = +(p.total + valor).toFixed(2);
-            p.pagamentosEfetivos = p.pagamentosEfetivos.concat(rows);
-            if(p.horario && p.horario.toDateString() === new Date().toDateString()) vendasHojeTotal += valor;
-            try{
-              // persiste a diferença no sidecar (senão some no restart e o portal fica com o total antigo)
-              natalApi.atualizarPedido(p._realId || p.id, {
-                total: p.total,
-                pagamentos: p.pagamentosEfetivos.filter(r=>r.valor>0).map(r=>{
-                  const m = meioInfoDeForma(r.forma);
-                  return { meio: m.meio, valor: r.valor, parcelas: m.parcelas || undefined };
-                }),
-              });
-              agendarPedidosPortal(500);
-              agendarSnapshotVendas(1200);
-            }catch(e){ console.warn('[pdv] falha ao persistir diferença:', e); }
-            toast(`Diferença de ${fmt(valor)} cobrada no ${p.id} — motivo registrado`);
-            renderPedidosScreen();
-          });
+        askValor('Valor da diferença', 'Informe o valor a cobrar em reais (ex: 10,00).', (valorStr)=>{
+          const valor = parseFloat((valorStr||'0').replace(',','.'));
+          if(!valor || valor<=0){ toast('Valor inválido — cobrança não aplicada'); return; }
+          showPaymentPickerModal(valor, null, 'Forma de pagamento da diferença',
+            `Pode ser uma forma diferente do restante do pedido — ${fmt(valor)} a cobrar.`,
+            (rows)=>{
+              p.itens.push({tipo:'ajuste', produtoId:'diferenca', label:`Diferença cobrada (senha ${senha})`, qtd:1, precoUnit:valor, preco:valor, sessionSenha:p.sessoes[0].senha, fotoSeed:p.itens[0].fotoSeed});
+              p.total = +(p.total + valor).toFixed(2);
+              p.pagamentosEfetivos = p.pagamentosEfetivos.concat(rows);
+              if(p.horario && p.horario.toDateString() === new Date().toDateString()) vendasHojeTotal += valor;
+              try{
+                // persiste a diferença no sidecar (senão some no restart e o portal fica com o total antigo)
+                natalApi.atualizarPedido(p._realId || p.id, {
+                  total: p.total,
+                  pagamentos: p.pagamentosEfetivos.filter(r=>r.valor>0).map(r=>{
+                    const m = meioInfoDeForma(r.forma);
+                    return { meio: m.meio, valor: r.valor, parcelas: m.parcelas || undefined };
+                  }),
+                });
+                agendarPedidosPortal(500);
+                agendarSnapshotVendas(1200);
+              }catch(e){ console.warn('[pdv] falha ao persistir diferença:', e); }
+              toast(`Diferença de ${fmt(valor)} cobrada no ${p.id} — motivo registrado`);
+              renderPedidosScreen();
+            });
+        });
       });
     });
 

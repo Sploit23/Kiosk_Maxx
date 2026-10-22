@@ -165,7 +165,19 @@ function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return fallback; }
 }
 function writeJson(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8');
+  // Escrita atômica: grava num .tmp e troca o arquivo de uma vez. Sem isso, uma
+  // queda de energia no meio do writeFileSync deixava o JSON truncado e o boot
+  // seguinte lia {} (perdendo machineId/kioskCode e, com eles, o pareamento).
+  const conteudo = JSON.stringify(data, null, 2);
+  const tmp = file + '.tmp';
+  try {
+    fs.writeFileSync(tmp, conteudo, 'utf-8');
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { fs.writeFileSync(file, conteudo, 'utf-8'); } catch {}
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+    void e;
+  }
 }
 function readText(file) {
   try { return fs.readFileSync(file, 'utf-8').trim(); } catch { return ''; }
@@ -183,6 +195,56 @@ function sanitizeSegment(s) {
 // a máquina física p/ emparelhamento no portal (kiosk.pair) e carimbos futuros.
 const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', lojaNome: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM' };
 let machineConfig = { ...MACHINE_DEFAULTS, ...readJson(CONFIG_FILE, {}) };
+
+// ─── Backup da identidade (machineId + kioskCode) ────────────
+// O config.json fica em <photosFolder>\natal-app\database — se a pasta de fotos
+// for apagada entre eventos, corrompida ou o disco falhar, o PDV perderia a
+// identidade e geraria outro código (desemparelhando sozinho). Esta cópia vive
+// FORA da pasta de fotos (C:\ProgramData\MaxxNatal) e é regravada a cada save;
+// no boot, se o config.json vier sem machineId/kioskCode, a identidade volta
+// do backup. Trocar de propósito continua sendo "Gerar novo código" (⚙) ou o
+// limpar-dados-pdv.ps1 -Completo (que apaga este backup também).
+const IDENTITY_BACKUP_FILE = (() => {
+  const programData = String(process.env.ProgramData || process.env.PROGRAMDATA || '').trim();
+  const dir = programData ? path.join(programData, 'MaxxNatal') : path.join(LEGACY_BOOT_DIR, 'database');
+  return path.join(dir, 'kiosk-identity.json');
+})();
+function salvarBackupIdentidade(mc) {
+  if (!mc || !mc.machineId || !mc.kioskCode) return;
+  try {
+    fs.mkdirSync(path.dirname(IDENTITY_BACKUP_FILE), { recursive: true });
+    writeJson(IDENTITY_BACKUP_FILE, {
+      machineId: mc.machineId,
+      kioskCode: mc.kioskCode,
+      lojaId: mc.lojaId || '',
+      lojaNome: mc.lojaNome || '',
+      pdvNome: mc.pdvNome || '',
+      atualizadoEm: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.warn('[natal-core] nao consegui gravar o backup de identidade:', e.message);
+  }
+}
+function restaurarIdentidadeSeFaltar() {
+  if (machineConfig.machineId && machineConfig.kioskCode) {
+    salvarBackupIdentidade(machineConfig); // mantém o backup fresco
+    return;
+  }
+  let bk = null;
+  try { bk = JSON.parse(fs.readFileSync(IDENTITY_BACKUP_FILE, 'utf-8')); } catch { return; }
+  if (!bk || !bk.machineId || !bk.kioskCode) return;
+  machineConfig = {
+    ...machineConfig,
+    machineId: bk.machineId,
+    kioskCode: bk.kioskCode,
+    lojaId: machineConfig.lojaId || bk.lojaId || '',
+    lojaNome: machineConfig.lojaNome || bk.lojaNome || '',
+    pdvNome: machineConfig.pdvNome || bk.pdvNome || '',
+  };
+  writeJson(CONFIG_FILE, machineConfig);
+  console.warn(`[natal-core] IDENTIDADE RESTAURADA do backup (${bk.kioskCode}) — config.json estava sem machineId/kioskCode`);
+}
+restaurarIdentidadeSeFaltar();
 persistFolderPointer(machineConfig.photosFolder);
 function getMachineConfig() { return machineConfig; }
 function setMachineConfig(partial) {
@@ -194,9 +256,22 @@ function setMachineConfig(partial) {
   // (botão "Gerar novo código" do ⚙) permite trocar deliberadamente.
   const forcar = entrada._forceIdentity === true;
   delete entrada._forceIdentity;
+  // Troca deliberada de loja (fluxo "vincular a uma loja existente" do wizard):
+  // permite sobrescrever lojaId/lojaNome sem liberar machineId/kioskCode.
+  const permitirLoja = entrada._allowLojaChange === true;
+  delete entrada._allowLojaChange;
   if (!forcar) {
     if (machineConfig.machineId && entrada.machineId) delete entrada.machineId;
     if (machineConfig.kioskCode && entrada.kioskCode) delete entrada.kioskCode;
+    // Pareamento/loja definidos no app também sobrevivem a saves parciais
+    // (wizard, ⚙ Config, atualização do app). Só mudam com _allowLojaChange
+    // ou com _forceIdentity (botão "Gerar novo código").
+    if (!permitirLoja) {
+      if (machineConfig.lojaId && entrada.lojaId) delete entrada.lojaId;
+      if (machineConfig.lojaNome && entrada.lojaNome) delete entrada.lojaNome;
+      if (machineConfig.pareadoEm && entrada.pareadoEm) delete entrada.pareadoEm;
+      if (machineConfig.pareadoLojaId && entrada.pareadoLojaId) delete entrada.pareadoLojaId;
+    }
   }
   const novo = { ...MACHINE_DEFAULTS, ...machineConfig, ...entrada };
   const novoFolder = String(novo.photosFolder || '').trim();
@@ -212,6 +287,7 @@ function setMachineConfig(partial) {
     recarregarEstadoLocal();
   }
   writeJson(CONFIG_FILE, machineConfig);
+  salvarBackupIdentidade(machineConfig);
   ensurePhotosWatcher();
 }
 

@@ -373,6 +373,20 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   emparelhado, `portalApi.login()/equipe()` usam o `lojaId` devolvido no lugar
   do `config.lojaId`. Bloqueio de clone: `KIOSK_NAO_EMPARELELHADO`,
   `MAQUINA_JA_EMPARELHADA`, `CODIGO_EM_USO`.
+- **Identidade resistente a perda de config (`natal-core.cjs`)** — `machineId`
+  e `kioskCode` vivem no `config.json` da pasta de dados (dentro de
+  `<photosFolder>\natal-app`), então apagar essa pasta/corromper o arquivo
+  desemparelharia a máquina. Por isso o sidecar mantém um **backup fora da
+  pasta de fotos** em `C:\ProgramData\MaxxNatal\kiosk-identity.json`
+  (`IDENTITY_BACKUP_FILE`), regravado a cada `POST /api/config`; no boot, se o
+  `config.json` vier sem `machineId`/`kioskCode`, a identidade (e loja salva no
+  app) é restaurada do backup e reescrita no `config.json` — config existente
+  sempre tem prioridade. `writeJson()` passou a ser **atômico** (`.tmp` +
+  rename), evitando JSON truncado por queda de energia. Trocar de propósito
+  continua sendo o botão "Gerar novo código" (`_forceIdentity`) ou o script
+  `-Completo`. O portal autoriza push pelo `machineId` (o `kioskCode` é só a
+  chave do `kiosk.pair`), então perder só o código não bloqueia a fila local —
+  basta o admin colar o novo código na loja.
 - **Wizard de 1º uso (PDV `vendas.html` + `admin.html`)** — assistente no
   overlay `#wizard-overlay` (funções `wz*`), mostrado **só quando a config não
   tem `lojaNome`** (e sem `window.kioskPair.ok`): 1) operador digita o **nome
@@ -432,14 +446,18 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   com o portal" (pendentes, "Sincronizar agora", "Limpar fila de envio") +
   painel "Envio digital" com um botão **Sincronizar** por código pendente (força
   o upload na hora em que a internet volta; o worker de 60s continua de
-  fallback); **🔒 Sistema** (exige senha **`8694`** via `window.prompt`,
-  `SENHA_CFG_SISTEMA`) = pasta de fotos nativa (IPC `natal:selectFolder` →
+  fallback); **🔒 Sistema** (exige senha **`8694`**, `SENHA_CFG_SISTEMA`, digitada
+  num campo dentro do próprio modal — `#cfg-senha-box`; **nunca** usar
+  `window.prompt`, que o Electron não implementa e lança erro) = pasta de fotos
+  nativa (IPC `natal:selectFolder` →
   `dialog.showOpenDialog`), logo do shopping, status real da impressora
   (10x15/15x20, connected, lastError), fila de impressão, "Loja desta máquina"
   (`lojaId`/`lojaNome`), emparelhamento/kioskCode, versão/atualização,
   manutenção ("Limpar dados") e o botão **Salvar** (grava nos dois lugares). O
   desbloqueio vale só enquanto o modal está aberto. As seções são marcadas com
-  `data-cfg-sec="sync|system"` e as abas com `data-cfg-tab`.
+  `data-cfg-sec="sync|system"` e as abas com `data-cfg-tab`. Entradas de valor e
+  senha usam os modais `askValor()` / `askSenhaTexto()` (o Electron não suporta
+  `window.prompt`; usos antigos de prompt foram convertidos).
 - **Importador de pasta de fotos** (`natal-core.cjs`) — regra da drop zone em
   `photosFolder`: **1 subpasta = 1 sessão**. O programa externo cria uma
   subpasta por cliente e salva `*.jpg|*.jpeg|*.png` nela; o sidecar escaneia a
@@ -463,7 +481,7 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 - `npm run release` — build + publish GitHub (release)
 - `npm run lint` — ESLint
 - `backend/publish.ps1` — deploy FTP do portal PHP **+ página `/natal`** (credenciais em `../../credencial.txt`)
-- `tools/limpar-dados-pdv.ps1` — zera os dados de teste do PDV (sessões, pedidos, caixa, fila de impressão, auditoria, contador de ribbon) com backup automático. Acha a pasta de dados sozinho (API `:9877/api/config` → ponteiro `%APPDATA%\natal-kiosk\database\fotos-folder.txt` → `electron-config.json` → `config.json`) e **recusa rodar com o app aberto** (o sidecar reescreve os arquivos em memória). Flags: `-DryRun` (só mostra), `-Completo` (apaga `database\config.json` → novo `machineId`/`kioskCode`, exigindo re-emparelhamento no portal), `-Forcar`. Depois de limpar é preciso **abrir um novo caixa** no PDV.
+- `tools/limpar-dados-pdv.ps1` — zera os dados de teste do PDV (sessões, pedidos, caixa, fila de impressão, auditoria, contador de ribbon) com backup automático. Acha a pasta de dados sozinho (API `:9877/api/config` → ponteiro `%APPDATA%\natal-kiosk\database\fotos-folder.txt` → `electron-config.json` → `config.json`) e **recusa rodar com o app aberto** (o sidecar reescreve os arquivos em memória). Flags: `-DryRun` (só mostra), `-Completo` (apaga `database\config.json` + o backup `C:\ProgramData\MaxxNatal\kiosk-identity.json` → novo `machineId`/`kioskCode`, exigindo re-emparelhamento no portal), `-Forcar`. Depois de limpar é preciso **abrir um novo caixa** no PDV.
 
 - **Auto-update (electron-updater):** o main checa atualizações no boot (10s) e
   de 60 em 60s quando ocioso (`performAutoUpdate`, `autoDownload=false`); o
@@ -490,5 +508,9 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   de desconto/perda). O cache offline (TOFU) guarda só sha256.
 - **Limpar a fila de envio exige senha** (`HCss221087`) justamente para o
   operador não apagar pendências sem querer.
+- **`window.prompt` não existe no Electron** (lança "prompt() is not supported"
+  e a ação morre em silêncio). Toda entrada de texto/valor usa `openModal()` +
+  `askValor()` / `askSenhaTexto()`; `alert`/`confirm` funcionam (`window.confirm`
+  é usado nas confirmações).
 - **`php` CLI não existe nesta máquina** — lint/validação do `backend/api.php`
   é manual (na web ou com PHP instalado).
