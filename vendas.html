@@ -2822,6 +2822,54 @@ function abrirQrDigital(codigo){
   atualizarStatusDigitalRemoto(codigo);
 }
 
+/* Painel do ⚙ Config: um botão de sincronizar por CÓDIGO pendente. O envio
+   automático continua rodando (60s), mas aqui o operador força na hora em que a
+   internet volta — sem esperar. */
+async function renderDigitalConfigPanel(){
+  const list = document.getElementById('cfg-digital-list');
+  if(!list) return;
+  let itens = [];
+  try{
+    const f = await natalApi.galeriaFila();
+    itens = ((f && f.itens) || []).filter(i => i.pendente);
+  }catch{ }
+  if(!itens.length){
+    list.innerHTML = '<div style="font-size:12px;color:var(--slate-500);">Nenhuma foto digital aguardando envio.</div>';
+    return;
+  }
+  list.innerHTML = itens.map(i => {
+    const fotos = Number(i.fotos) || 0;
+    const enviadas = Number(i.enviadas) || 0;
+    const falta = Math.max(0, fotos - enviadas);
+    const situacao = falta > 0
+      ? `${falta} de ${fotos} foto${fotos === 1 ? '' : 's'} pendente${falta === 1 ? '' : 's'}`
+      : 'fotos enviadas — falta publicar';
+    return `<button type="button" data-sync-digital="${i.codigo}" style="display:flex;flex-direction:column;gap:2px;align-items:flex-start;text-align:left;padding:10px 14px;border:1px solid var(--amber-500);border-radius:8px;background:rgba(245,158,11,.08);color:var(--slate-200);font-size:12.5px;cursor:pointer;font-family:Arial,sans-serif;width:100%;">
+      <b style="font-size:13px;color:var(--gold-300);">🔄 Sincronizar ${i.codigo}</b>
+      <span style="color:var(--slate-400);">${situacao}</span>
+    </button>`;
+  }).join('');
+  list.querySelectorAll('[data-sync-digital]').forEach(btn => {
+    btn.onclick = async ()=>{
+      const codigo = btn.getAttribute('data-sync-digital');
+      btn.disabled = true;
+      const span = btn.querySelector('span');
+      if(span) span.textContent = 'Sincronizando…';
+      try{
+        const r = await natalApi.sincronizarGaleria(codigo);
+        const item = ((r && r.itens) || []).find(i => i.codigo === codigo);
+        if(item && item.manifestoEnviado) toast(`✅ Fotos do código ${codigo} publicadas`);
+        else toast('⚠ Ainda sem internet — as fotos continuam guardadas. Tente de novo em instantes.');
+      }catch(e){
+        toast('⚠ ' + (e && e.message ? e.message : 'Falha ao sincronizar'));
+      }
+      atualizarStatusDigitalRemoto(codigo);
+      renderDigitalConfigPanel();
+      renderSyncChip();
+    };
+  });
+}
+
 async function finalizarVenda(){
   const total = cartTotal();
   const origemRealId = editingPedidoId
@@ -4536,6 +4584,12 @@ async function showConfigModal(){
     </div>
 
     <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Envio digital (fotos no celular)</div>
+      <div id="cfg-digital-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Vendeu com o PC sem internet? As fotos ficam guardadas aqui. Quando a internet voltar, toque em <b>Sincronizar</b> para subir na hora.</div>
+    </div>
+
+    <div style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Versão e atualização</div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span style="font-size:13px;color:var(--slate-300);">Versão instalada: <b style="color:var(--gold-300);">v${versaoAtual||'—'}</b></span>
@@ -4619,13 +4673,14 @@ async function showConfigModal(){
   const syncNowBtn = document.getElementById('cfg-sync-now');
   if(syncNowBtn) syncNowBtn.onclick = async ()=>{
     syncNowBtn.disabled = true; setSyncInfo('Sincronizando…');
-    try{ await enfileirarPendentesPortal(); await drenarFilaPortal(); }catch{ }
+    try{ await enfileirarPendentesPortal(); await drenarFilaPortal(); await natalApi.sincronizarGaleria(); }catch{ }
     try{
       const r = await natalApi.filaPortalList();
       const n = (r && r.total) || 0;
       setSyncInfo(n ? (n + ' registro(s) ainda pendente(s)') : 'Tudo em dia com o portal.');
     }catch{ setSyncInfo('Sem resposta do sidecar.'); }
     renderSyncChip(); syncNowBtn.disabled = false;
+    renderDigitalConfigPanel();
   };
   const syncClearBtn = document.getElementById('cfg-sync-clear');
   if(syncClearBtn) syncClearBtn.onclick = async ()=>{
@@ -4641,6 +4696,8 @@ async function showConfigModal(){
     }catch(e){ toast('⚠ ' + (e && e.message ? e.message : 'Erro ao limpar a fila')); }
     syncClearBtn.disabled = false;
   };
+
+  renderDigitalConfigPanel();
 
   document.querySelectorAll('[data-limpa-fila]').forEach(btn => {
     btn.onclick = async ()=>{
@@ -6341,7 +6398,7 @@ async function INIT(){
     }
     if(key==='printer:progress'){ if(data && data.total) _printProgress = { current: Math.min(data.current || 0, data.total), total: data.total }; renderRibbonChip(); }
     if(key==='print-fila:atualizada'){ _sincronizarEstadoFila(); }
-    if(key==='galeria:enviado' && data && data.codigo){ atualizarStatusDigitalRemoto(data.codigo); }
+    if(key==='galeria:enviado' && data && data.codigo){ atualizarStatusDigitalRemoto(data.codigo); renderDigitalConfigPanel(); }
     if(key==='print-complete'){
       printando = false; _printProgress = null; _printFila = 0; _printFilaUltimoAviso = 0;
       if(data && data.success === false){ mostrarFalhaImpressao('Falha na impressão', data.error || 'Falha na impressão ASK-400'); }

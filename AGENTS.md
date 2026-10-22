@@ -94,7 +94,7 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 | POST | `/api/galeria/upload/:codigo/:seq` | Upload do JPEG final do envio digital (pose única) — grava em disco e tenta FTP |
 | POST | `/api/galeria/finalizar/:codigo` | Fecha o envio digital `{total, pedidoId}` → libera o manifesto (sobe por último) |
 | GET | `/api/galeria/fila` | Estado dos envios digitais `{itens, pendentes, fotosPendentes, urlBase}` |
-| POST | `/api/galeria/fila/sincronizar` | Força o reenvio das galerias pendentes (worker também roda a cada 60s) |
+| POST | `/api/galeria/fila/sincronizar` | Força o reenvio das galerias pendentes (`{codigo}` opcional = só aquele código; worker também roda a cada 60s) |
 | GET | `/api/pdv/caixa` | Estado do caixa atual |
 | GET | `/api/pdv/caixas` | Histórico de caixas fechados (persistido em `caixas.json`, ordenado do mais recente primeiro) |
 | POST | `/api/pdv/caixa/abrir` | Abre caixa (`CX-...`) |
@@ -430,7 +430,9 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   (IPC `natal:selectFolder` → `dialog.showOpenDialog`) + status real da
   impressora (10x15/15x20, connected, lastError) + seção "Loja desta máquina"
   (`lojaId`/`lojaNome`) + painel "Sincronização com o portal" (pendentes,
-  "Sincronizar agora", "Limpar fila de envio"), e salva nos dois lugares.
+  "Sincronizar agora", "Limpar fila de envio") + painel "Envio digital" com um
+  botão **Sincronizar** por código pendente (força o upload na hora em que a
+  internet volta; o worker de 60s continua de fallback), e salva nos dois lugares.
 - **Importador de pasta de fotos** (`natal-core.cjs`) — regra da drop zone em
   `photosFolder`: **1 subpasta = 1 sessão**. O programa externo cria uma
   subpasta por cliente e salva `*.jpg|*.jpeg|*.png` nela; o sidecar escaneia a

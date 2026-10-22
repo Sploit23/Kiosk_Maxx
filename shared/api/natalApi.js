@@ -83,7 +83,7 @@ const natalApi = {
   finalizarGaleria: (codigo, dados) =>
     api('POST', `/api/galeria/finalizar/${encodeURIComponent(codigo)}`, dados || {}),
   galeriaFila: () => api('GET', '/api/galeria/fila'),
-  sincronizarGaleria: () => api('POST', '/api/galeria/fila/sincronizar', {}),
+  sincronizarGaleria: (codigo) => api('POST', '/api/galeria/fila/sincronizar', codigo ? { codigo } : {}),
 
   // ─── Impressão ASK-400 (produção) ────────────────────────  // Envia o JPEG final de cada foto composta no PDV para a fila do pedido.
   uploadImpressao: (pedidoId, filename, blob) =>

@@ -1481,7 +1481,17 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (method === 'POST' && p === '/api/galeria/fila/sincronizar') {
-      await sincronizarGaleriasPendentes();
+      let body = {};
+      try {
+        const raw = await readBody(req, 64 * 1024);
+        if (raw.length) body = JSON.parse(raw.toString('utf-8') || '{}');
+      } catch {}
+      const codigo = String(body.codigo || '').trim().toUpperCase();
+      if (codigo && galeriaCodigoValido(codigo)) {
+        await sincronizarGaleria(codigo); // só o código pedido (respeita o que já subiu)
+      } else {
+        await sincronizarGaleriasPendentes();
+      }
       const itens = listarGalerias().map(galeriaStatusUI);
       return sendJson(res, 200, { success: true, itens, pendentes: itens.filter((i) => i.pendente).length });
     }
