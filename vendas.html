@@ -2320,6 +2320,7 @@ function renderImportChip(){
   const card = imp.card || {};
   const prog = imp.progress || {};
   const dl = imp.download || {};
+  const peer = imp.peer || {};
   const batches = Array.isArray(imp.batches) ? imp.batches : [];
   const sessoes = r.sessoes || {};
   const pendentes = batches.filter(b => b.done && !sessoes[b.name]).length;
@@ -2331,11 +2332,14 @@ function renderImportChip(){
   else if(pendentes > 0) txt = `💳 ${pendentes} lote${pendentes === 1 ? '' : 's'} aguardando`;
   else if(card.state === 'detected') txt = `💳 Cartão detectado${card.drive ? ' (' + card.drive + ')' : ''}`;
   else if(card.state === 'finished' || card.state === 'all_imported') txt = '💳 Cartão: em dia';
+  else if(peer.found) txt = '💳 Cartão: outro PC conectado';
   else txt = '💳 Cartão';
   el.textContent = txt;
   el.title = !r.online
     ? 'O importador de fotos do cartão não está respondendo nesta máquina.'
-    : (card.message || card.badge || 'Fotos recebidas do cartão');
+    : (peer.found
+        ? `Outro PC: ${peer.name || 'sem nome'} (${peer.ip || '?'})${peer.status ? ' — ' + peer.status : ''}`
+        : (card.message || card.badge || 'Fotos recebidas do cartão'));
 }
 
 async function atualizarStatusImport(){
@@ -2345,6 +2349,8 @@ async function atualizarStatusImport(){
     _importStatus = null;
   }
   renderImportChip();
+  const info = document.getElementById('cfg-import-info');
+  if(info && info.offsetParent) renderImportConfigPanel(); // aba Cartão aberta: mantém o peer fresco
 }
 
 /* Aba "Cartão" do ⚙: estado do importador + lotes recebidos + toggle. */
@@ -2361,16 +2367,29 @@ async function renderImportConfigPanel(){
   }
   const imp = r.importer || {};
   const card = imp.card || {};
+  const peer = imp.peer || {};
   const online = !!r.online;
   const sessoes = r.sessoes || {};
   const batches = Array.isArray(imp.batches) ? imp.batches : [];
   const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const pasta = r.importFolder || '';
+  const peerLost = !peer.found && /desconectad/i.test(peer.status || '');
+  const peerTxt = !online
+    ? '○ Descoberta de rede indisponível (importador parado)'
+    : peer.found
+    ? `● Outro PC conectado: <b>${esc(peer.name || 'sem nome')}</b> (${esc(peer.ip || '?')})` +
+      (peer.status ? ` <span style="color:var(--slate-400);font-weight:400;">— ${esc(peer.status)}</span>` : '')
+    : peerLost
+      ? '○ Outro PC desconectado — procurando de novo na rede…'
+      : '○ Nenhum outro PC encontrado na rede — este PDV está trabalhando sozinho';
+  const peerCor = !online ? 'var(--slate-500)' : peer.found ? 'var(--green-400)' : (peerLost ? 'var(--amber-500)' : 'var(--slate-500)');
   info.innerHTML = `
     <div style="font-size:12.5px;color:${online ? 'var(--green-400)' : 'var(--red-400)'};font-weight:700;">
       ${online ? '● Importador ativo' : '○ Importador não está rodando'}
       <span style="color:var(--slate-400);font-weight:400;">— ${esc(card.badge || card.message || 'aguardando cartão')}</span>
     </div>
+    <div style="font-size:11.5px;margin-top:4px;color:${peerCor};font-weight:${peer.found ? 600 : 400};">${peerTxt}</div>
+    ${peer.error ? `<div style="font-size:11px;color:var(--amber-500);margin-top:2px;">${esc(peer.error)}</div>` : ''}
     <div style="font-size:11px;color:var(--slate-500);margin-top:4px;word-break:break-all;">Pasta dos lotes: ${esc(pasta || '—')}</div>`;
 
   const list = document.getElementById('cfg-import-list');

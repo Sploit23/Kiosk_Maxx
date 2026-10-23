@@ -476,9 +476,12 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   painel "Envio digital" com um botão **Sincronizar** por código pendente (força
   o upload na hora em que a internet volta; o worker de 60s continua de
   fallback); **💳 Cartão** (qualquer operador, `data-cfg-tab="card"`) = estado do
-  importador, lotes recebidos (`lote → sessão`), "Procurar fotos agora"
-  (`POST /api/import/sincronizar`), "Abrir pasta" (IPC `natal:openPath`) e o
-  toggle **Criar sessões das fotos recebidas neste PC** (`importSessoes`);
+  importador, **outro PC da rede** (`peer`: conectado com nome/IP + status, ou
+  "nenhum outro PC encontrado"), lotes recebidos (`lote → sessão`), "Procurar
+  fotos agora" (`POST /api/import/sincronizar`), "Abrir pasta" (IPC
+  `natal:openPath`) e o toggle **Criar sessões das fotos recebidas neste PC**
+  (`importSessoes`); o chip da topbar também mostra "outro PC conectado" quando
+  o PDV está ocioso (`peer.found`);
   **🔒 Sistema** (exige senha **`8694`**, `SENHA_CFG_SISTEMA`, digitada
   num campo dentro do próprio modal — `#cfg-senha-box`; **nunca** usar
   `window.prompt`, que o Electron não implementa e lança erro) = pasta de fotos
