@@ -53,6 +53,33 @@ function loadConfig() {
 }
 loadConfig();
 
+// Instalacao nova chega sem pasta de fotos e o importador do cartao nunca
+// subia ("Pasta de fotos ainda nao configurada"), deixando o PC sem receber
+// nada. Documentos\Natal_Recebidas funciona sem senha e pode ser trocada no
+// ⚙ Config > Sistema (a pasta escolhida continua tendo prioridade).
+function aplicarPastaDeFotosPadrao() {
+  if (String(config.photosFolder || '').trim()) return;
+  let docs = '';
+  try { docs = app.getPath('documents'); } catch {}
+  if (!docs) docs = path.join(process.env.USERPROFILE || '', 'Documents');
+  const pasta = path.join(docs, 'Natal_Recebidas');
+  try {
+    fs.mkdirSync(pasta, { recursive: true });
+  } catch (e) {
+    console.warn(`[Config] nao consegui criar a pasta padrao ${pasta}: ${(e && e.message) || e}`);
+    return;
+  }
+  config.photosFolder = pasta;
+  try {
+    fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+  } catch (e) {
+    // Sem permissao de escrita a pasta ainda vale para esta sessao (env abaixo).
+    console.warn(`[Config] nao consegui gravar ${CONFIG_PATH}: ${(e && e.message) || e}`);
+  }
+  logMain(`[Config] pasta de fotos padrao: ${pasta}`);
+}
+
 // ─── 1. Sidecar servidor (natal-core.cjs) ───────────────────
 const SIDECAR_MAX_RESTARTS = 5;
 let sidecarRestartCount = 0;
@@ -753,6 +780,7 @@ function performAutoUpdate() {
 
 // ─── 7. Lifecycle ───────────────────────────────────────────
 app.whenReady().then(() => {
+  aplicarPastaDeFotosPadrao();
   startSidecar();
   startJavaSidecar();
   createWindow();

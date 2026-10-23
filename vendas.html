@@ -2475,7 +2475,7 @@ async function renderRecebimento(){
   st.innerHTML = `<span style="color:${cor};">${s}</span>`;
 
   let a = '';
-  if(!r.online) a = 'O importador embutido não respondeu nesta máquina.';
+  if(!r.online) a = imp.lastError ? `Importador parado: ${imp.lastError}.` : 'O importador embutido não respondeu nesta máquina.';
   else if(dl && dl.total) a = `⬇ Baixando do outro PC: ${dl.count || 0}/${dl.total}${dl.batch ? ' — ' + esc(dl.batch) : ''}`;
   else if(prog && prog.total) a = `📥 Copiando do cartão: ${prog.count || 0}/${prog.total}`;
   else if(card.state === 'copying' || imp.copying) a = '📥 Lendo o cartão…';
@@ -2555,11 +2555,16 @@ async function renderImportConfigPanel(){
     try{ d = await window.natal?.importerInfo(); }catch{}
     if(d){
       const linhas = [];
+      const semPasta = /pasta de fotos/i.test(d.lastError || '');
       if(!d.exeExists) linhas.push('Arquivo do importador nao encontrado (instalacao incompleta ou antivirus).');
       if(d.lastError) linhas.push(d.lastError);
       if(d.portBusy && !d.online) linhas.push('A porta 8099 esta em uso por outro programa.');
+      if(semPasta) linhas.push('O importador do cartao so inicia depois de definir a pasta de fotos.');
       if(linhas.length){
-        diagHtml = `<div style="font-size:11px;color:var(--amber-500);background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:6px 8px;margin-top:6px;">${linhas.map(esc).join('<br>')}<div style="color:var(--slate-500);margin-top:4px;">Log: ${esc(d.logFile || '')}</div></div>`;
+        const btnFotos = semPasta
+          ? '<button id="cfg-fotos-btn" type="button" style="margin-top:8px;padding:7px 12px;border:1px solid var(--gold-500);border-radius:8px;background:var(--gold-500);color:var(--navy-950);font-size:12px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">Definir pasta de fotos</button>'
+          : '';
+        diagHtml = `<div style="font-size:11px;color:var(--amber-500);background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:6px 8px;margin-top:6px;">${linhas.map(esc).join('<br>')}<div style="color:var(--slate-500);margin-top:4px;">Log: ${esc(d.logFile || '')}</div>${btnFotos}</div>`;
       }
     }
   }
@@ -2572,6 +2577,9 @@ async function renderImportConfigPanel(){
       <span style="color:var(--slate-400);font-weight:400;">— ${esc(card.badge || card.message || 'aguardando cartão')}</span>
     </div>
     <div style="font-size:11px;color:var(--slate-500);margin-top:4px;word-break:break-all;">Pasta dos lotes: ${esc(pasta || '—')}</div>`;
+
+  const btnFotos = document.getElementById('cfg-fotos-btn');
+  if(btnFotos) btnFotos.onclick = () => showConfigModal('system');
 
   const list = document.getElementById('cfg-import-list');
   if(!list) return;
@@ -5021,6 +5029,7 @@ async function showConfigModal(tabInicial){
         <button id="cfg-browse" style="padding:10px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;white-space:nowrap;font-family:Arial,sans-serif;">Procurar</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Onde o software do fotógrafo salva as fotos nesta máquina.</div>
+      ${folder ? '' : '<div style="font-size:11px;color:var(--amber-500);font-weight:600;margin-top:4px;">Vazia = o importador do cartão não roda. Escolha uma pasta acima.</div>'}
     </div>
 
     <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">

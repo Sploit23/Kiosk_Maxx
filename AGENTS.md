@@ -533,6 +533,12 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   "Reiniciar importador". Para no `will-quit`. O app NÃO pede UAC: as regras de
   firewall (TCP 8099 + UDP 50000 para o exe do importador) são criadas pelo
   instalador NSIS elevado (`build/installer.nsh`, `perMachine: true`).
+  Máquina nova sem `photosFolder` ganha o default **`Documentos\Natal_Recebidas`**
+  no boot (`aplicarPastaDeFotosPadrao` em `electron-main.cjs`, gravado no
+  `electron-config.json` e passado via `NATAL_PHOTOS_FOLDER`) — antes o
+  importador ficava parado com "Pasta de fotos ainda nao configurada" e o PC
+  não recebia nada; a pasta escolhida no ⚙ tem prioridade e o diagnóstico da
+  aba Cartão mostra o motivo real com o botão **Definir pasta de fotos**.
 - **Importação de lotes do cartão** (`natal-core.cjs`) — regra da drop zone:
   **1 subpasta = 1 sessão**, tanto em `photosFolder` (programa externo) quanto em
   `importFolder` (importador embutido). No `importFolder`, a subpasta só é
