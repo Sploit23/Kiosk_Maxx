@@ -259,6 +259,26 @@
   .login-kiosk b{color:var(--gold-300);font-family:ui-monospace,Consolas,monospace;letter-spacing:2px;font-size:13px;}
   .login-kiosk .pair-ok{color:var(--green-500);}
   .login-kiosk .pair-no{color:var(--amber-500);}
+  .login-peer{
+    display:flex;align-items:center;gap:8px;justify-content:center;width:100%;
+    margin:0 0 14px;padding:8px 14px;border-radius:999px;
+    border:1px solid var(--navy-line);background:var(--navy-850);
+    color:var(--slate-300);font-size:12.5px;font-weight:600;
+    cursor:pointer;font-family:inherit;transition:border-color .15s,background .15s;
+  }
+  .login-peer:hover{border-color:var(--gold-500);background:var(--navy-800);}
+  .login-peer .hint{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--gold-300);white-space:nowrap;}
+  .login-peer #login-peer-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+  .login-peer .dot{width:8px;height:8px;border-radius:50%;background:var(--slate-500);flex:0 0 auto;}
+  .login-peer.on{border-color:rgba(34,197,94,.45);color:var(--green-400);}
+  .login-peer.on .dot{background:var(--green-500);box-shadow:0 0 8px rgba(34,197,94,.8);}
+  .login-peer.warn{border-color:rgba(245,158,11,.45);color:var(--amber-500);}
+  .login-peer.warn .dot{background:var(--amber-500);}
+  .login-peer.off{border-color:rgba(248,113,113,.4);color:var(--red-400);}
+  .login-peer.off .dot{background:var(--red-400);}
+  .card-ic{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;}
+  .card-ic svg{width:14px;height:14px;}
+  #import-chip{display:inline-flex;align-items:center;gap:6px;}
   .sales-eye:hover{border-color:var(--gold-500);}
   .sales-eye.revealed{color:var(--gold-300);font-weight:700;border-color:var(--gold-500);}
 
@@ -1104,7 +1124,26 @@
       <button class="btn-primary" id="login-entrar">Entrar</button>
     </div>
     <p class="login-error" id="login-error"></p>
+    <button type="button" class="login-peer" id="login-peer" style="display:none;"><span class="dot"></span><span id="login-peer-txt"></span><span class="hint">ver fotos ›</span></button>
     <p class="login-kiosk" id="login-kiosk">🖥️ Código do kiosk: <b id="kiosk-code-el">—</b><br><span id="kiosk-pair-st"></span></p>
+  </div>
+</div>
+
+<!-- ============ RECEBIMENTO DE FOTOS (aberto pela pílula do login) ============ -->
+<div class="modal-overlay" id="receive-overlay" style="z-index:250;">
+  <div class="modal-box" style="width:620px;">
+    <div class="modal-head">
+      <div>
+        <div class="modal-step-label">Recebimento de fotos</div>
+        <h3 style="margin:0;font-size:18px;color:var(--gold-050);">Sessões que estão chegando</h3>
+      </div>
+      <button type="button" id="receive-close" style="padding:6px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;font-family:inherit;">Fechar</button>
+    </div>
+    <div id="receive-status" style="font-size:12.5px;font-weight:700;margin:10px 0 4px;">—</div>
+    <div id="receive-activity" style="font-size:11.5px;color:var(--slate-400);min-height:16px;margin-bottom:10px;"></div>
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--slate-500);font-weight:700;margin:4px 0 6px;">Sessões recentes</div>
+    <div id="receive-list" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;"></div>
+    <div style="font-size:10.5px;color:var(--slate-500);margin-top:10px;">Atualiza sozinho a cada 2,5s — pode deixar esta tela aberta.</div>
   </div>
 </div>
 
@@ -1141,7 +1180,7 @@
     <div class="op-chip sales-eye" id="sales-eye">
       <span id="sales-eye-icon">👁️</span> <span id="sales-eye-value">Vendas de hoje</span>
     </div>
-    <button class="op-chip op-chip-btn" id="import-chip" style="display:none;" title="Fotos recebidas do cartão">💳 Cartão</button>
+    <button class="op-chip op-chip-btn" id="import-chip" style="display:none;" title="Cartão de memória e conexão com o outro PC"><span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6l2-4z"/><path d="M9 2v5h7V2"/><path d="M9 12h6M9 16h6"/></svg></span><span id="import-chip-txt">Cartão</span></button>
     <div class="op-chip" id="ribbon-chip">🖨️ Ribbon: — un.</div>
     <button class="op-chip op-chip-btn" id="user-chip">👤 —</button>
     <button class="op-chip op-chip-btn" id="btn-config" title="Configurações">⚙</button>
@@ -2314,7 +2353,7 @@ function renderImportChip(){
   const el = document.getElementById('import-chip');
   if(!el) return;
   const r = _importStatus;
-  if(!r || !r.success){ el.style.display = 'none'; return; }
+  if(!r || !r.success){ el.style.display = 'none'; renderLoginPeer(r); return; }
   el.style.display = '';
   const imp = r.importer || {};
   const card = imp.card || {};
@@ -2325,21 +2364,139 @@ function renderImportChip(){
   const sessoes = r.sessoes || {};
   const pendentes = batches.filter(b => b.done && !sessoes[b.name]).length;
   let txt;
-  if(!r.online) txt = '💳 Cartão: sem conexão';
-  else if(dl && dl.total) txt = `💳 Baixando ${dl.count || 0}/${dl.total}`;
-  else if(prog && prog.total) txt = `💳 Copiando ${prog.count || 0}/${prog.total}`;
-  else if(card.state === 'copying' || imp.copying) txt = '💳 Lendo cartão…';
-  else if(pendentes > 0) txt = `💳 ${pendentes} lote${pendentes === 1 ? '' : 's'} aguardando`;
-  else if(card.state === 'detected') txt = `💳 Cartão detectado${card.drive ? ' (' + card.drive + ')' : ''}`;
-  else if(card.state === 'finished' || card.state === 'all_imported') txt = '💳 Cartão: em dia';
-  else if(peer.found) txt = '💳 Cartão: outro PC conectado';
-  else txt = '💳 Cartão';
-  el.textContent = txt;
+  if(!r.online) txt = 'Importador parado';
+  else if(dl && dl.total) txt = `Baixando ${dl.count || 0}/${dl.total}`;
+  else if(prog && prog.total) txt = `Copiando ${prog.count || 0}/${prog.total}`;
+  else if(card.state === 'copying' || imp.copying) txt = 'Lendo cartão…';
+  else if(card.state === 'detected') txt = `Cartão detectado${card.drive ? ' (' + card.drive + ')' : ''}`;
+  else if(pendentes > 0) txt = `${pendentes} lote${pendentes === 1 ? '' : 's'} aguardando`;
+  else if(peer.found) txt = `Conectado: ${peer.name || 'outro PC'}`;
+  else txt = 'Procurando outro PC…';
+  const txtEl = document.getElementById('import-chip-txt');
+  if(txtEl) txtEl.textContent = txt;
+  else el.textContent = txt;
+  el.style.color = peer.found || !r.online ? '' : 'var(--slate-400)';
   el.title = !r.online
     ? 'O importador de fotos do cartão não está respondendo nesta máquina.'
     : (peer.found
-        ? `Outro PC: ${peer.name || 'sem nome'} (${peer.ip || '?'})${peer.status ? ' — ' + peer.status : ''}`
-        : (card.message || card.badge || 'Fotos recebidas do cartão'));
+        ? `Outro PC conectado: ${peer.name || 'sem nome'} (${peer.ip || '?'})${peer.status ? ' — ' + peer.status : ''}`
+        : (card.message || card.badge || 'Procurando outro PC na rede…'));
+  renderLoginPeer(r);
+}
+
+/* Indicador na TELA DE LOGIN: o PC que só recebe fotos não precisa entrar,
+   mas precisa ver se está conectado ao outro PDV. */
+function renderLoginPeer(r){
+  const el = document.getElementById('login-peer');
+  if(!el) return;
+  const txt = document.getElementById('login-peer-txt');
+  const online = !!(r && r.online);
+  const peer = (r && r.importer && r.importer.peer) || {};
+  let cls = 'off';
+  let s = 'Importador de fotos do cartão não está rodando';
+  if(online && peer.found){
+    cls = 'on';
+    s = `Conectado ao outro PC: ${peer.name || 'sem nome'}`;
+    if(peer.status) s += ` — ${peer.status}`;
+  } else if(online){
+    cls = 'warn';
+    s = 'Procurando outro PC na rede…';
+  }
+  el.className = 'login-peer ' + cls;
+  el.style.display = '';
+  if(txt) txt.textContent = s;
+  el.title = online
+    ? (peer.error || 'Este PC recebe as fotos do cartão e sincroniza com o outro PDV.')
+    : 'O importador embutido não respondeu nesta máquina.';
+}
+
+/* Monitor de recebimento: aberto pela pílula do login. Mostra se o outro PC
+   está conectado e as sessões que vão chegando (sem precisar de login). */
+let _receiveTimer = null;
+
+function abrirRecebimento(){
+  const ov = document.getElementById('receive-overlay');
+  if(!ov) return;
+  ov.classList.add('active');
+  renderRecebimento();
+  if(_receiveTimer) clearInterval(_receiveTimer);
+  _receiveTimer = setInterval(renderRecebimento, 2500);
+}
+
+function fecharRecebimento(){
+  const ov = document.getElementById('receive-overlay');
+  if(ov) ov.classList.remove('active');
+  if(_receiveTimer){ clearInterval(_receiveTimer); _receiveTimer = null; }
+}
+
+async function renderRecebimento(){
+  const st = document.getElementById('receive-status');
+  const act = document.getElementById('receive-activity');
+  const list = document.getElementById('receive-list');
+  if(!st || !act || !list) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  let r = null, ss = null;
+  try{
+    const [a, b] = await Promise.all([natalApi.importStatus(), natalApi.listarSessoes()]);
+    r = a; ss = b;
+  }catch{}
+  _importStatus = r;
+  renderImportChip(); // mantém a pílula do login em sincronia
+
+  if(!r || !r.success){
+    st.innerHTML = '<span style="color:var(--red-400);">● Sem comunicação com o serviço de fotos deste PC.</span>';
+    act.textContent = '';
+    list.innerHTML = '<div style="font-size:12px;color:var(--slate-500);">Nada para mostrar.</div>';
+    return;
+  }
+  const imp = r.importer || {};
+  const card = imp.card || {};
+  const peer = imp.peer || {};
+  const prog = imp.progress || {};
+  const dl = imp.download || {};
+
+  let s, cor;
+  if(!r.online){ cor = 'var(--red-400)'; s = '○ Importador parado neste PC'; }
+  else if(peer.found){
+    cor = 'var(--green-400)';
+    s = `● Conectado ao outro PC: <b>${esc(peer.name || 'sem nome')}</b>` +
+        (peer.ip ? ` (${esc(peer.ip)})` : '') +
+        (peer.status ? ` <span style="color:var(--slate-400);font-weight:400;">— ${esc(peer.status)}</span>` : '');
+  } else {
+    cor = 'var(--amber-500)'; s = '○ Procurando outro PC na rede…';
+  }
+  st.innerHTML = `<span style="color:${cor};">${s}</span>`;
+
+  let a = '';
+  if(!r.online) a = 'O importador embutido não respondeu nesta máquina.';
+  else if(dl && dl.total) a = `⬇ Baixando do outro PC: ${dl.count || 0}/${dl.total}${dl.batch ? ' — ' + esc(dl.batch) : ''}`;
+  else if(prog && prog.total) a = `📥 Copiando do cartão: ${prog.count || 0}/${prog.total}`;
+  else if(card.state === 'copying' || imp.copying) a = '📥 Lendo o cartão…';
+  else if(card.state === 'detected') a = `💳 Cartão detectado${card.drive ? ' (' + esc(card.drive) + ')' : ''} — aguardando cópia`;
+  else if(peer.found) a = 'Aguardando novas fotos do cartão (neste PC ou no outro).';
+  else a = 'Aguardando cartão ou outro PC na rede.';
+  act.textContent = a;
+
+  const sessoes = Array.isArray(ss && ss.sessoes) ? ss.sessoes.slice() : [];
+  sessoes.sort((x, y) => (y.criadaEm || 0) - (x.criadaEm || 0));
+  const recentes = sessoes.slice(0, 8);
+  if(!recentes.length){
+    list.innerHTML = '<div style="font-size:12px;color:var(--slate-500);">Nenhuma sessão recebida ainda.</div>';
+    return;
+  }
+  list.innerHTML = recentes.map(x => {
+    const estado = x.estado || '—';
+    const ok = estado === 'PRONTA' || estado === 'VENDIDA' || estado === 'FINALIZADA' || estado === 'EM_ATENDIMENTO';
+    const c = ok ? 'var(--green-400)' : (estado === 'CANCELADA' ? 'var(--red-400)' : 'var(--amber-500)');
+    const hora = x.criadaEm ? new Date(x.criadaEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+    const qtd = x.fotosQtd != null ? x.fotosQtd : (Array.isArray(x.fotos) ? x.fotos.length : 0);
+    return `<div style="display:flex;align-items:center;gap:10px;background:var(--navy-800);border:1px solid var(--navy-line);border-radius:8px;padding:7px 10px;font-size:12px;">
+      <b style="color:var(--gold-300);white-space:nowrap;">${esc(x.id)}</b>
+      <span style="color:var(--slate-400);white-space:nowrap;">${qtd} foto${qtd === 1 ? '' : 's'}</span>
+      <span style="margin-left:auto;color:${c};font-weight:700;white-space:nowrap;">${esc(estado)}</span>
+      <span style="color:var(--slate-500);white-space:nowrap;">${hora}</span>
+    </div>`;
+  }).join('');
 }
 
 async function atualizarStatusImport(){
@@ -2384,12 +2541,12 @@ async function renderImportConfigPanel(){
       : '○ Nenhum outro PC encontrado na rede — este PDV está trabalhando sozinho';
   const peerCor = !online ? 'var(--slate-500)' : peer.found ? 'var(--green-400)' : (peerLost ? 'var(--amber-500)' : 'var(--slate-500)');
   info.innerHTML = `
-    <div style="font-size:12.5px;color:${online ? 'var(--green-400)' : 'var(--red-400)'};font-weight:700;">
+    <div style="font-size:13px;margin-bottom:5px;color:${peerCor};font-weight:700;">${peerTxt}</div>
+    ${peer.error ? `<div style="font-size:11px;color:var(--amber-500);margin-bottom:5px;">${esc(peer.error)}</div>` : ''}
+    <div style="font-size:11.5px;color:${online ? 'var(--green-400)' : 'var(--red-400)'};font-weight:600;">
       ${online ? '● Importador ativo' : '○ Importador não está rodando'}
       <span style="color:var(--slate-400);font-weight:400;">— ${esc(card.badge || card.message || 'aguardando cartão')}</span>
     </div>
-    <div style="font-size:11.5px;margin-top:4px;color:${peerCor};font-weight:${peer.found ? 600 : 400};">${peerTxt}</div>
-    ${peer.error ? `<div style="font-size:11px;color:var(--amber-500);margin-top:2px;">${esc(peer.error)}</div>` : ''}
     <div style="font-size:11px;color:var(--slate-500);margin-top:4px;word-break:break-all;">Pasta dos lotes: ${esc(pasta || '—')}</div>`;
 
   const list = document.getElementById('cfg-import-list');
@@ -4816,7 +4973,7 @@ async function showConfigModal(tabInicial){
 
     <div style="display:flex;gap:6px;margin-top:14px;border-bottom:1px solid var(--navy-line);padding-bottom:0;">
       <button type="button" data-cfg-tab="sync" style="padding:9px 16px;border:1px solid var(--navy-line);border-bottom:none;border-radius:8px 8px 0 0;background:var(--navy-800);color:var(--slate-200);font-size:12.5px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">Sincronizar</button>
-      <button type="button" data-cfg-tab="card" style="padding:9px 16px;border:1px solid var(--navy-line);border-bottom:none;border-radius:8px 8px 0 0;background:transparent;color:var(--slate-300);font-size:12.5px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">💳 Cartão</button>
+      <button type="button" data-cfg-tab="card" style="padding:9px 16px;border:1px solid var(--navy-line);border-bottom:none;border-radius:8px 8px 0 0;background:transparent;color:var(--slate-300);font-size:12.5px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;"><span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6l2-4z"/><path d="M9 2v5h7V2"/><path d="M9 12h6M9 16h6"/></svg></span> Cartão</button>
       <button type="button" data-cfg-tab="system" style="padding:9px 16px;border:1px solid var(--navy-line);border-bottom:none;border-radius:8px 8px 0 0;background:transparent;color:var(--slate-300);font-size:12.5px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">🔒 Sistema</button>
     </div>
 
@@ -6855,6 +7012,9 @@ async function INIT(){
   });
   document.getElementById('btn-config').addEventListener('click', ()=> showConfigModal());
   document.getElementById('import-chip').addEventListener('click', ()=> showConfigModal('card'));
+  document.getElementById('login-peer').addEventListener('click', abrirRecebimento);
+  document.getElementById('receive-close').addEventListener('click', fecharRecebimento);
+  document.getElementById('receive-overlay').addEventListener('click', (e)=>{ if(e.target && e.target.id === 'receive-overlay') fecharRecebimento(); });
   const btnTema = document.getElementById('btn-tema');
   btnTema.addEventListener('click', ()=>{
     const light = document.documentElement.getAttribute('data-theme') === 'light';

@@ -405,7 +405,12 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   (`IDENTITY_BACKUP_FILE`), regravado a cada `POST /api/config`; no boot, se o
   `config.json` vier sem `machineId`/`kioskCode`, a identidade (e loja salva no
   app) é restaurada do backup e reescrita no `config.json` — config existente
-  sempre tem prioridade. `writeJson()` passou a ser **atômico** (`.tmp` +
+  sempre tem prioridade. O **`photosFolder` também é preservado**: se o
+  `config.json` sumir (pasta apagada/movida), o boot usa o ponteiro
+  `fotos-folder.txt` (`NATAL_PHOTOS_FOLDER`) em vez de zerar a config — antes
+  disso o ponteiro era sobrescrito com vazio e a máquina parava de criar
+  sessões, exigindo reconfigurar a pasta. `writeJson()` passou a ser
+  **atômico** (`.tmp` +
   rename), evitando JSON truncado por queda de energia. Trocar de propósito
   continua sendo o botão "Gerar novo código" (`_forceIdentity`) ou o script
   `-Completo`. O portal autoriza push pelo `machineId` (o `kioskCode` é só a
@@ -481,7 +486,11 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   fotos agora" (`POST /api/import/sincronizar`), "Abrir pasta" (IPC
   `natal:openPath`) e o toggle **Criar sessões das fotos recebidas neste PC**
   (`importSessoes`); o chip da topbar também mostra "outro PC conectado" quando
-  o PDV está ocioso (`peer.found`);
+  o PDV está ocioso (`peer.found`). Na **tela de login** (PC que só recebe, sem
+  operador logado) a pílula `#login-peer` mostra o mesmo estado e é **clicável**:
+  abre o overlay `#receive-overlay` (`abrirRecebimento`/`renderRecebimento`),
+  um monitor ao vivo com peer + progresso (baixando/copiando) + últimas sessões,
+  atualizado a cada 2,5s via `/api/import/status` + `/api/sessoes`;
   **🔒 Sistema** (exige senha **`8694`**, `SENHA_CFG_SISTEMA`, digitada
   num campo dentro do próprio modal — `#cfg-senha-box`; **nunca** usar
   `window.prompt`, que o Electron não implementa e lança erro) = pasta de fotos

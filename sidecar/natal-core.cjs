@@ -128,7 +128,8 @@ function persistFolderPointer(folder) {
   } catch {}
 }
 
-let DATA_DIR = computeDataDir(readBootstrapPhotosFolder());
+const BOOT_PHOTOS_FOLDER = readBootstrapPhotosFolder();
+let DATA_DIR = computeDataDir(BOOT_PHOTOS_FOLDER);
 let DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR;
 let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE, FILA_IMPRESSAO_FILE, FILA_PORTAL_FILE, CACHE_PORTAL_FILE, ENVIADOS_PORTAL_FILE, GALERIA_DIR;
 bindPaths(DATA_DIR);
@@ -195,6 +196,13 @@ function sanitizeSegment(s) {
 // a máquina física p/ emparelhamento no portal (kiosk.pair) e carimbos futuros.
 const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', lojaNome: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM', importFolder: '', importSessoes: true };
 let machineConfig = { ...MACHINE_DEFAULTS, ...readJson(CONFIG_FILE, {}) };
+// Se o config.json sumiu (pasta de fotos apagada/movida) mas o ponteiro de
+// bootstrap ainda sabe a pasta, devolve a pasta em vez de zerar a config —
+// sem isso a maquina "esquece" o photosFolder e para de criar sessoes.
+if (!String(machineConfig.photosFolder || '').trim() && BOOT_PHOTOS_FOLDER) {
+  machineConfig.photosFolder = BOOT_PHOTOS_FOLDER;
+  try { writeJson(CONFIG_FILE, machineConfig); } catch {}
+}
 
 // ─── Backup da identidade (machineId + kioskCode) ────────────
 // O config.json fica em <photosFolder>\natal-app\database — se a pasta de fotos
@@ -249,7 +257,7 @@ function restaurarIdentidadeSeFaltar() {
   console.warn(`[natal-core] IDENTIDADE RESTAURADA do backup (${bk.kioskCode}) — config.json estava sem machineId/kioskCode`);
 }
 restaurarIdentidadeSeFaltar();
-persistFolderPointer(machineConfig.photosFolder);
+persistFolderPointer(machineConfig.photosFolder || BOOT_PHOTOS_FOLDER);
 function getMachineConfig() { return machineConfig; }
 function setMachineConfig(partial) {
   const entrada = { ...partial };
