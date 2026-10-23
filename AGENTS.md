@@ -154,7 +154,10 @@ esse campo é o heartbeat do kiosk), `lojas.save` (**2 caminhos**: com
 resolve nome/pdv/máquina no rascunho `pendentes`, gera `id` por `slugLoja()`
 (com sufixo `-2`…), grava `pareamento` na hora e apaga o rascunho →
 `{ ok, loja, criada:true }`; sem rascunho → `RASCUNHO_NAO_ENCONTRADO` 404),
-`lojas.delete`, `usuarios.list`, `usuarios.save`,
+`lojas.delete` (remove a loja e, em cascata, usuários/vendas/pedidos/auditoria/
+despesas daquela loja — **catálogo e preços NÃO são apagados**),
+`lojas.limparOrfaos` (remove os órfãos de lojas já excluídas; idempotente;
+preserva `precos.json`), `usuarios.list`, `usuarios.save`,
 `usuarios.delete`, `precos.save` (salva `{ lojaId, precos }` **ou**
 `{ lojaId, catalogo }` em `data/precos.json`; com `catalogo` valida
 `sanitizarCatalogo()` — exige os tamanhos `10x15` e `15x20`, deriva o mapa flat
@@ -344,9 +347,12 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 - **Catálogo — fonte de verdade no portal:** o PDV (`vendas.html`) busca
   `portalApi.precos()` no boot, a cada 60s e a cada emparelhamento e reconstrói o
   catálogo local (`TAMANHOS`/`EXTRAS`/`COMBOS`) com o `catalogo` estruturado
-  devolvido. O admin edita/cria/exclui produtos por loja em "Catálogo de
+  devolvido. O admin edita/cria/exclui produtos em "Catálogo de
   produtos" (tela `#screen-precos`: 3 listas + modal "novo"; `precos.save` com
-  `{catalogo}`). Cada **tamanho** tem um `modelo` — formato físico de impressão
+  `{catalogo}`). O seletor tem **Padrão — todas as lojas**
+  (`precos.json['__global']`, herdado por lojas novas e por lojas sem ajuste) e
+  ajustes opcionais por loja; a resolução é loja → global → `CATALOGO_DEFAULT`.
+  Cada **tamanho** tem um `modelo` — formato físico de impressão
   (`10x15`/`15x20`/`bolinha`/`polaroide`) — que manda na composição e no `media`
   do Java; `10x15` e `15x20` são obrigatórios (base da impressão/pareamento de
   ribbon) e `unidades` de ribbon é derivado do modelo (não editável). `extras`
@@ -506,11 +512,25 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `askValor()` / `askSenhaTexto()` (o Electron não suporta `window.prompt`; usos
   antigos de prompt foram convertidos).
 - **Importador de fotos do cartão** — `electron-main.cjs` sobe
-  `resources/importador/Natal_Foto_Import.exe --headless` (dev: `python
-  tools/pegar-fotos/app.py`) com `--root <importFolder> --port 8099
-  --no-firewall --config <userData>\importador-config.json --log
-  <userData>\logs\importador.log`; adota uma instância órfã na mesma pasta,
-  reinicia até 5x e para no `will-quit`. O app NÃO pede UAC: as regras de
+  `resources/importador/Natal_Foto_Import.exe --headless` (dev:
+  `tools/pegar-fotos/dist/Natal_Foto_Import/Natal_Foto_Import.exe`, com fallback
+  para o exe onefile antigo / `python tools/pegar-fotos/app.py`) com `--root
+  <importFolder> --port 8099 --no-firewall --config
+  <userData>\importador-config.json --log <userData>\logs\importador.log`.
+  O PyInstaller builda em **onedir + UPX off** (spec
+  `Natal_Foto_Import.spec`): inicia em ~1s, não extrai em pasta temporária e
+  reduz falso positivo de antivírus (onefile + UPX era morto antes de abrir a
+  porta em PCs lentos). O main **não desiste mais** do importador: espera até
+  45s no cold start, adota instância órfã na mesma pasta, mata a instância
+  presa na trava `Global\NatalFotoImport` e relança, faz backoff (3–20s) em vez
+  de parar após 5 tentativas e tem **watchdog de 30s** (`startImporterWatchdog`)
+  que religa se ele cair depois do boot; pasta de fotos indisponível
+  (HD/rede) gera erro claro e nova tentativa em 30s. Eventos do importador vão
+  para `<userData>\logs\main.log` (append, rotaciona em 2 MB) e a aba ⚙ →
+  Cartão mostra o motivo real quando está parado (`natal:importerInfo` em
+  `preload.cjs`), com botões **Reiniciar importador** e **Abrir log**
+  (`natal:openImporterLog`); o monitor de recebimento do login também tem
+  "Reiniciar importador". Para no `will-quit`. O app NÃO pede UAC: as regras de
   firewall (TCP 8099 + UDP 50000 para o exe do importador) são criadas pelo
   instalador NSIS elevado (`build/installer.nsh`, `perMachine: true`).
 - **Importação de lotes do cartão** (`natal-core.cjs`) — regra da drop zone:

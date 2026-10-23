@@ -1571,7 +1571,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const resp = await fetch('http://127.0.0.1:8099/api/status', {
           headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(1500),
+          signal: AbortSignal.timeout(3000),
         });
         if (resp.ok) importer = await resp.json();
       } catch {}

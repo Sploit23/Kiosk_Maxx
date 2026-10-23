@@ -240,16 +240,58 @@ function startJavaSidecar() {
 // sidecar transforma cada lote em sessao. O PDV mostra o status via
 // GET /api/import/status (proxy do sidecar).
 const IMPORTER_PORT = 8099;
-const IMPORTER_MAX_RESTARTS = 5;
 let importerProcess = null;
 let importerPid = null;
 let importerRestartCount = 0;
 let importerStopping = false;
-let importerFolderRetries = 0;
 let importerBusy = false;
+let importerLastError = '';
+let importerWatchdog = null;
+
+function mainLogFile() {
+  return path.join(app.getPath('userData'), 'logs', 'main.log');
+}
+
+// Log em arquivo: o app empacotado nao tem console, entao sem isso nao da
+// para descobrir no PC do evento por que o importador nao subiu.
+function logMain(msg) {
+  const linha = `[${new Date().toISOString()}] ${msg}`;
+  try {
+    const file = mainLogFile();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (fs.existsSync(file) && fs.statSync(file).size > 2 * 1024 * 1024) fs.writeFileSync(file, '');
+    fs.appendFileSync(file, linha + '\n');
+  } catch {}
+  console.log(linha);
+}
+
+function setImporterError(msg) {
+  const texto = String(msg || '');
+  if (texto === importerLastError) return;
+  importerLastError = texto;
+  if (texto) logMain('[Importador] ' + texto);
+}
+
+function importerBackoff() {
+  return Math.min(3000 + importerRestartCount * 2000, 20000);
+}
+
+// PyInstaller onefile roda pai + filho e usa a trava Global\NatalFotoImport.
+// Se o filho ficar orfao, a nova instancia sai sozinha (codigo 0) e o PDV fica
+// sem importador; aqui derrubamos a instancia presa antes de relancar.
+function killAllImporters() {
+  if (process.platform !== 'win32') return;
+  try {
+    spawn('taskkill', ['/IM', 'Natal_Foto_Import.exe', '/T', '/F'], { windowsHide: true });
+  } catch {}
+}
 
 function getImporterPath() {
   if (app.isPackaged) return path.join(process.resourcesPath, 'importador', 'Natal_Foto_Import.exe');
+  // Build atual = onedir (dist/Natal_Foto_Import/Natal_Foto_Import.exe).
+  const onedir = path.join(__dirname, 'tools', 'pegar-fotos', 'dist', 'Natal_Foto_Import', 'Natal_Foto_Import.exe');
+  if (fs.existsSync(onedir)) return onedir;
+  // Fallback para o exe onefile antigo (quem ainda nao rebuildou o importador).
   return path.join(__dirname, 'tools', 'pegar-fotos', 'dist', 'Natal_Foto_Import.exe');
 }
 function importerScriptPath() {
@@ -275,7 +317,21 @@ function fetchJson(port, urlPath, host = '127.0.0.1', timeout = 2000) {
 }
 
 async function importerStatus() {
-  return fetchJson(IMPORTER_PORT, '/api/status', '127.0.0.1', 1500);
+  return fetchJson(IMPORTER_PORT, '/api/status', '127.0.0.1', 2500);
+}
+
+async function waitImporterReady(proc, timeoutMs) {
+  const t0 = Date.now();
+  while (!importerStopping && importerProcess === proc && Date.now() - t0 < timeoutMs) {
+    const st = await importerStatus();
+    if (st && st.ok) {
+      importerRestartCount = 0;
+      setImporterError('');
+      return true;
+    }
+    await sleep(1500);
+  }
+  return false;
 }
 
 // O exe onefile do PyInstaller pode rodar como pai + filho; matar só o PID
@@ -302,6 +358,9 @@ async function startImporter() {
   importerBusy = true;
   try {
     await startImporterInner();
+  } catch (e) {
+    setImporterError(`Falha ao iniciar o importador: ${(e && e.message) || e}`);
+    setTimeout(startImporter, 15000);
   } finally {
     importerBusy = false;
   }
@@ -309,24 +368,21 @@ async function startImporter() {
 
 async function startImporterInner() {
   if (importerStopping) return;
-  if (importerRestartCount >= IMPORTER_MAX_RESTARTS) {
-    console.warn('[Importador] Limite de reinicios atingido. Importador desativado.');
-    return;
-  }
   const info = await resolverImportFolder();
   if (!info) {
-    // Sidecar ainda subindo ou maquina sem pasta de fotos (wizard). Tenta por
-    // ate 2 min; depois so reinicia com um save de config (IPC).
-    if (importerFolderRetries++ < 24) setTimeout(startImporter, 5000);
+    // Sidecar ainda subindo ou maquina sem pasta de fotos (wizard). Continua
+    // tentando: a pasta pode ser configurada depois sem reiniciar o app.
+    setImporterError('Pasta de fotos ainda nao configurada');
+    setTimeout(startImporter, 10000);
     return;
   }
-  importerFolderRetries = 0;
 
   const exe = getImporterPath();
   const script = importerScriptPath();
   const usarExe = fs.existsSync(exe);
   if (!usarExe && !fs.existsSync(script)) {
-    console.warn('[Importador] Executavel/script nao encontrado. Fotos do cartao desativadas.');
+    setImporterError(`Importador nao encontrado: ${exe} (instalacao incompleta ou antivirus)`);
+    setTimeout(startImporter, 30000);
     return;
   }
 
@@ -336,21 +392,41 @@ async function startImporterInner() {
   if (atual && atual.ok) {
     if (path.resolve(atual.root || '') === path.resolve(info.folder)) {
       importerPid = atual.pid || null;
-      console.warn(`[Importador] Ja rodando em ${info.folder} (pid ${importerPid}). Usando a instancia existente.`);
+      importerRestartCount = 0;
+      setImporterError('');
+      logMain(`[Importador] ja rodando em ${info.folder} (pid ${importerPid}); usando a instancia existente`);
       return;
     }
     if (atual.pid) {
-      console.warn(`[Importador] Rodando em pasta antiga (${atual.root}). Substituindo...`);
+      logMain(`[Importador] rodando em pasta antiga (${atual.root}); substituindo`);
       try { killImporterPid(atual.pid); } catch {}
       for (let i = 0; i < 20; i++) {
         if (!(await isPortInUse(IMPORTER_PORT))) break;
         await sleep(200);
       }
     }
+  } else if (await isPortInUse(IMPORTER_PORT)) {
+    // Porta presa por um importador que nao responde. Confere uma segunda vez
+    // antes de derrubar, para nao interromper uma copia grande em andamento.
+    await sleep(1500);
+    const segunda = await importerStatus();
+    if (segunda && segunda.ok) {
+      importerPid = segunda.pid || null;
+      importerRestartCount = 0;
+      setImporterError('');
+      logMain(`[Importador] instancia existente respondeu (pid ${importerPid}); usando`);
+      return;
+    }
+    setImporterError('Importador orfao preso na porta 8099; reiniciando');
+    killAllImporters();
+    for (let i = 0; i < 15; i++) {
+      if (!(await isPortInUse(IMPORTER_PORT))) break;
+      await sleep(300);
+    }
   }
   if (await isPortInUse(IMPORTER_PORT)) {
-    console.warn('[Importador] Porta 8099 ocupada por outro programa. Tentando de novo em 5s.');
-    setTimeout(startImporter, 5000);
+    setImporterError('Porta 8099 ocupada por outro programa');
+    setTimeout(startImporter, 15000);
     return;
   }
 
@@ -364,42 +440,73 @@ async function startImporterInner() {
   ];
   const cmd = usarExe ? exe : 'python';
   const cmdArgs = usarExe ? args : [script, ...args];
-  fs.mkdirSync(path.dirname(importerLogFile()), { recursive: true });
-  fs.mkdirSync(info.folder, { recursive: true });
+  try {
+    fs.mkdirSync(path.dirname(importerLogFile()), { recursive: true });
+    fs.mkdirSync(info.folder, { recursive: true });
+  } catch (e) {
+    // Pasta de fotos em HD externo/rede desconectado: antes o start morria
+    // calado e o importador ficava parado ate reiniciar o app.
+    setImporterError(`Pasta indisponivel: ${info.folder} (${(e && (e.code || e.message)) || e})`);
+    setTimeout(startImporter, 30000);
+    return;
+  }
 
-  console.log(`[Importador] Iniciando (${usarExe ? 'exe' : 'python'}) -> ${info.folder}`);
-  importerProcess = spawn(cmd, cmdArgs, { windowsHide: true, env: { ...process.env } });
-  importerPid = importerProcess.pid || null;
-  let importerSpawnError = false;
-  importerProcess.on('error', (e) => {
-    importerSpawnError = true;
-    console.error('[Importador] Falha ao iniciar:', e.message);
-    importerProcess = null;
-    importerPid = null;
-    importerRestartCount++;
-    setTimeout(startImporter, 5000);
-  });
-  if (importerProcess.stdout) importerProcess.stdout.on('data', (d) => console.log(`[Importador] ${d}`.trim()));
-  if (importerProcess.stderr) importerProcess.stderr.on('data', (d) => console.error(`[Importador] ${d}`.trim()));
-  importerProcess.on('close', (code) => {
-    console.warn(`[Importador] Finalizado (${code})`);
-    importerProcess = null;
-    if (importerSpawnError || importerStopping || code === 0 || code === null) return;
-    importerRestartCount++;
-    setTimeout(startImporter, 3000);
-  });
+  logMain(`[Importador] iniciando (${usarExe ? 'exe' : 'python'}) -> ${info.folder}`);
+  const proc = spawn(cmd, cmdArgs, { windowsHide: true, env: { ...process.env } });
+  importerProcess = proc;
+  importerPid = proc.pid || null;
+  let spawnError = false;
 
-  // Se em 6s nao responder, mata e tenta de novo (porta nao subiu).
-  setTimeout(async () => {
-    if (importerStopping || !importerProcess) return;
-    const st = await importerStatus();
-    if (!st || !st.ok) {
-      console.warn('[Importador] Nao respondeu em 6s. Relancando...');
-      importerRestartCount++;
-      killImporterPid(importerProcess.pid);
-      setTimeout(startImporter, 1500);
+  proc.on('error', (e) => {
+    spawnError = true;
+    const codigo = (e && e.code) || '';
+    if (codigo === 'EACCES' || codigo === 'EPERM') {
+      setImporterError('Acesso negado ao importador (antivirus bloqueando?)');
+    } else if (codigo === 'ENOENT') {
+      setImporterError(`Executavel do importador nao encontrado: ${cmd}`);
+    } else {
+      setImporterError(`Falha ao iniciar o importador: ${(e && e.message) || e}`);
     }
-  }, 6000);
+    if (importerProcess === proc) { importerProcess = null; importerPid = null; }
+    importerRestartCount++;
+    setTimeout(startImporter, importerBackoff());
+  });
+  if (proc.stdout) proc.stdout.on('data', (d) => logMain(`[Importador] ${String(d).trim()}`));
+  if (proc.stderr) proc.stderr.on('data', (d) => logMain(`[Importador][erro] ${String(d).trim()}`));
+
+  proc.on('close', async (code) => {
+    logMain(`[Importador] finalizado (codigo ${code})`);
+    const eraAtual = importerProcess === proc;
+    if (eraAtual) { importerProcess = null; importerPid = null; }
+    if (spawnError || importerStopping || !eraAtual) return;
+    const st = await importerStatus();
+    if (st && st.ok) {
+      importerPid = st.pid || null;
+      importerRestartCount = 0;
+      setImporterError('');
+      return;
+    }
+    if (code === 0) {
+      // Saiu porque a trava de instancia unica estava presa num orfao.
+      setImporterError('Outra instancia do importador estava travada; reiniciando');
+      killAllImporters();
+    } else {
+      setImporterError(`Importador encerrou sozinho (codigo ${code})`);
+    }
+    importerRestartCount++;
+    setTimeout(startImporter, importerBackoff());
+  });
+
+  // O 1o start de um exe PyInstaller pode demorar enquanto o antivirus escaneia
+  // o arquivo; so relanca depois de 45s sem resposta (antes eram 6s e o
+  // importador era morto no meio da inicializacao).
+  const ok = await waitImporterReady(proc, 45000);
+  if (!ok && !importerStopping && importerProcess === proc) {
+    setImporterError('Importador nao respondeu em 45s; relancando');
+    killImporterPid(proc.pid);
+    importerRestartCount++;
+    setTimeout(startImporter, importerBackoff());
+  }
 }
 
 function stopImporter() {
@@ -420,8 +527,27 @@ function restartImporter() {
   importerProcess = null;
   importerPid = null;
   importerRestartCount = 0;
-  importerFolderRetries = 0;
-  setTimeout(() => { importerStopping = false; startImporter(); }, 800);
+  setImporterError('');
+  // Se o start anterior ainda esta no meio da espera (importerBusy), espera ele
+  // soltar para nao perder o relancamento.
+  const tentar = () => {
+    if (importerBusy) { setTimeout(tentar, 300); return; }
+    importerStopping = false;
+    startImporter();
+  };
+  setTimeout(tentar, 800);
+}
+
+// Rede de seguranca: se o importador cair depois do boot (orfao, antivirus,
+// update), tenta subir de novo a cada 30s em vez de ficar parado para sempre.
+function startImporterWatchdog() {
+  if (importerWatchdog) return;
+  importerWatchdog = setInterval(async () => {
+    if (importerStopping || importerBusy) return;
+    const st = await importerStatus();
+    if (st && st.ok) { importerRestartCount = 0; return; }
+    startImporter();
+  }, 30000);
 }
 
 // ─── 3. Janela principal ────────────────────────────────────
@@ -484,6 +610,47 @@ ipcMain.handle('natal:saveConfig', async (_event, partial) => {
 ipcMain.handle('natal:restartImporter', async () => {
   restartImporter();
   return { success: true };
+});
+// Diagnostico do importador para a aba "Cartao" (o app empacotado nao tem
+// console; sem isso o operador so ve "nao esta rodando" sem o motivo).
+ipcMain.handle('natal:importerInfo', async () => {
+  const exe = getImporterPath();
+  const script = importerScriptPath();
+  let info = null;
+  try { info = await resolverImportFolder(); } catch {}
+  const st = await importerStatus();
+  let portBusy = false;
+  try { portBusy = await isPortInUse(IMPORTER_PORT); } catch {}
+  return {
+    success: true,
+    online: !!(st && st.ok),
+    exe,
+    exeExists: fs.existsSync(exe),
+    script,
+    scriptExists: fs.existsSync(script),
+    folder: info ? info.folder : '',
+    pid: importerPid,
+    port: IMPORTER_PORT,
+    portBusy,
+    restartCount: importerRestartCount,
+    lastError: importerLastError,
+    logFile: importerLogFile(),
+    mainLogFile: mainLogFile(),
+    userData: app.getPath('userData'),
+  };
+});
+ipcMain.handle('natal:openImporterLog', async () => {
+  const file = importerLogFile();
+  try {
+    if (fs.existsSync(file)) {
+      const err = await shell.openPath(file);
+      return err ? { success: false, error: err } : { success: true };
+    }
+    shell.showItemInFolder(path.join(app.getPath('userData'), 'logs'));
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: (e && e.message) || String(e) };
+  }
 });
 // Abre uma pasta/arquivo no Explorer (botoes da aba "Cartao").
 ipcMain.handle('natal:openPath', async (_event, target) => {
@@ -590,6 +757,7 @@ app.whenReady().then(() => {
   startJavaSidecar();
   createWindow();
   setTimeout(startImporter, 4000);
+  startImporterWatchdog();
 
   setTimeout(() => {
     performAutoUpdate();

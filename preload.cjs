@@ -38,5 +38,7 @@ contextBridge.exposeInMainWorld('natal', {
   selectFolder: () => ipcRenderer.invoke('natal:selectFolder'),
   saveConfig: (partial) => ipcRenderer.invoke('natal:saveConfig', partial),
   restartImporter: () => ipcRenderer.invoke('natal:restartImporter'),
+  importerInfo: () => ipcRenderer.invoke('natal:importerInfo'),
+  openImporterLog: () => ipcRenderer.invoke('natal:openImporterLog'),
   openPath: (target) => ipcRenderer.invoke('natal:openPath', target),
 });
