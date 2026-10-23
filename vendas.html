@@ -1449,7 +1449,13 @@ const MAPA_ESTOQUE_FISICO = {
   'item-encarte': 'item-encarte',
   'porta-cartao-postal': 'porta-cartao-postal',
 };
-function chaveFisica(produtoId){ return MAPA_ESTOQUE_FISICO[produtoId] || null; }
+function chaveFisica(produtoId){
+  if(MAPA_ESTOQUE_FISICO[produtoId]) return MAPA_ESTOQUE_FISICO[produtoId];
+  // tamanho criado no portal com modelo bolinha também consome a bolinha de acrílico
+  const t = TAMANHOS.find(x => x.id === produtoId);
+  if(t && modeloDe(t) === 'bolinha') return 'bolinha-acrilico';
+  return null;
+}
 function saldoFisico(produtoId){ const k=chaveFisica(produtoId); return k ? (estoqueFisico[k]??0) : null; }
 function temEstoqueFisico(produtoId, qtd=1){ const s=saldoFisico(produtoId); return s===null || s>=qtd; }
 function baixarEstoqueFisico(produtoId, qtd=1){ const k=chaveFisica(produtoId); if(k) estoqueFisico[k]-=qtd; }
@@ -1478,12 +1484,19 @@ const COMBOS = [
     valorCombo:38 },
 ];
 
+// Modelo físico de impressão de cada tamanho. O portal pode criar tamanhos com
+// nome/preço próprios (`modelo`), mas a ASK-400 só imprime 10x15/15x20 e os
+// moldes bolinha/polaroide usam a folha 10x15 — o `modelo` é o que manda na
+// composição e no `media` do Java. Para os tamanhos oficiais, modelo === id.
+const MODELO_RATIO = {'10x15':'2/3','15x20':'3/4','bolinha':'932/1228','polaroide':'932/1228'};
+function modeloDe(t){ return (t && (t.modelo || t.id)) || '10x15'; }
+function modeloProduto(id){ return modeloDe(TAMANHOS.find(x => x.id === id)); }
+
 // Catálogo de descontos pré-cadastrados (regra 3.2 do documento) — vendedora só seleciona, nunca digita livre
 const DESCONTOS_CATALOGO = [
   {id:'d1', nome:'5% de desconto (pedidos acima de R$100)', tipo:'percentual', valor:5, minimo:100},
   {id:'d2', nome:'R$10 de desconto — promoção de Natal', tipo:'fixo', valor:10, minimo:0},
 ];
-
 const FORMAS = ['Dinheiro','Débito','Crédito à vista','Crédito 2x','Crédito 3x','PIX'];
 // Regra 3.5 do documento de negócio: parcelamento configurável por loja, liberado a partir de um valor mínimo
 const LOJA_PARCELAMENTO = { habilitado:true, valorMinimo:200, maxParcelas:3 };
@@ -1743,7 +1756,7 @@ function mapearPedido(p){
       qtd: it.qty || 1, precoUnit: it.unitPrice || 0, preco: it.subtotal || 0,
       zoom: it.scale || 100, offX: it.diffx || 0, offY: it.diffy || 0,
       orientation: it.orientation || 'retrato',
-      logo: config.allowsLogo(it.key), pdv: true,
+      logo: config.allowsLogo(modeloProduto(it.key)), pdv: true,
     })),
     ...(p.produtos || []).map(it => ({
       cartId: 'ped-p-' + p.id + '-' + it.key,
@@ -1771,6 +1784,7 @@ function mapearPedido(p){
     }),
     status: ['PAGO', 'IMPRESSO'].includes(p.status) ? 'pago'
       : (p.status === 'CANCELADO' ? 'cancelado' : String(p.status || 'pago').toLowerCase()),
+    caixaId: p.caixaId || null,
     operador: p.operador || '—',
     origemPedidoId: p.origemPedidoId || null,
     guiaImpressa: !!p.guiaImpressa,
@@ -2059,10 +2073,12 @@ garantirIdentidade().then(async () => {
   try{
     const cfg = await natalApi.getConfig().catch(()=>({}));
     if(cfg && String(cfg.logoTexto || '').trim()) logoTexto = String(cfg.logoTexto).trim();
-    // Wizard de 1º uso: SÓ quando a máquina nunca foi pareada. Uma atualização
-    // do app não pode reabrir o assistente nem pedir o nome da loja de novo.
-    const jaPareadoBoot = !!(cfg && (cfg.pareadoEm || cfg.pareadoLojaId || (window.kioskPair && window.kioskPair.ok)));
-    if(cfg && cfg.machineId && cfg.kioskCode && !jaPareadoBoot){
+    // Wizard de 1º uso: SÓ quando a máquina nunca foi configurada. Uma
+    // atualização do app não pode reabrir o assistente nem pedir o nome da
+    // loja de novo. `lojaNome` cobre configs antigas (pareadas antes de
+    // existir pareadoEm/pareadoLojaId).
+    const jaConfigurado = !!(cfg && (cfg.pareadoEm || cfg.pareadoLojaId || String(cfg.lojaNome || '').trim() || (window.kioskPair && window.kioskPair.ok)));
+    if(cfg && cfg.machineId && cfg.kioskCode && !jaConfigurado){
       setTimeout(() => { if(!(window.kioskPair && window.kioskPair.ok)) wzAbrir(); }, 700);
     }
   }catch{ }
@@ -2335,21 +2351,25 @@ function montarSnapshotDia(dataIso){
 /* Garante que tudo que precisa ir ao portal está NA FILA (e não só enviado).
    Pedidos e auditoria: 1 item por registro. Snapshots: 1 item por dia.
    O sidecar guarda o registro do que JÁ foi confirmado pelo portal
-   (enviados-portal.json) para não reenviar o histórico a cada boot. */
+   (enviados-portal.json, com hash do payload) para não reenviar o histórico
+   a cada boot — mas reenvia quando o conteúdo mudou (ex.: cancelamento). */
 async function enfileirarPendentesPortal(){
   const res = await natalApi.filaPortalList();
   if(!res || !res.success) return 0;
   const naFila = new Set((res.itens || []).map(i => i.tipo + ':' + i.chave));
   const enviados = new Set(res.enviados || []);
+  const enviadosAt = res.enviadosAt || {};
   const hoje = isoDataLocal(new Date());
   let novos = 0;
 
-  // 1) pedidos (pagos e cancelados)
+  // 1) pedidos (pagos e cancelados). O sidecar compara o hash do payload:
+  //    se nada mudou desde o último envio confirmado, não reenfileira; se
+  //    mudou (cancelamento, correção de total/meio), reenvia.
   for(const p of pedidosRealizados){
     if(p.status !== 'pago' && p.status !== 'cancelado') continue;
     const id = p._realId || p.id;
     const k = 'pedido:' + id;
-    if(naFila.has(k) || enviados.has(k)) continue;
+    if(naFila.has(k)) continue;
     if(await enfileirarPortal('pedido', id, montarPedidoPortal(p))) novos++;
   }
 
@@ -2370,20 +2390,24 @@ async function enfileirarPendentesPortal(){
     })) novos++;
   }
 
-  // 3) snapshots: hoje (sempre, para o painel do portal ficar vivo) + dias
-  //    antigos que ainda não subiram (recuperação de dias offline).
+  // 3) snapshots: 1 por dia. Hoje sobe sempre; dias antigos só quando ainda
+  //    não subiram ou quando um pedido daquele dia foi cancelado DEPOIS do
+  //    envio (senão o portal continuaria contando a venda cancelada).
   const dias = new Set(pedidosRealizados
-    .filter(p => p.status === 'pago' && p.horario instanceof Date && !isNaN(p.horario))
+    .filter(p => (p.status === 'pago' || p.status === 'cancelado') && p.horario instanceof Date && !isNaN(p.horario))
     .map(p => isoDataLocal(p.horario)));
   dias.add(hoje);
   for(const d of dias){
     const k = 'vendas:' + d;
-    if(d === hoje){
-      // hoje: o payload é sempre atualizado (a fila dedup por chave)
-      await enfileirarPortal('vendas', d, montarSnapshotDia(d));
-      continue;
+    if(naFila.has(k)) continue;
+    let precisa = d === hoje || !enviados.has(k);
+    if(!precisa){
+      const enviadoEm = Number(enviadosAt[k] || 0);
+      precisa = pedidosRealizados.some(p =>
+        p.status === 'cancelado' && p.horario instanceof Date && isoDataLocal(p.horario) === d &&
+        p.canceladoEm instanceof Date && +p.canceladoEm > enviadoEm);
     }
-    if(naFila.has(k) || enviados.has(k)) continue;
+    if(!precisa) continue;
     if(await enfileirarPortal('vendas', d, montarSnapshotDia(d))) novos++;
   }
   if(novos) console.log('[sync] ' + novos + ' registro(s) na fila do portal');
@@ -2538,7 +2562,7 @@ function montarPedidoPortal(p){
     pagamentos,
     sessoes: (p.sessoes || []).map(s => ({ id: s.id, senha: s.senha })),
     desconto: +descontoValor.toFixed(2),
-    caixaId: typeof caixaReal === 'object' && caixaReal && caixaReal.id ? caixaReal.id : '',
+    caixaId: p.caixaId || (typeof caixaReal === 'object' && caixaReal && caixaReal.id ? caixaReal.id : ''),
     origemPedidoId: p.origemPedidoId || null,
     guiaImpressa: !!p.guiaImpressa,
     codigoDigital: p.codigoDigital || null,
@@ -2575,43 +2599,127 @@ async function carregarAuditoria(){
   }catch{ }
 }
 
-/* ---------------- PREÇOS VINDOS DO PORTAL (precos) ---------------- */
-/* O portal é a fonte de verdade dos preços: no boot e a cada emparelhamento,
-   o PDV busca os preços da loja e sobrescreve o catálogo local
-   (TAMANHOS/EXTRAS/combos). Se o portal não responder, mantém os valores
-   locais — que são os mesmos defaults do portal. */
+/* ---------------- CATÁLOGO/PREÇOS VINDOS DO PORTAL ---------------- */
+/* O portal é a fonte de verdade do catálogo (produtos e preços): no boot, a
+   cada 60s e a cada emparelhamento o PDV busca a lista da loja e reconstrói
+   TAMANHOS/EXTRAS/COMBOS. Se o portal não responder, aplica a última versão
+   salva no cache do sidecar. */
+let _catalogoAssinatura = '';
+function normalizarTamanhoPortal(t){
+  const id = String(t.id || '');
+  const modelo = MODELO_RATIO[t.modelo] ? t.modelo : (MODELO_RATIO[id] ? id : '10x15');
+  return {
+    id, label: String(t.label || id), preco: Number(t.preco) || 0,
+    ratio: MODELO_RATIO[modelo], modelo,
+    unidades: Number(t.unidades) || (modelo === '15x20' ? 2 : 1),
+    polaroid: modelo === 'polaroide' ? true : undefined,
+    nota: t.nota || undefined,
+  };
+}
+function normalizarExtraPortal(e){
+  return {
+    id: String(e.id || ''), label: String(e.label || e.id), preco: Number(e.preco) || 0,
+    oculto: !!e.oculto, digital: !!e.digital, nota: e.nota || undefined,
+  };
+}
+function normalizarComboPortal(c){
+  return {
+    id: String(c.id || ''), nome: String(c.nome || c.id), valorCombo: Number(c.valorCombo) || 0,
+    inline: !!c.inline, encarte: !!c.encarte, tamanhoAlvo: c.tamanhoAlvo || undefined,
+    itens: (Array.isArray(c.itens) ? c.itens : []).map(it => ({
+      produtoId: String(it.produtoId || ''),
+      tipoProduto: it.tipoProduto === 'tamanho' ? 'tamanho' : 'extra',
+      qtd: Math.max(1, Number(it.qtd) || 1),
+    })).filter(it => it.produtoId),
+  };
+}
+function aplicarCatalogoPortal(cat){
+  if(!cat || typeof cat !== 'object') return false;
+  // evita re-renderizar a tela do PDV a cada 60s quando nada mudou
+  const assinatura = JSON.stringify({
+    t: Array.isArray(cat.tamanhos) ? cat.tamanhos : null,
+    e: Array.isArray(cat.extras) ? cat.extras : null,
+    c: Array.isArray(cat.combos) ? cat.combos : null,
+  });
+  if(assinatura === _catalogoAssinatura) return false;
+  let mudou = false;
+  if(Array.isArray(cat.tamanhos) && cat.tamanhos.length){
+    const tams = cat.tamanhos.map(normalizarTamanhoPortal).filter(t => t.id && t.label);
+    if(tams.length && tams.some(t => t.id === '10x15') && tams.some(t => t.id === '15x20')){
+      TAMANHOS.splice(0, TAMANHOS.length, ...tams);
+      mudou = true;
+    }
+  }
+  if(Array.isArray(cat.extras)){
+    const extras = cat.extras.map(normalizarExtraPortal).filter(e => e.id && e.label);
+    EXTRAS.splice(0, EXTRAS.length, ...extras);
+    const ie = extras.find(e => e.id === 'item-encarte');
+    if(ie){ ITEM_ENCARTE.label = ie.label; ITEM_ENCARTE.preco = ie.preco; }
+    const pc = extras.find(e => e.id === 'porta-cartao-postal');
+    if(pc){ PORTA_CARTAO_POSTAL.label = pc.label; PORTA_CARTAO_POSTAL.preco = pc.preco; }
+    mudou = true;
+  }
+  if(Array.isArray(cat.combos)){
+    const combos = cat.combos.map(normalizarComboPortal).filter(c => c.id && c.itens.length);
+    COMBOS.splice(0, COMBOS.length, ...combos);
+    mudou = true;
+  }
+  if(mudou) _catalogoAssinatura = assinatura;
+  return mudou;
+}
 function aplicarPrecosPortal(precos){
-  if(!precos || typeof precos !== 'object') return;
+  if(!precos || typeof precos !== 'object') return false;
   let mudou = false;
   TAMANHOS.forEach(t => { if(precos[t.id] != null) { t.preco = Number(precos[t.id]); mudou = true; } });
   EXTRAS.forEach(e => { if(precos[e.id] != null) { e.preco = Number(precos[e.id]); mudou = true; } });
   if(precos['item-encarte'] != null) { ITEM_ENCARTE.preco = Number(precos['item-encarte']); mudou = true; }
   if(precos['porta-cartao-postal'] != null) { PORTA_CARTAO_POSTAL.preco = Number(precos['porta-cartao-postal']); mudou = true; }
   COMBOS.forEach(c => { if(precos[c.id] != null) { c.valorCombo = Number(precos[c.id]); mudou = true; } });
-  if(!mudou) return;
+  return mudou;
+}
+function rerenderCatalogoPortal(){
   const ativo = document.querySelector('.screen.active');
+  if(ativo && ativo.id === 'screen-venda'){
+    if(currentTamanho && !TAMANHOS.some(t => t.id === currentTamanho)) currentTamanho = null;
+    renderOptions();
+    renderFrame();
+  }
   if(ativo && ativo.id === 'screen-vendas') renderVendasScreen();
   renderGlobalCart();
 }
 async function carregarPrecosPortal(){
   try{
     const res = await portalApi.precos();
-    if(res && res.ok && res.precos && Object.keys(res.precos).length){
-      aplicarPrecosPortal(res.precos);
-      console.log('[precos] catálogo atualizado pelo portal:', Object.keys(res.precos).length, 'chaves');
-      natalApi.cachePortalSave({ precos: res.precos }).catch(()=>{}); // cache offline-first
+    if(res && res.ok && (res.catalogo || (res.precos && Object.keys(res.precos).length))){
+      const mudouCat = aplicarCatalogoPortal(res.catalogo);
+      const mudouPreco = aplicarPrecosPortal(res.precos);
+      if(mudouCat || mudouPreco) rerenderCatalogoPortal();
+      console.log('[precos] catálogo atualizado pelo portal:',
+        (res.catalogo && (res.catalogo.tamanhos || []).length) || 0, 'tamanhos,',
+        (res.catalogo && (res.catalogo.extras || []).length) || 0, 'extras,',
+        (res.catalogo && (res.catalogo.combos || []).length) || 0, 'combos');
+      // cache offline-first (catálogo + preços)
+      const cache = {};
+      if(res.precos) cache.precos = res.precos;
+      if(res.catalogo) cache.catalogo = res.catalogo;
+      if(Object.keys(cache).length) natalApi.cachePortalSave(cache).catch(()=>{});
       return;
     }
-    console.warn('[precos] portal sem preços, mantendo catálogo local');
+    console.warn('[precos] portal sem catálogo, mantendo o local');
   }catch(e){
-    console.warn('[precos] portal indisponível, mantendo catálogo local');
+    console.warn('[precos] portal indisponível, mantendo o local');
   }
   // offline → aplica o último catálogo salvo pelo sidecar
   try{
     const c = await natalApi.cachePortalGet();
-    if(c && c.cache && c.cache.precos && Object.keys(c.cache.precos).length){
-      aplicarPrecosPortal(c.cache.precos);
-      console.log('[precos] catálogo do cache local aplicado');
+    if(c && c.cache){
+      const mudouCat = aplicarCatalogoPortal(c.cache.catalogo);
+      const mudouPreco = (c.cache.precos && Object.keys(c.cache.precos).length)
+        ? aplicarPrecosPortal(c.cache.precos) : false;
+      if(mudouCat || mudouPreco){
+        rerenderCatalogoPortal();
+        console.log('[precos] catálogo do cache local aplicado');
+      }
     }
   }catch{ }
 }
@@ -2712,13 +2820,19 @@ async function iniciarImpressaoFotos(pedidoId, itens){
     const id = f.fotoSeed + '__' + f.produtoId;
     const existente = agrupado.get(id);
     if(existente) existente.qty += (f.qtd || 1);
-    else agrupado.set(id, {
-      sessionId: sessId, filename: uploadName, key: f.produtoId,
-      qty: f.qtd || 1, url: natalApi.fotoUrl(sessId, 'originais', fileName || ''),
-      scale: f.zoom || 100, diffx: f.offX || 0, diffy: f.offY || 0, angle: 0,
-      orientation: f.orientation || 'paisagem', pdv: true,
-      logo: !!f.logo, logoTexto,
-    });
+    else {
+      // `key` é o MODELO físico (10x15/15x20/bolinha/polaroide): é ele que
+      // escolhe a resolução/molde no compose e o media (6x4/6x8) no sidecar.
+      // Um tamanho criado no portal pode ter id próprio, mas imprime no modelo.
+      const tProd = TAMANHOS.find(x => x.id === f.produtoId);
+      agrupado.set(id, {
+        sessionId: sessId, filename: uploadName, key: tProd ? modeloDe(tProd) : f.produtoId,
+        qty: f.qtd || 1, url: natalApi.fotoUrl(sessId, 'originais', fileName || ''),
+        scale: f.zoom || 100, diffx: f.offX || 0, diffy: f.offY || 0, angle: 0,
+        orientation: f.orientation || 'paisagem', pdv: true,
+        logo: !!f.logo, logoTexto,
+      });
+    }
   }
   const lista = [...agrupado.values()];
   if(!lista.length) return;
@@ -3380,8 +3494,9 @@ function miniThumb(cls='', styleAttr=''){
   return `<span class="oc-thumb ${cls}" ${styleAttr}><img src="${src}" alt=""></span>`;
 }
 function miniThumbTamanho(t){
-  if(t.id==='bolinha') return miniThumb('oc-round');
-  if(t.id==='polaroide') return miniThumb('oc-polaroid');
+  const modelo = modeloDe(t);
+  if(modelo==='bolinha') return miniThumb('oc-round');
+  if(modelo==='polaroide') return miniThumb('oc-polaroid');
   // 10x15 e 15x20: papel em paisagem (proporção trocada na miniatura)
   const [w,h] = String(t.ratio).split('/');
   return miniThumb('', `style="aspect-ratio:${h}/${w}"`);
@@ -3423,7 +3538,7 @@ function renderOptions(){
 
   const eList = document.getElementById('extras-list');
   eList.innerHTML='';
-  EXTRAS.forEach(ex=>{
+  EXTRAS.filter(ex=>!ex.oculto).forEach(ex=>{
     const card=document.createElement('div');
     card.className='option-card';
     card.innerHTML = `
@@ -3661,7 +3776,8 @@ function frameBoxDims(t){
   // impressão. Se os dois divergirem, o enquadramento da tela para de bater com
   // o papel (é exatamente o que acontecia com a polaroide: o editor usava
   // `t.ratio` e a impressão usava o editorFrame).
-  if(config.getOverlay(t.id)) return config.getEditorBox(t.id);
+  const modelo = modeloDe(t);
+  if(config.getOverlay(modelo)) return config.getEditorBox(modelo);
 
   // formato sem molde (hipotético): respeita a orientação escolhida
   let [rw, rh] = String(t.ratio).split('/').map(Number);
@@ -3698,21 +3814,25 @@ function renderFrame(){
     return;
   }
 
-  hint.textContent=`Ajustando enquadramento — ${TAMANHOS.find(x=>x.id===currentTamanho).label}`;
+  const t = TAMANHOS.find(x=>x.id===currentTamanho);
+  if(!t){
+    // o tamanho selecionado foi excluído no portal — volta para "escolha um tamanho"
+    currentTamanho = null; renderOptions(); renderFrame(); return;
+  }
+  hint.textContent=`Ajustando enquadramento — ${t.label}`;
   hint.style.display='block';
   controls.classList.remove('disabled');
-  const t = TAMANHOS.find(x=>x.id===currentTamanho);
   const badge = document.getElementById('size-badge');
   badge.style.display='block';
   badge.textContent = `${t.label} · ${fmt(t.preco)}`;
 
   // formatos com molde imprimem sempre no ratio do molde/célula — igual ao kiosk
   // React, o botão de orientação não existe para nenhum deles.
-  document.getElementById('btn-orientacao').style.display = config.getOverlay(t.id) ? 'none' : 'inline-flex';
+  document.getElementById('btn-orientacao').style.display = config.getOverlay(modeloDe(t)) ? 'none' : 'inline-flex';
 
   // formato com molde de CÉLULA (mais de uma por folha): bolinha e polaroide.
   // São os que mostram o PNG real por cima da foto e usam guias de terços.
-  const moldCelula = config.getOverlay(t.id);
+  const moldCelula = config.getOverlay(modeloDe(t));
   const temMoldeCelula = !!(moldCelula && (moldCelula.grid.rows * moldCelula.grid.cols) > 1);
 
   box.className='frame-box';
@@ -3740,7 +3860,7 @@ function renderFrame(){
   box.appendChild(im);
   photoInto(im, 'medium', currentFoto);
   // com molde de célula, o alvo do cover é a JANELA da foto (não o cartão todo)
-  setupCover(im, W, H, temMoldeCelula ? config.windowInBox(t.id) : null);
+  setupCover(im, W, H, temMoldeCelula ? config.windowInBox(modeloDe(t)) : null);
   cropContainer = box;
 
   if(temMoldeCelula){
@@ -3778,7 +3898,7 @@ function renderFrame(){
 
   // a logo do shopping só nos formatos que a aceitam (10x15/15x20) — mesma
   // regra da impressão, pra tela e papel não divergirem
-  if(includeLogo && config.allowsLogo(t.id)){
+  if(includeLogo && config.allowsLogo(modeloDe(t))){
     const logo=document.createElement('div');
     logo.className='shop-logo';
     logo.textContent=logoTexto;
@@ -3973,6 +4093,7 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1){
     toast(`⚠ Estoque insuficiente de ${label} (saldo: ${saldoFisico(produtoId)})`);
     return;
   }
+  const modeloCart = tipo==='tamanho' ? modeloDe(TAMANHOS.find(x=>x.id===produtoId)) : produtoId;
   cart.push({
     cartId: 'c'+Date.now()+Math.random().toString(36).slice(2,6),
     sessionId: currentSession.id,
@@ -3984,7 +4105,7 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1){
     orientation: (tipo==='tamanho'||digital)?currentOrientation:null,
     // allowLogo do formato decide: a polaroide/bolinha nunca entram com logo,
     // mesmo com o checkbox marcado (o printUtils também checa, por segurança)
-    logo: tipo==='tamanho' ? (includeLogo && config.allowsLogo(produtoId)) : false,
+    logo: tipo==='tamanho' ? (includeLogo && config.allowsLogo(modeloCart)) : false,
     digital: digital || undefined,
     pdv: true,
   });
@@ -4127,7 +4248,7 @@ function renderEnquadramentoEstatico(wrap, c){
   }
 
   const ed = frameBoxDims(t);
-  const moldCelula = config.getOverlay(t.id);
+  const moldCelula = config.getOverlay(modeloDe(t));
   const temMoldeCelula = !!(moldCelula && (moldCelula.grid.rows * moldCelula.grid.cols) > 1);
   const H = temMoldeCelula ? 340 : ((c.orientation==='paisagem') ? 320 : 420);
   const W = Math.round(H * ed.W / ed.H);
@@ -4157,7 +4278,7 @@ function renderEnquadramentoEstatico(wrap, c){
   // bolinha o card é 1.66x mais "aberto" que a janela). Sem janela
   // (10x15/15x20) cai no cover do card inteiro, como antes.
   const k = H / ed.H;
-  const wbox = config.windowInBox(t.id);
+  const wbox = config.windowInBox(modeloDe(t));
   const tw = wbox.w * k, th = wbox.h * k;
 
   const applyFixedCover = ()=>{
@@ -4171,7 +4292,7 @@ function renderEnquadramentoEstatico(wrap, c){
   if(im.complete && im.naturalWidth) applyFixedCover();
   else im.addEventListener('load', applyFixedCover);
 
-  const mold = config.getOverlay(t.id);
+  const mold = config.getOverlay(modeloDe(t));
   if(mold && (mold.grid.rows * mold.grid.cols) > 1){
     const moldImg = document.createElement('img');
     moldImg.src = mold.image;
@@ -4180,7 +4301,7 @@ function renderEnquadramentoEstatico(wrap, c){
     card.appendChild(moldImg);
   }
 
-  if(c.logo && config.allowsLogo(t.id)){
+  if(c.logo && config.allowsLogo(modeloDe(t))){
     const logo=document.createElement('div');
     logo.className='shop-logo';
     logo.textContent=logoTexto;
@@ -4282,7 +4403,7 @@ function closeCartDrawer(){ document.getElementById('cart-drawer').classList.rem
 document.getElementById('cart-summary').addEventListener('click', toggleCartDrawer);
 document.getElementById('cart-close').addEventListener('click', closeCartDrawer);
 
-const EXTRA_PRECO = id => EXTRAS.find(e=>e.id===id).preco;
+const EXTRA_PRECO = id => { const e = EXTRAS.find(x=>x.id===id); return e ? e.preco : 0; };
 
 function startCheckoutFlow(){
   if(editingPedidoId){ showConferenceModal(); return; }
@@ -4300,14 +4421,17 @@ function buildUpsellOptions(){
   const tem15x20 = cart.some(c=>c.tipo==='tamanho' && c.produtoId==='15x20');
   const opts = [];
   if(tem10x15){
-    opts.push({tipo:'extra', produtoId:'porta-retrato-10x15', label:'Porta-retrato 10x15', preco:EXTRA_PRECO('porta-retrato-10x15')});
-    opts.push({tipo:'extra', produtoId:'ima', label:'Ímã de geladeira', preco:EXTRA_PRECO('ima')});
+    if(EXTRAS.some(e=>e.id==='porta-retrato-10x15'))
+      opts.push({tipo:'extra', produtoId:'porta-retrato-10x15', label:'Porta-retrato 10x15', preco:EXTRA_PRECO('porta-retrato-10x15')});
+    if(EXTRAS.some(e=>e.id==='ima'))
+      opts.push({tipo:'extra', produtoId:'ima', label:'Ímã de geladeira', preco:EXTRA_PRECO('ima')});
   }
   if(tem15x20){
-    opts.push({tipo:'extra', produtoId:'porta-retrato-15x20', label:'Porta-retrato 15x20', preco:EXTRA_PRECO('porta-retrato-15x20')});
-    if(saldoFisico('item-encarte')>0){
-      const combo = COMBOS.find(c=>c.id==='combo3');
-      opts.push({tipo:'combo', comboId:'combo3', label:'Combo Encarte (+2 fotos 15x20)', preco:combo.valorCombo});
+    if(EXTRAS.some(e=>e.id==='porta-retrato-15x20'))
+      opts.push({tipo:'extra', produtoId:'porta-retrato-15x20', label:'Porta-retrato 15x20', preco:EXTRA_PRECO('porta-retrato-15x20')});
+    const comboEncarte = COMBOS.find(c=>c.id==='combo3');
+    if(comboEncarte && saldoFisico('item-encarte')>0){
+      opts.push({tipo:'combo', comboId:'combo3', label:'Combo Encarte (+2 fotos 15x20)', preco:comboEncarte.valorCombo});
     }
   }
   return opts;
@@ -4408,9 +4532,21 @@ document.getElementById('modal-overlay').addEventListener('click', e=>{
 /* ---------------- TECLADO NUMÉRICO NA TELA ---------------- */
 // Campos numéricos (PIN de 4 dígitos, busca de sessão e valores de caixa) abrem
 // um teclado só de números — o kiosk é touch, sem teclado físico obrigatório.
-const NUM_FIELDS = '#login-senha,#busca-sessao,#sm-senha,#ac-fundo,.fc-real,#fc-envelope,.pr-valor';
+const NUM_FIELDS = '#login-senha,#busca-sessao,#sm-senha,#ac-fundo,.fc-real,#fc-envelope,.pr-valor,#cfg-senha-input';
+// Qualquer campo numérico abre o teclado, mesmo os criados depois (telas de
+// caixa, modais de valor etc.) — sem depender de manter uma lista de seletores.
+const NUM_AUTO = 'input[type="number"],input[inputmode="numeric"],input[inputmode="decimal"]';
 let numpadTarget = null;
 let numpadAllowDot = false;
+// O visor/valor digitado vive num buffer próprio: input[type=number] descarta
+// valores intermediários ("12." vira "") e não aceita maxLength (vale -1).
+let numpadBuf = '';
+
+function campoTemNumpad(el){
+  if(!el || el.tagName !== 'INPUT' || el.disabled || el.readOnly) return false;
+  if(!el.matches) return false;
+  return el.matches(NUM_FIELDS) || el.matches(NUM_AUTO);
+}
 
 const _npTitles = {
   '#login-senha': 'Senha do PDV (4 dígitos)',
@@ -4418,16 +4554,37 @@ const _npTitles = {
   '#sm-senha': 'Senha master (4 dígitos)',
   '#ac-fundo': 'Abertura de caixa — fundo de troco',
   '#fc-envelope': 'Envelope de depósito',
+  '#cfg-senha-input': 'Senha do sistema',
+  '#av-valor': 'Informe o valor',
 };
+function numpadLimite(el){
+  return (el && el.maxLength && el.maxLength > 0) ? el.maxLength : Infinity;
+}
+function numpadGravar(){
+  const el = numpadTarget;
+  if(!el) return;
+  let buf = numpadBuf;
+  if(el.type === 'number'){
+    // grava só quando o conteúdo é um número válido (ignora "12." interim)
+    const limpo = buf.replace(/\.$/, '');
+    el.value = (buf === '' || limpo === '') ? '' : (/^-?\d+(\.\d+)?$/.test(limpo) ? limpo : el.value);
+  } else {
+    el.value = buf;
+  }
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  atualizarNumpad();
+}
 function atualizarNumpad(){
   const disp = document.getElementById('numpad-display');
   if(!numpadTarget){ disp.innerHTML = '&nbsp;'; return; }
-  const v = numpadTarget.value || '';
+  const v = numpadBuf || '';
   disp.innerHTML = v === '' ? '&nbsp;' : v.replace(/[^\d.,]+/g, '').replace(/</g, '&#60;');
 }
 function abrirNumpad(el){
   numpadTarget = el;
-  numpadAllowDot = (el.type === 'number');
+  numpadAllowDot = (el.type === 'number') || el.inputMode === 'decimal';
+  numpadBuf = String(el.value || '');
   const key = '#' + el.id;
   const titulo = _npTitles[key]
     || (el.classList.contains('fc-real') ? 'Valor real no caixa — ' + (el.dataset.forma || '') : 'Digite os números');
@@ -4436,9 +4593,14 @@ function abrirNumpad(el){
   atualizarNumpad();
 }
 function fecharNumpad(blur){
+  if(numpadTarget && numpadBuf.endsWith('.')){
+    numpadBuf = numpadBuf.replace(/\.$/, '');
+    numpadGravar();
+  }
   document.getElementById('numpad-overlay').style.display = 'none';
   if(blur && numpadTarget) numpadTarget.blur();
   numpadTarget = null;
+  numpadBuf = '';
 }
 // Enter: confirma a ação do campo em foco (mesmo comportamento do teclado físico)
 function numpadEnter(){
@@ -4460,12 +4622,24 @@ function numpadEnter(){
 }
 // apertou um campo numérico → abre o teclado
 document.addEventListener('focusin', e=>{
-  const el = e.target;
-  if(el && el.matches && el.matches(NUM_FIELDS)) abrirNumpad(el);
+  if(campoTemNumpad(e.target)) abrirNumpad(e.target);
 });
+// toque/clique no campo: abre mesmo se o campo já estava em foco (o foco
+// automático de algumas telas não dispara focusin de novo ao tocar)
+document.addEventListener('pointerdown', e=>{
+  const el = e.target;
+  if(!campoTemNumpad(el)) return;
+  const aberto = document.getElementById('numpad-overlay').style.display !== 'none';
+  if(el !== numpadTarget || !aberto) abrirNumpad(el);
+}, true);
 // teclado físico digitando com o pad aberto → espelha no visor
 document.addEventListener('input', e=>{
-  if(numpadTarget && e.target === numpadTarget) atualizarNumpad();
+  // só espelha digitação real (teclado físico); eventos sintéticos do próprio
+  // numpad já estão refletidos no buffer
+  if(e.isTrusted && numpadTarget && e.target === numpadTarget){
+    numpadBuf = String(numpadTarget.value || '');
+    atualizarNumpad();
+  }
 });
 /* pointerdown (com preventDefault) pra o clique nas teclas NÃO roubar o foco
    do campo — o valor é gravado direto e o campo segue "focado" por baixo */
@@ -4474,25 +4648,22 @@ document.getElementById('numpad-overlay').addEventListener('pointerdown', e=>{
   const btn = e.target.closest('button');
   if(!btn || !numpadTarget) return;
   e.preventDefault();
-  const el = numpadTarget;
   const k = btn.dataset.k;
   if(k === 'close'){ fecharNumpad(true); return; }
   if(k === 'enter'){ numpadEnter(); return; }
-  if(k === 'clear'){ el.value = ''; }
-  else if(k === 'bc'){ el.value = (el.value || '').slice(0, -1); }
+  const limite = numpadLimite(numpadTarget);
+  if(k === 'clear'){ numpadBuf = ''; }
+  else if(k === 'bc'){ numpadBuf = numpadBuf.slice(0, -1); }
   else if(k === '.'){
-    if(!numpadAllowDot || (el.value || '').includes('.')) return;
-    el.value += '.';
+    if(!numpadAllowDot || numpadBuf.includes('.')) return;
+    numpadBuf = numpadBuf === '' ? '0.' : numpadBuf + '.';
   }
   else{
-    if(el.value.length >= (+el.maxLength || Infinity)) return;
-    el.value += k;
+    if(numpadBuf.length >= limite) return;
+    numpadBuf += k;
   }
-  const limite = el.maxLength ? +el.maxLength : Infinity;
-  if(el.value.length > limite) el.value = el.value.slice(0, limite);
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-  atualizarNumpad();
+  if(numpadBuf.length > limite) numpadBuf = numpadBuf.slice(0, limite);
+  numpadGravar();
 });
 
 /* ---------------- CONFIGURAÇÕES (modal) ---------------- */
@@ -4883,7 +5054,10 @@ const r = await natalApi.limparFila({ pedidoId });
       const partial = { photosFolder: val, logoTexto: logoVal };
       if(lojaIdEl) partial.lojaId = lojaIdVal;
       if(lojaNomeEl) partial.lojaNome = lojaNomeVal;
-      await natalApi.saveConfig(partial);
+      // _allowLojaChange: mudar a loja pelo ⚙ é uma ação deliberada do
+      // operador — o sidecar preserva a loja em saves automáticos, mas aqui
+      // a edição vale (machineId/kioskCode continuam protegidos).
+      await natalApi.saveConfig({ ...partial, _allowLojaChange: true });
       if(window.natal?.saveConfig) await window.natal.saveConfig(partial);
       logoTexto = logoVal;
       // identidade local mudou → republica e (re)agenda o envio da fila

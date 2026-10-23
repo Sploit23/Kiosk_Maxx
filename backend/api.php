@@ -402,6 +402,179 @@ function precosEfetivos(string $lojaId): array
     return $out;
 }
 
+// ─── Catálogo estruturado (produtos que o PDV mostra) ────────────────────────
+// O `precos` é só preço por chave; o catálogo é a LISTA de produtos (tamanhos,
+// extras e combos) que a loja pode editar/criar/excluir no admin. O PDV aplica
+// esta estrutura a cada 60s — criar/excluir aqui muda o PDV aberto.
+//
+// `modelo` de um tamanho é o formato físico de impressão (10x15/15x20/bolinha/
+// polaroide): um tamanho novo pode ter outro nome/preço, mas sempre imprime num
+// desses modelos. `oculto` marca extras de uso interno (Item Encarte, Porta-
+// cartão postal) que só aparecem dentro de combos.
+const CATALOGO_DEFAULT = [
+    'tamanhos' => [
+        ['id' => '10x15', 'label' => '10x15', 'preco' => 15.0, 'modelo' => '10x15', 'unidades' => 1],
+        ['id' => '15x20', 'label' => '15x20', 'preco' => 25.0, 'modelo' => '15x20', 'unidades' => 2],
+        ['id' => 'bolinha', 'label' => 'Bolinha 7,5x7,5', 'preco' => 12.0, 'modelo' => 'bolinha', 'unidades' => 1,
+            'nota' => '2 bolinhas iguais por folha 10x15, lado a lado'],
+        ['id' => 'polaroide', 'label' => 'Polaroide 2 poses', 'preco' => 20.0, 'modelo' => 'polaroide', 'unidades' => 1,
+            'nota' => '2 poses iguais por folha 10x15, lado a lado'],
+    ],
+    'extras' => [
+        ['id' => 'porta-retrato-10x15', 'label' => 'Porta-retrato 10x15', 'preco' => 35.0],
+        ['id' => 'porta-retrato-15x20', 'label' => 'Porta-retrato 15x20', 'preco' => 50.0],
+        ['id' => 'ima', 'label' => 'Ímã de geladeira', 'preco' => 10.0, 'nota' => 'adicional a uma foto 10x15'],
+        ['id' => 'foto-digital', 'label' => '📲 Envio digital (foto)', 'preco' => 10.0, 'digital' => true,
+            'nota' => 'a foto escolhida vai para o celular por código'],
+        ['id' => 'item-encarte', 'label' => 'Item Encarte', 'preco' => 15.0, 'oculto' => true],
+        ['id' => 'porta-cartao-postal', 'label' => 'Porta-cartão postal', 'preco' => 12.0, 'oculto' => true],
+    ],
+    'combos' => [
+        ['id' => 'combo1', 'nome' => 'Foto + Porta-retrato 10x15', 'valorCombo' => 45.0, 'inline' => true,
+            'itens' => [['produtoId' => '10x15', 'qtd' => 1], ['produtoId' => 'porta-retrato-10x15', 'qtd' => 1]]],
+        ['id' => 'combo2', 'nome' => 'Foto + Porta-retrato 15x20', 'valorCombo' => 65.0, 'inline' => true,
+            'itens' => [['produtoId' => '15x20', 'qtd' => 1], ['produtoId' => 'porta-retrato-15x20', 'qtd' => 1]]],
+        ['id' => 'combo3', 'nome' => 'Encarte (2 fotos 15x20)', 'valorCombo' => 80.0, 'encarte' => true,
+            'itens' => [['produtoId' => '15x20', 'qtd' => 2], ['produtoId' => 'item-encarte', 'qtd' => 1]]],
+        ['id' => 'combo4', 'nome' => 'Foto 10x15 + Porta-retrato + Bolinha', 'valorCombo' => 52.0,
+            'itens' => [['produtoId' => '10x15', 'qtd' => 1], ['produtoId' => 'porta-retrato-10x15', 'qtd' => 1], ['produtoId' => 'bolinha', 'qtd' => 1]]],
+        ['id' => 'combo5', 'nome' => 'Cartão de Natal — Layout 1', 'valorCombo' => 38.0,
+            'itens' => [['produtoId' => '10x15', 'qtd' => 1], ['produtoId' => 'porta-cartao-postal', 'qtd' => 1]]],
+        ['id' => 'combo6', 'nome' => 'Cartão de Natal — Layout 2', 'valorCombo' => 38.0,
+            'itens' => [['produtoId' => '10x15', 'qtd' => 1], ['produtoId' => 'porta-cartao-postal', 'qtd' => 1]]],
+    ],
+];
+
+function catId($v): string
+{
+    $s = strtolower(trim((string) $v));
+    $s = preg_replace('/[^a-z0-9-]+/', '-', $s);
+    $s = trim((string) $s, '-');
+    return substr($s, 0, 40);
+}
+
+function catTexto($v, int $max = 80): string
+{
+    return mb_substr(trim(strip_tags((string) $v)), 0, $max);
+}
+
+function catPreco($v): float
+{
+    return (is_numeric($v) && (float) $v >= 0) ? round((float) $v, 2) : 0.0;
+}
+
+// Valida/normaliza o catálogo vindo do admin. Devolve null quando inválido
+// (sem 10x15/15x20, que são a base da impressão e dos combos).
+function sanitizarCatalogo($cat): ?array
+{
+    if (!is_array($cat)) return null;
+    $modelos = ['10x15', '15x20', 'bolinha', 'polaroide'];
+    $tipos = [];
+    $tamanhos = [];
+    foreach ((array) ($cat['tamanhos'] ?? []) as $it) {
+        if (!is_array($it)) continue;
+        $id = catId($it['id'] ?? '');
+        if ($id === '' || isset($tipos[$id])) continue;
+        $modelo = in_array(($it['modelo'] ?? ''), $modelos, true) ? $it['modelo'] : $id;
+        if (!in_array($modelo, $modelos, true)) $modelo = '10x15';
+        // Consumo de ribbon é determinado pelo papel do modelo (15x20 = 2
+        // unidades de 10x15); não é editável pela loja.
+        $u = ($modelo === '15x20') ? 2 : 1;
+        $row = [
+            'id' => $id,
+            'label' => catTexto($it['label'] ?? $id) ?: $id,
+            'preco' => catPreco($it['preco'] ?? 0),
+            'modelo' => $modelo,
+            'unidades' => $u,
+        ];
+        $nota = catTexto($it['nota'] ?? '', 160);
+        if ($nota !== '') $row['nota'] = $nota;
+        $tamanhos[] = $row;
+        $tipos[$id] = 'tamanho';
+    }
+    if (!isset($tipos['10x15']) || !isset($tipos['15x20'])) return null;
+
+    $extras = [];
+    foreach ((array) ($cat['extras'] ?? []) as $it) {
+        if (!is_array($it)) continue;
+        $id = catId($it['id'] ?? '');
+        if ($id === '' || isset($tipos[$id])) continue;
+        $row = [
+            'id' => $id,
+            'label' => catTexto($it['label'] ?? $id) ?: $id,
+            'preco' => catPreco($it['preco'] ?? 0),
+        ];
+        if (!empty($it['oculto'])) $row['oculto'] = true;
+        if (!empty($it['digital'])) $row['digital'] = true;
+        $nota = catTexto($it['nota'] ?? '', 160);
+        if ($nota !== '') $row['nota'] = $nota;
+        $extras[] = $row;
+        $tipos[$id] = 'extra';
+    }
+
+    $combos = [];
+    foreach ((array) ($cat['combos'] ?? []) as $it) {
+        if (!is_array($it)) continue;
+        $id = catId($it['id'] ?? '');
+        if ($id === '' || isset($tipos[$id])) continue;
+        $itens = [];
+        foreach ((array) ($it['itens'] ?? []) as $ci) {
+            if (!is_array($ci)) continue;
+            $pid = catId($ci['produtoId'] ?? '');
+            if ($pid === '' || !isset($tipos[$pid])) continue;
+            $qtd = (int) ($ci['qtd'] ?? 1);
+            if ($qtd < 1) $qtd = 1;
+            if ($qtd > 99) $qtd = 99;
+            $itens[] = ['produtoId' => $pid, 'tipoProduto' => $tipos[$pid], 'qtd' => $qtd];
+        }
+        if (!$itens) continue;
+        $row = [
+            'id' => $id,
+            'nome' => catTexto($it['nome'] ?? $id) ?: $id,
+            'valorCombo' => catPreco($it['valorCombo'] ?? 0),
+            'itens' => $itens,
+        ];
+        if (!empty($it['inline'])) $row['inline'] = true;
+        if (!empty($it['encarte'])) $row['encarte'] = true;
+        $alvo = catId($it['tamanhoAlvo'] ?? '');
+        if ($alvo !== '') $row['tamanhoAlvo'] = $alvo;
+        $combos[] = $row;
+        $tipos[$id] = 'combo';
+    }
+
+    return ['tamanhos' => $tamanhos, 'extras' => $extras, 'combos' => $combos];
+}
+
+// Catálogo efetivo da loja: o salvo (quando existe) ou os defaults com o
+// overlay de preços antigo aplicado — garante que a tela do admin e o PDV
+// mostrem sempre a mesma lista.
+function catalogoEfetivo(string $lojaId): array
+{
+    $saved = loadJson('precos.json', []);
+    $overlay = (is_array($saved) && isset($saved[$lojaId]) && is_array($saved[$lojaId])) ? $saved[$lojaId] : [];
+    if (isset($overlay['__catalogo'])) {
+        $cat = sanitizarCatalogo($overlay['__catalogo']);
+        if ($cat !== null) return $cat;
+    }
+    $cat = CATALOGO_DEFAULT;
+    foreach ($cat['tamanhos'] as $i => $it) {
+        if (isset($overlay[$it['id']]) && is_numeric($overlay[$it['id']]) && (float) $overlay[$it['id']] >= 0) {
+            $cat['tamanhos'][$i]['preco'] = round((float) $overlay[$it['id']], 2);
+        }
+    }
+    foreach ($cat['extras'] as $i => $it) {
+        if (isset($overlay[$it['id']]) && is_numeric($overlay[$it['id']]) && (float) $overlay[$it['id']] >= 0) {
+            $cat['extras'][$i]['preco'] = round((float) $overlay[$it['id']], 2);
+        }
+    }
+    foreach ($cat['combos'] as $i => $it) {
+        if (isset($overlay[$it['id']]) && is_numeric($overlay[$it['id']]) && (float) $overlay[$it['id']] >= 0) {
+            $cat['combos'][$i]['valorCombo'] = round((float) $overlay[$it['id']], 2);
+        }
+    }
+    return $cat;
+}
+
 // Nome do PDV que aparece no portal: usa o valor enviado pelo PDV; se vier
 // vazio (o PDV sempre envia a chave, mesmo sem configurar pdvNome), cai no
 // nome 'pdv' da loja cadastrada no portal em vez de gravar string vazia.
@@ -657,7 +830,12 @@ try {
 
         case 'precos': {
             $lojaId = trim((string) ($p['lojaId'] ?? ''));
-            respond(['ok' => true, 'lojaId' => $lojaId, 'precos' => precosEfetivos($lojaId)]);
+            respond([
+                'ok' => true,
+                'lojaId' => $lojaId,
+                'precos' => precosEfetivos($lojaId),
+                'catalogo' => catalogoEfetivo($lojaId),
+            ]);
         }
 
         // Snapshot diário de vendas enviado pelo PDV (só aceita de máquina
@@ -1025,21 +1203,53 @@ try {
         case 'precos.save': {
             $lojaId = trim((string) ($p['lojaId'] ?? ''));
             $enviados = $p['precos'] ?? null;
-            if ($lojaId === '' || !is_array($enviados)) {
-                fail('DADOS_INCOMPLETOS: lojaId e precos são obrigatórios');
+            $temCatalogo = array_key_exists('catalogo', $p);
+            if ($lojaId === '' || (!$temCatalogo && !is_array($enviados))) {
+                fail('DADOS_INCOMPLETOS: lojaId e precos/catalogo são obrigatórios');
+            }
+            $catalogo = null;
+            if ($temCatalogo) {
+                $catalogo = sanitizarCatalogo($p['catalogo']);
+                if ($catalogo === null) {
+                    fail('CATALOGO_INVALIDO: informe pelo menos os tamanhos 10x15 e 15x20 e combos com itens válidos');
+                }
             }
             $dados = loadJson('precos.json', []);
             if (!is_array($dados)) $dados = [];
             $sanitizado = [];
-            foreach (PRECOS_DEFAULT as $k => $v) {
-                if (!array_key_exists($k, $enviados)) continue;
-                if (is_numeric($enviados[$k]) && (float) $enviados[$k] >= 0) {
-                    $sanitizado[$k] = round((float) $enviados[$k], 2);
+            if (is_array($enviados)) {
+                foreach (PRECOS_DEFAULT as $k => $v) {
+                    if (!array_key_exists($k, $enviados)) continue;
+                    if (is_numeric($enviados[$k]) && (float) $enviados[$k] >= 0) {
+                        $sanitizado[$k] = round((float) $enviados[$k], 2);
+                    }
                 }
             }
-            $dados[$lojaId] = $sanitizado; // vazio = resetar para os defaults oficiais
+            if ($catalogo !== null) {
+                // Preços embutidos no catálogo viram o overlay "flat" das chaves
+                // oficiais — mantém compatibilidade com PDVs antigos, que só
+                // conhecem o mapa de preços.
+                $flat = [];
+                foreach ($catalogo['tamanhos'] as $it) {
+                    if (array_key_exists($it['id'], PRECOS_DEFAULT)) $flat[$it['id']] = $it['preco'];
+                }
+                foreach ($catalogo['extras'] as $it) {
+                    if (array_key_exists($it['id'], PRECOS_DEFAULT)) $flat[$it['id']] = $it['preco'];
+                }
+                foreach ($catalogo['combos'] as $it) {
+                    if (array_key_exists($it['id'], PRECOS_DEFAULT)) $flat[$it['id']] = $it['valorCombo'];
+                }
+                $dados[$lojaId] = array_merge($flat, $sanitizado);
+                $dados[$lojaId]['__catalogo'] = $catalogo;
+            } else {
+                $dados[$lojaId] = $sanitizado; // vazio = resetar para os defaults oficiais
+            }
             saveJson('precos.json', $dados);
-            respond(['ok' => true, 'precos' => precosEfetivos($lojaId)]);
+            respond([
+                'ok' => true,
+                'precos' => precosEfetivos($lojaId),
+                'catalogo' => catalogoEfetivo($lojaId),
+            ]);
         }
 
         // Overlay bruto de preços por loja (admin) — usado no backup/restauração
@@ -1047,7 +1257,7 @@ try {
         case 'precos.list': {
             $dados = loadJson('precos.json', []);
             if (!is_array($dados)) $dados = [];
-            respond(['ok' => true, 'precos' => $dados, 'defaults' => PRECOS_DEFAULT]);
+            respond(['ok' => true, 'precos' => $dados, 'defaults' => PRECOS_DEFAULT, 'catalogoDefault' => CATALOGO_DEFAULT]);
         }
 
         case 'vendas.resumo': {

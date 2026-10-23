@@ -219,6 +219,8 @@ function salvarBackupIdentidade(mc) {
       lojaId: mc.lojaId || '',
       lojaNome: mc.lojaNome || '',
       pdvNome: mc.pdvNome || '',
+      pareadoEm: mc.pareadoEm || '',
+      pareadoLojaId: mc.pareadoLojaId || '',
       atualizadoEm: new Date().toISOString(),
     });
   } catch (e) {
@@ -240,6 +242,8 @@ function restaurarIdentidadeSeFaltar() {
     lojaId: machineConfig.lojaId || bk.lojaId || '',
     lojaNome: machineConfig.lojaNome || bk.lojaNome || '',
     pdvNome: machineConfig.pdvNome || bk.pdvNome || '',
+    pareadoEm: machineConfig.pareadoEm || bk.pareadoEm || '',
+    pareadoLojaId: machineConfig.pareadoLojaId || bk.pareadoLojaId || '',
   };
   writeJson(CONFIG_FILE, machineConfig);
   console.warn(`[natal-core] IDENTIDADE RESTAURADA do backup (${bk.kioskCode}) — config.json estava sem machineId/kioskCode`);
@@ -560,12 +564,23 @@ let filaPortal = readJson(FILA_PORTAL_FILE, []);
 if (!Array.isArray(filaPortal)) filaPortal = [];
 function saveFilaPortal() { writeJson(FILA_PORTAL_FILE, filaPortal); }
 
-// Registro do que JÁ foi confirmado pelo portal: { "tipo:chave": timestamp }.
+// Registro do que JÁ foi confirmado pelo portal:
+// { "tipo:chave": { em: timestamp, hash: hashDoPayloadEnviado } }.
 // Serve para o PDV não reenviar o histórico inteiro a cada boot (o portal é
-// idempotente, mas reenviar tudo o tempo todo é desperdício e risco).
+// idempotente, mas reenviar tudo o tempo todo é desperdício e risco). O hash
+// permite reenviar quando o registro mudou (ex.: pedido cancelado depois de
+// pago) sem reenfileirar o que está igual.
 let enviadosPortal = readJson(ENVIADOS_PORTAL_FILE, {});
 if (!enviadosPortal || typeof enviadosPortal !== 'object' || Array.isArray(enviadosPortal)) enviadosPortal = {};
 function saveEnviadosPortal() { writeJson(ENVIADOS_PORTAL_FILE, enviadosPortal); }
+
+function hashPayload(payload) {
+  try {
+    return crypto.createHash('sha256').update(JSON.stringify(payload === undefined ? null : payload)).digest('hex');
+  } catch {
+    return null;
+  }
+}
 
 function filaPortalItem(tipo, chave) {
   return filaPortal.find((i) => i && i.tipo === tipo && i.chave === String(chave)) || null;
@@ -584,6 +599,15 @@ function enfileirarPortal({ tipo, chave, payload } = {}) {
     existente.atualizadoEm = Date.now();
     saveFilaPortal();
     return { item: existente, criado: false };
+  }
+  // Já foi confirmado com ESTE conteúdo? Então não há nada de novo a enviar.
+  // Comparar o hash (e não só a chave) é o que permite propagar alterações
+  // posteriores — p.ex. cancelamento de um pedido que já subiu como pago.
+  const enviado = enviadosPortal[t + ':' + c];
+  const hashEnviado = enviado && typeof enviado === 'object' ? enviado.hash : null;
+  const hashNovo = hashPayload(payload);
+  if (hashEnviado && hashNovo && hashEnviado === hashNovo) {
+    return { item: null, criado: false, inalterado: true };
   }
   const item = {
     id: 'q-' + Date.now().toString(36) + '-' + crypto.randomBytes(3).toString('hex'),
@@ -614,7 +638,7 @@ function confirmarPortal({ id, tipo, chave } = {}) {
   if (removidos.length) {
     saveFilaPortal();
     for (const i of removidos) {
-      enviadosPortal[i.tipo + ':' + i.chave] = Date.now();
+      enviadosPortal[i.tipo + ':' + i.chave] = { em: Date.now(), hash: hashPayload(i.payload) };
     }
     saveEnviadosPortal();
     emit('portal:fila', { total: filaPortal.length });
@@ -1447,18 +1471,32 @@ const server = http.createServer(async (req, res) => {
     // O PDV enfileira aqui tudo que precisa registrar no portal e só
     // remove quando o portal confirma. Sem internet, a fila só cresce.
     if (method === 'GET' && p === '/api/portal/fila') {
+      // enviadosAt: quando cada chave foi confirmada (ms). Usado pelo PDV para
+      // saber se um registro antigo mudou DEPOIS do último envio (ex.: um dia
+      // cujo pedido foi cancelado depois do snapshot já ter subido).
+      const enviadosAt = {};
+      for (const [k, v] of Object.entries(enviadosPortal)) {
+        enviadosAt[k] = v && typeof v === 'object' ? Number(v.em || 0) : Number(v || 0);
+      }
       return sendJson(res, 200, {
         success: true,
         itens: filaPortalParaUI(),
         total: filaPortal.length,
         enviados: Object.keys(enviadosPortal),
+        enviadosAt,
       });
     }
     if (method === 'POST' && p === '/api/portal/fila') {
       const body = JSON.parse((await readBody(req, 8 * 1024 * 1024)).toString() || '{}');
       const r = enfileirarPortal({ tipo: body.tipo, chave: body.chave, payload: body.payload });
       if (!r) return sendJson(res, 400, { success: false, error: 'DADOS_INCOMPLETOS: tipo e chave são obrigatórios' });
-      return sendJson(res, 200, { success: true, id: r.item.id, criado: r.criado, total: filaPortal.length });
+      return sendJson(res, 200, {
+        success: true,
+        id: r.item ? r.item.id : null,
+        criado: r.criado,
+        inalterado: !!r.inalterado,
+        total: filaPortal.length,
+      });
     }
     if (method === 'POST' && p === '/api/portal/fila/confirmar') {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');

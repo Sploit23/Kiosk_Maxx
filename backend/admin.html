@@ -199,6 +199,27 @@ select.form-input{appearance:none;}
 .preco-val{display:flex;align-items:center;gap:6px;color:var(--gold-300);font-weight:700;font-size:13px;}
 .preco-val .form-input{width:84px;text-align:right;}
 .preco-nome small{display:block;color:var(--slate-500);font-size:10.5px;font-weight:400;}
+/* catálogo editável (tamanhos/extras/combos) */
+.cat-box{border:1px solid var(--navy-line);border-radius:10px;padding:12px;background:var(--navy-850);margin-top:12px;}
+.cat-box-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
+.cat-box-head h4{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--gold-300);margin:0;}
+.cat-row{display:grid;grid-template-columns:2fr 1.1fr .9fr .7fr 34px;gap:8px;align-items:center;margin-bottom:8px;}
+.cat-row.cat-row-extra{grid-template-columns:2fr .9fr 1.3fr 34px;}
+.cat-row .form-input{padding:8px 10px;font-size:12px;min-width:0;}
+.cat-row .cat-preco{text-align:right;}
+.cat-row .cat-unid{text-align:center;}
+.cat-chk{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--slate-400);white-space:nowrap;}
+.cat-del,.cat-ci-del{background:rgba(226,84,84,.1);border:1px solid rgba(226,84,84,.3);color:var(--red-400,#e25454);border-radius:7px;width:34px;height:32px;cursor:pointer;font-size:14px;line-height:1;}
+.cat-del:hover,.cat-ci-del:hover{background:rgba(226,84,84,.2);}
+.cat-del[disabled]{opacity:.3;cursor:not-allowed;}
+.cat-combo{border:1px solid var(--navy-line);border-radius:9px;padding:10px;margin-bottom:10px;background:rgba(255,255,255,.015);}
+.cat-combo .cat-row{grid-template-columns:2fr .9fr 1fr 1fr 34px;}
+.cat-ci-list{margin-top:8px;padding-left:10px;border-left:2px solid var(--navy-line);}
+.cat-ci{display:grid;grid-template-columns:2fr .7fr 30px;gap:8px;align-items:center;margin-bottom:6px;}
+.cat-ci .form-input{padding:7px 9px;font-size:12px;min-width:0;}
+.cat-ci-del{width:30px;height:29px;}
+.cat-ci-add{margin-top:2px;font-size:11px;padding:6px 10px;}
+.cat-hint{font-size:11px;color:var(--slate-500);line-height:1.5;margin-top:6px;}
 .pair-status{font-size:11.5px;color:var(--green-500);background:rgba(79,174,127,.1);border:1px solid rgba(79,174,127,.25);border-radius:8px;padding:8px 10px;margin-bottom:14px;}
 .pair-status.muted{color:var(--slate-500);background:var(--navy-850);border-color:var(--navy-line);}
 .pair-tutorial{font-size:12px;color:var(--slate-400);background:var(--navy-850);border:1px solid var(--navy-line);border-radius:8px;padding:10px 12px;margin-bottom:14px;}
@@ -366,8 +387,6 @@ select.form-input{appearance:none;}
     <div class="sb-section">Equipe</div>
     <div class="sb-item" data-screen="equipe"><span class="ico">👥</span> Colaboradores</div>
     <div class="sb-item" data-screen="ranking"><span class="ico">🏆</span> Ranking</div>
-    <div class="sb-section">Controle</div>
-    <div class="sb-item" data-screen="auditoria"><span class="ico">🔑</span> Auditoria</div>
     <div class="sb-section">Admin</div>
     <div class="sb-item" data-screen="config"><span class="ico">⚙️</span> Configurações</div>
   </div>
@@ -476,8 +495,23 @@ select.form-input{appearance:none;}
         </div>
       </div>
       <div class="card">
+        <h3>Parâmetros financeiros (DRE)</h3>
+        <p style="margin:0 0 12px;color:var(--slate-400);font-size:12px;">Usados no resultado do período: custo de ribbon por unidade e comissões sobre a receita de cada operador.</p>
+        <div class="form-row-h">
+          <div class="form-row"><label class="form-label">Custo do ribbon (R$/unidade)</label>
+            <input class="form-input" id="p-custo-ribbon" type="number" min="0" step="0.01" placeholder="0,00"></div>
+          <div class="form-row"><label class="form-label">Comissão vendedora (%)</label>
+            <input class="form-input" id="p-com-vend" type="number" min="0" max="100" step="0.1" placeholder="0"></div>
+          <div class="form-row"><label class="form-label">Comissão fotógrafo (%)</label>
+            <input class="form-input" id="p-com-foto" type="number" min="0" max="100" step="0.1" placeholder="0"></div>
+          <div class="form-row"><label class="form-label">Ribbon crítico (un.)</label>
+            <input class="form-input" id="p-ribbon-crit" type="number" min="0" step="1" placeholder="100"></div>
+        </div>
+        <div style="margin-top:12px;"><button class="btn btn-primary" id="btn-salvar-params">💾 Salvar parâmetros</button></div>
+      </div>
+      <div class="card">
         <h3>Exportação de dados</h3>
-        <p style="margin:0 0 12px;color:var(--slate-400);font-size:12px;">Baixe uma visão completa do portal (lojas, equipe, vendas, pedidos, despesas, auditoria e parâmetros).</p>
+        <p style="margin:0 0 12px;color:var(--slate-400);font-size:12px;">Baixe uma visão completa do portal (lojas, equipe, vendas, pedidos, despesas e parâmetros).</p>
         <div class="form-row-h">
           <button class="btn btn-primary" id="btn-exportar-relatorio">🖨️ Relatório (HTML)</button>
           <button class="btn btn-ghost" id="btn-exportar-json">⬇️ Backup completo (JSON)</button>
@@ -577,6 +611,11 @@ select.form-input{appearance:none;}
         </div>
       </div>
       <div class="kpi-grid" id="desp-kpis"></div>
+      <div class="card">
+        <h3>Resultado do período (DRE)</h3>
+        <p style="margin:0 0 10px;color:var(--slate-400);font-size:12px;" id="desp-dre-base"></p>
+        <table id="desp-dre"></table>
+      </div>
       <div class="grid2">
         <div class="card">
           <h3>Nova despesa</h3>
@@ -655,48 +694,38 @@ select.form-input{appearance:none;}
       </div>
     </div>
 
-    <!-- ====== AUDITORIA (uso de senha master) ====== -->
-    <div class="screen" id="screen-auditoria">
-      <div class="section-head">
-        <div>
-          <h2>Auditoria</h2>
-          <p>Usos de senha master (perda, desconto, cancelamento, cobrança de diferença) — enviados pelo PDV na hora</p>
-        </div>
-        <div class="period-tabs" id="audit-periodo">
-          <button class="period-tab active" data-period="7d">7 dias</button>
-          <button class="period-tab" data-period="mes">Este mês</button>
-          <button class="period-tab" data-period="temporada">Temporada</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="form-row-h" style="align-items:flex-end;gap:12px;">
-          <div class="form-row"><label class="form-label">Loja</label>
-            <select class="form-input" id="audit-loja" style="min-width:200px;"></select>
-          </div>
-          <div class="form-row"><label class="form-label">Tipo de ação</label>
-            <select class="form-input" id="audit-tipo" style="min-width:220px;"></select>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <table id="audit-tabela"></table>
-      </div>
-    </div>
-
   <!-- ====== CATÁLOGO DE PRODUTOS (preços por loja) ====== -->
     <div class="screen" id="screen-precos">
       <div class="section-head">
-        <div><h2>Catálogo de produtos</h2><p>Preços que o PDV usa — escolha a loja, ajuste os valores e salve</p></div>
+        <div><h2>Catálogo de produtos</h2><p>Edite, crie e exclua produtos — o PDV aplica as mudanças sozinho em até 60s</p></div>
       </div>
       <div class="card">
         <h3>Loja / Kiosk</h3>
         <select class="form-input" id="precos-loja" style="width:320px;"></select>
       </div>
       <div class="card">
-        <h3>Preços</h3>
-        <div class="precos-grid" id="precos-grid"></div>
+        <div class="cat-box-head" style="margin-bottom:4px;">
+          <h3 style="margin:0;">Produtos</h3>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-ghost" id="cat-add-tamanho">+ Tamanho</button>
+            <button class="btn btn-ghost" id="cat-add-extra">+ Produto extra</button>
+            <button class="btn btn-ghost" id="cat-add-combo">+ Combo</button>
+          </div>
+        </div>
+        <div class="cat-box">
+          <div class="cat-box-head"><h4>Tamanhos de foto (impressos)</h4><span class="cat-hint">Modelo = papel/molde usado na ASK-400</span></div>
+          <div id="cat-tamanhos"></div>
+        </div>
+        <div class="cat-box">
+          <div class="cat-box-head"><h4>Produtos extras (físicos e envio digital)</h4><span class="cat-hint">“Uso interno” aparece só dentro de combos</span></div>
+          <div id="cat-extras"></div>
+        </div>
+        <div class="cat-box">
+          <div class="cat-box-head"><h4>Combos</h4><span class="cat-hint">Preço fechado; itens saem do catálogo acima</span></div>
+          <div id="cat-combos"></div>
+        </div>
         <div style="margin-top:14px;display:flex;gap:10px;">
-          <button class="btn btn-primary" id="btn-salvar-precos">💾 Salvar preços</button>
+          <button class="btn btn-primary" id="btn-salvar-precos">💾 Salvar catálogo</button>
           <button class="btn btn-ghost" id="btn-recargar-precos">↻ Recarregar da loja</button>
         </div>
       </div>
@@ -704,7 +733,7 @@ select.form-input{appearance:none;}
         <span class="alert-ico">💡</span>
         <div class="alert-body">
           <div class="a-title">Como o PDV usa isso</div>
-          <div class="a-sub">O PDV busca estes preços ao iniciar e a cada emparelhamento (kiosk.pair). Se o portal estiver fora, o kiosk usa os valores locais — os mesmos defaults que aparecem aqui antes de qualquer alteração.</div>
+          <div class="a-sub">O PDV busca o catálogo ao iniciar e a cada 60s. Criar, editar ou excluir aqui muda o PDV aberto (sem reiniciar). O 10x15 e o 15x20 não podem ser excluídos porque são a base da impressão e dos combos. Se o portal estiver fora, o kiosk segue com a última versão salva localmente.</div>
         </div>
       </div>
     </div>
@@ -729,7 +758,7 @@ var FN_LABEL = { vendedor:'Vendedora', fotografo:'Fotógrafo', admin:'Administra
 var FN_ACESSO = { vendedor:'Kiosk', fotografo:'Kiosk', admin:'Total', gerente:'Regional' };
 
 var token = sessionStorage.getItem('nac_token') || '';
-var state = { currentUser:null, lojas:[], usuarios:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', finPeriodo:'hoje', fluxoPeriodo:'hoje', despesasPeriodo:'mes', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, auditoria:[], _audProm:null, _audDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje', auditPeriodo:'7d' };
+var state = { currentUser:null, lojas:[], usuarios:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', finPeriodo:'hoje', fluxoPeriodo:'hoje', despesasPeriodo:'mes', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje' };
 var notificacoes = [];
 var currentScreen = 'dashboard';
 
@@ -804,8 +833,7 @@ var titles = {
   dashboard:'Dashboard', lojas:'Lojas', equipe:'Colaboradores', ranking:'Ranking',
   config:'Configurações', precos:'Catálogo de produtos',
   financeiro:'Financeiro', fluxo:'Fluxo de Caixa',
-  despesas:'Despesas & Taxas', estoque:'Estoque',
-  auditoria:'Auditoria'
+  despesas:'Despesas & Taxas', estoque:'Estoque'
 };
 $$('.sb-item[data-screen]').forEach(function(item){
   item.addEventListener('click', function(){
@@ -833,7 +861,6 @@ function goScreen(name){
   if(name==='despesas') renderDespesas();
   if(name==='estoque') renderEstoque();
   if(name==='ranking') renderRanking();
-  if(name==='auditoria') renderAuditoria();
 }
 
 // ——— DADOS ———
@@ -905,6 +932,26 @@ async function tentarLogin(){
   await loadAll();
   healthPing();
   goScreen('dashboard');
+  iniciarAutoRefresh();
+}
+
+// Atualiza a tela logada a cada 60s (o PDV manda venda/pedido em tempo real;
+// sem isso o portal só veria os dados novos depois de recarregar a página).
+var _autoRefreshTimer = null;
+function iniciarAutoRefresh(){
+  if(_autoRefreshTimer) return;
+  _autoRefreshTimer = setInterval(function(){
+    if(!state.currentUser) return;
+    state._vendasAt = 0; state._pedAt = 0; state._despAt = 0; state._paramAt = 0;
+    var s = currentScreen;
+    if(s === 'dashboard') renderDashboard();
+    else if(s === 'financeiro') renderFinanc();
+    else if(s === 'fluxo') renderFluxo();
+    else if(s === 'despesas') renderDespesas();
+    else if(s === 'estoque') renderEstoque();
+    else if(s === 'ranking') renderRanking();
+    else if(s === 'lojas') loadAll().then(renderLojas);
+  }, 60000);
 }
 
 // ——— LOGOUT ———
@@ -988,8 +1035,13 @@ function fmtBRL(v){
 function fmtInt(v){
   return String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g,'.');
 }
+// Cache curto: o PDV envia vendas/pedidos a cada evento (e no máximo a cada
+// 5 min). 20s garante que o portal mostre a venda nova sem recarregar a página.
+var CACHE_TTL = 20000;
+function cacheFresh(at){ return at && (Date.now() - at) < CACHE_TTL; }
 function getVendas(){
-  if(!state._vendasProm){
+  if(!state._vendasProm || !cacheFresh(state._vendasAt)){
+    state._vendasAt = Date.now();
     state._vendasProm = call('vendas.resumo', {}).then(function(res){
       state.vendasRaw = (res && res.ok && Array.isArray(res.vendas)) ? res.vendas : [];
       return state.vendasRaw;
@@ -998,27 +1050,22 @@ function getVendas(){
   return state._vendasProm;
 }
 function getPedidos(){
-  if(!state._pedProm || state._pedDirty){
+  if(!state._pedProm || state._pedDirty || !cacheFresh(state._pedAt)){
     state._pedDirty = false;
+    state._pedAt = Date.now();
     state._pedProm = call('pedido.list', {}).then(function(res){
       state.pedidos = (res && res.ok && Array.isArray(res.pedidos)) ? res.pedidos : [];
+      // Status sempre em minúsculas: o PDV manda 'pago'/'cancelado', mas o
+      // histórico antigo pode ter 'PAGO'/'CANCELADO' (filtros e DRE comparam).
+      state.pedidos.forEach(function(p){ p.status = String(p.status||'').toLowerCase(); });
       return state.pedidos;
     }).catch(function(){ state.pedidos = []; return state.pedidos; });
   }
   return state._pedProm;
 }
-function getAuditoria(){
-  if(!state._audProm || state._audDirty){
-    state._audDirty = false;
-    state._audProm = call('auditoria.list', {}).then(function(res){
-      state.auditoria = (res && res.ok && Array.isArray(res.auditoria)) ? res.auditoria : [];
-      return state.auditoria;
-    }).catch(function(){ state.auditoria = []; return state.auditoria; });
-  }
-  return state._audProm;
-}
 function getParametros(){
-  if(!state._paramProm){
+  if(!state._paramProm || !cacheFresh(state._paramAt)){
+    state._paramAt = Date.now();
     state._paramProm = call('parametros.get', {}).then(function(res){
       state.parametros = (res && res.ok && res.parametros) ? res.parametros : null;
       return state.parametros;
@@ -1051,7 +1098,7 @@ function conexaoDeltaMin(iso){
   return m >= 60 ? Math.round(m/60)+' h' : m+' min';
 }
 // Status online/offline da loja (servido por lojas.list a partir do enviadoEm
-// dos snapshots/pedidos/auditoria — o PDV envia snapshot a cada 5 min).
+// dos snapshots/pedidos — o PDV envia snapshot a cada 5 min).
 function connPill(l){
   if(l.online) return '<span class="pill pill-green">● Online · há '+conexaoDeltaMin(l.ultimaConexao)+'</span>';
   return l.ultimaConexao
@@ -1355,8 +1402,12 @@ async function renderFinanc(){
   var ptb = $('#fin-pedidos');
   ptb.innerHTML = pedidosTabelaHTML(peds, 200);
   bindPedidoVer(ptb);
-  var totPed = peds.reduce(function(s,p){ return s + toNum(p.total); }, 0);
-  setCardCount('#fin-pedidos-count', peds.length ? (fmtInt(peds.length)+' pedido(s) · '+fmtBRL(totPed)) : 'nenhum pedido no período');
+  var pedLiquidos = peds.filter(function(p){ return p.status!=='cancelado'; });
+  var totPed = pedLiquidos.reduce(function(s,p){ return s + toNum(p.total); }, 0);
+  var cancelados = peds.length - pedLiquidos.length;
+  setCardCount('#fin-pedidos-count', peds.length
+    ? (fmtInt(pedLiquidos.length)+' pedido(s) · '+fmtBRL(totPed)+(cancelados?' · '+fmtInt(cancelados)+' cancelado(s)':''))
+    : 'nenhum pedido no período');
 }
 
 // ——— FLUXO DE CAIXA ———
@@ -1436,8 +1487,9 @@ function setCardCount(id, txt){ var el = $(id); if(el) el.textContent = txt || '
 
 // ——— DESPESAS & TAXAS ———
 function loadDespesas(){
-  if(!state._despProm || state._despDirty){
+  if(!state._despProm || state._despDirty || !cacheFresh(state._despAt)){
     state._despDirty = false;
+    state._despAt = Date.now();
     state._despProm = call('despesas.list', {}).then(function(res){
       state.despesas = (res && res.ok && Array.isArray(res.despesas)) ? res.despesas : [];
       return state.despesas;
@@ -1452,19 +1504,71 @@ async function renderDespesas(){
     lojaSel.innerHTML = '<option value="">Geral / despesa da operação</option>' +
       state.lojas.map(function(l){ return '<option value="'+escAttr(l.id)+'">'+esc(l.nome)+'</option>'; }).join('');
   }
-  await Promise.all([getVendas(), loadDespesas()]);
+  await Promise.all([getVendas(), getPedidos(), loadDespesas(), getParametros()]);
   var period = state.despesasPeriodo;
   var cut = periodCutoff(period);
-  var vendasRows = state.vendasRaw.filter(function(v){ return cut ? (v.data||'') >= dayStr(cut) : true; });
   var despRows = state.despesas.filter(function(d){ return cut ? (d.data||'') >= dayStr(cut) : true; });
-  var receita = aggVendas(vendasRows).total;
   var totalDesp = despRows.reduce(function(s,d){ return s + toNum(d.valor); }, 0);
-  var resultado = receita - totalDesp;
+
+  // Receita do DRE: pedidos reais (pago/impresso) — cada item e cada pagamento
+  // enviados pelo PDV. Se ainda não houver pedido no período, cai no snapshot
+  // diário (vendas.push) para o resultado nunca aparecer zerado por atraso.
+  var pedRows = state.pedidos.filter(function(p){
+    if(p.status !== 'pago' && p.status !== 'impresso') return false;
+    return cut ? (p.data||'') >= dayStr(cut) : true;
+  });
+  var vendasRows = state.vendasRaw.filter(function(v){ return cut ? (v.data||'') >= dayStr(cut) : true; });
+  var receita = pedRows.reduce(function(s,p){ return s + toNum(p.total); }, 0);
+  var baseDre = pedRows.length
+    ? fmtInt(pedRows.length)+' pedido(s) consolidado(s)'
+    : 'snapshot(s) diário(s) — nenhum pedido consolidado no período';
+  if(!pedRows.length) receita = aggVendas(vendasRows).total;
+
+  var params = state.parametros || {};
+  var unidades = pedRows.reduce(function(s,p){ return s + toNum(p.unidadesTotal); }, 0);
+  var custoRibbon = unidades * toNum(params.custoRibbonUnitario);
+  // Comissões: aplica o % sobre a receita dos operadores de cada função
+  // (vendedor/fotógrafo), usando o cadastro de colaboradores do portal.
+  var revVend = 0, revFoto = 0;
+  pedRows.forEach(function(p){
+    var nome = String(p.operador||'');
+    var u = state.usuarios.find(function(x){
+      if(String(x.nome)!==nome && String(x.usuario)!==nome) return false;
+      // nomes repetidos entre lojas: prioriza o colaborador da loja do pedido
+      return !p.lojaId || !x.lojaId || x.lojaId === p.lojaId;
+    });
+    var f = u ? u.funcao : '';
+    if(f === 'vendedor') revVend += toNum(p.total);
+    else if(f === 'fotografo') revFoto += toNum(p.total);
+  });
+  var comVend = revVend * toNum(params.comissaoVendedor)/100;
+  var comFoto = revFoto * toNum(params.comissaoFotografo)/100;
+  var resultado = receita - totalDesp - custoRibbon - comVend - comFoto;
+  var margem = receita > 0 ? (resultado/receita*100) : 0;
+
   $('#desp-kpis').innerHTML =
-    kpi('Receita ('+typeVal(null,period)+')', fmtBRL(receita), vendasRows.length+' snapshot(s)', 'ok') +
+    kpi('Receita ('+typeVal(null,period)+')', fmtBRL(receita), pedRows.length+' pedido(s)', 'ok') +
     kpi('Despesas ('+typeVal(null,period)+')', fmtBRL(totalDesp), despRows.length+' lançamento(s)', despRows.length?'ok':'alert') +
-    kpi('Resultado', fmtBRL(resultado), resultado>=0 ? 'período positivo' : 'período negativo', resultado>=0?'ok':'alert') +
-    kpi('Custo sobre receita', receita>0 ? (totalDesp/receita*100).toFixed(1)+'%' : '—', 'despesas ÷ receita', 'ok');
+    kpi('Custo de ribbon', fmtBRL(custoRibbon), fmtInt(unidades)+' unidade(s)', unidades?'ok':'alert') +
+    kpi('Comissões', fmtBRL(comVend+comFoto), 'vendedoras + fotógrafos', (comVend+comFoto)?'ok':'alert') +
+    kpi('Resultado', fmtBRL(resultado), resultado>=0 ? 'lucro no período' : 'prejuízo no período', resultado>=0?'ok':'alert') +
+    kpi('Margem', (receita>0?margem.toFixed(1):'—')+'%', 'resultado ÷ receita', resultado>=0?'ok':'alert');
+
+  var dre = $('#desp-dre');
+  if(dre){
+    var zeroParams = !toNum(params.custoRibbonUnitario) && !toNum(params.comissaoVendedor) && !toNum(params.comissaoFotografo);
+    dre.innerHTML =
+      '<tr><th>Descrição</th><th style="text-align:right;">Valor</th></tr>' +
+      '<tr><td>Receita de vendas</td><td style="text-align:right;"><b>'+fmtBRL(receita)+'</b></td></tr>' +
+      '<tr><td style="color:var(--slate-400);">(−) Despesas lançadas</td><td style="text-align:right;color:var(--red-400);">−'+fmtBRL(totalDesp)+'</td></tr>' +
+      '<tr><td style="color:var(--slate-400);">(−) Custo de ribbon ('+fmtInt(unidades)+' un. × '+fmtBRL(toNum(params.custoRibbonUnitario))+')</td><td style="text-align:right;color:var(--red-400);">−'+fmtBRL(custoRibbon)+'</td></tr>' +
+      '<tr><td style="color:var(--slate-400);">(−) Comissão vendedoras ('+toNum(params.comissaoVendedor)+'% de '+fmtBRL(revVend)+')</td><td style="text-align:right;color:var(--red-400);">−'+fmtBRL(comVend)+'</td></tr>' +
+      '<tr><td style="color:var(--slate-400);">(−) Comissão fotógrafos ('+toNum(params.comissaoFotografo)+'% de '+fmtBRL(revFoto)+')</td><td style="text-align:right;color:var(--red-400);">−'+fmtBRL(comFoto)+'</td></tr>' +
+      '<tr><td><b>'+(resultado>=0?'Lucro do período':'Prejuízo do período')+'</b></td><td style="text-align:right;"><b style="color:'+(resultado>=0?'var(--green-500)':'var(--red-400)')+';">'+fmtBRL(resultado)+'</b></td></tr>' +
+      (zeroParams ? '<tr><td colspan="2" style="color:var(--amber-500);font-size:12px;">Configure custo de ribbon e comissões em <b>Configurações → Parâmetros financeiros</b> para o resultado ficar completo.</td></tr>' : '');
+    var baseEl = $('#desp-dre-base');
+    if(baseEl) baseEl.textContent = 'Base da receita: '+baseDre+' · '+fmtInt(pedRows.reduce(function(s,p){ return s + toNum(p.unidadesTotal); },0))+' unidade(s) de ribbon.';
+  }
 
   var tb = $('#tabela-despesas');
   if(despRows.length){
@@ -1713,47 +1817,8 @@ async function renderRanking(){
     }).join('') : '<tr><td class="empty" colspan="5">—</td></tr>');
 }
 
-// ——— AUDITORIA (uso de senha master no PDV) ———
-async function renderAuditoria(){
-  await getAuditoria();
-  var lojaSel = $('#audit-loja');
-  if(lojaSel && lojaSel.options.length===0){
-    lojaSel.innerHTML = '<option value="">Todas as lojas</option>' +
-      state.lojas.map(function(l){ return '<option value="'+escAttr(l.id)+'">'+esc(l.nome)+'</option>'; }).join('');
-  }
-  var tipos = {};
-  state.auditoria.forEach(function(u){ tipos[u.titulo||'outro'] = 1; });
-  var tipoSel = $('#audit-tipo');
-  if(tipoSel && tipoSel.options.length===0){
-    tipoSel.innerHTML = '<option value="">Todos os tipos</option>' +
-      Object.keys(tipos).sort().map(function(t){ return '<option value="'+escAttr(t)+'">'+esc(t)+'</option>'; }).join('');
-  }
-  var period = state.auditPeriodo;
-  var cut = periodCutoff(period);
-  var lojaF = $('#audit-loja').value || '';
-  var tipoF = $('#audit-tipo').value || '';
-  var rows = state.auditoria.filter(function(u){
-    if(lojaF && u.lojaId!==lojaF) return false;
-    if(tipoF && (u.titulo||'')!==tipoF) return false;
-    return cut ? (u.data||'') >= dayStr(cut) : true;
-  }).sort(function(a,b){ return String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')); });
-  $('#audit-tabela').innerHTML =
-    '<tr><th>Quando</th><th>Loja / PDV</th><th>Ação</th><th>Operador</th><th>Motivo</th><th>Pedido</th></tr>' +
-    (rows.length ? rows.slice(0,200).map(function(u){
-      var ctx = [u.pedidoContexto, u.pedidoGeradoId].filter(Boolean).join(' → ');
-      return '<tr><td style="white-space:nowrap;">'+fmtDt(u.criadoEm)+'</td>'+
-        '<td>'+esc(u.lojaNome||u.lojaId||'—')+'<div style="font-size:11px;color:var(--slate-400);">'+esc(u.pdvNome||'')+'</div></td>'+
-        '<td>'+esc(u.titulo||'—')+'</td><td>'+esc(u.operador||'—')+'</td>'+
-        '<td style="color:var(--slate-400);max-width:300px;">'+esc(u.motivo||'')+'</td>'+
-        '<td>'+(ctx?esc(ctx):'—')+'</td></tr>';
-    }).join('') : '<tr><td class="empty" colspan="6">Nenhum uso de senha master registrado no período.</td></tr>');
-}
-
 // ——— BINDs das novas telas ———
 bindPeriodTabs('#rank-periodo', function(p){ state.rankPeriodo = p; renderRanking(); });
-bindPeriodTabs('#audit-periodo', function(p){ state.auditPeriodo = p; renderAuditoria(); });
-$('#audit-loja').addEventListener('change', renderAuditoria);
-$('#audit-tipo').addEventListener('change', renderAuditoria);
 
 // ——— LOJAS ———
 function renderLojas(){
@@ -2050,14 +2115,36 @@ async function excluirUser(id){
 }
 
 // ——— CONFIG ———
-function renderConfig(){
+async function renderConfig(){
   $('#tabela-api').innerHTML =
     '<tr><th></th><th></th></tr>'+
     '<tr><td>Plataforma</td><td>HostGator (PHP)</td></tr>'+
     '<tr><td>Portal</td><td>maxxfoto.com.br/natalcontroler</td></tr>'+
     '<tr><td>Login do kiosk</td><td>Valida no portal (lojaId na config)</td></tr>'+
     '<tr><td>Offline</td><td>Kiosk usa cadastro local se sem internet</td></tr>';
+  var pr = await getParametros();
+  var p = pr || {};
+  if($('#p-custo-ribbon')) $('#p-custo-ribbon').value = toNum(p.custoRibbonUnitario);
+  if($('#p-com-vend')) $('#p-com-vend').value = toNum(p.comissaoVendedor);
+  if($('#p-com-foto')) $('#p-com-foto').value = toNum(p.comissaoFotografo);
+  if($('#p-ribbon-crit')) $('#p-ribbon-crit').value = toNum(p.ribbonCritico);
 }
+$('#btn-salvar-params').addEventListener('click', async function(){
+  var payload = {
+    custoRibbonUnitario: parseFloat($('#p-custo-ribbon').value) || 0,
+    comissaoVendedor: parseFloat($('#p-com-vend').value) || 0,
+    comissaoFotografo: parseFloat($('#p-com-foto').value) || 0,
+    ribbonCritico: parseFloat($('#p-ribbon-crit').value) || 0,
+  };
+  var res = await call('parametros.save', payload);
+  if(!res || !res.ok){ toast((res&&res.error)||'Falha ao salvar parâmetros', true); return; }
+  state.parametros = res.parametros || payload;
+  state._paramProm = null;
+  if(state._despDirty !== undefined) state._despDirty = true;
+  toast('Parâmetros financeiros salvos');
+  notif('⚙️','Parâmetros atualizados','Custo de ribbon e comissões atualizados.');
+  renderConfig();
+});
 $('#btn-trocar-senha').addEventListener('click', function(){
   openPortalModal(
     '<div class="modal-head"><h3>Trocar senha do portal</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
@@ -2083,7 +2170,7 @@ $('#btn-trocar-senha').addEventListener('click', function(){
 // ——— EXPORTAÇÃO DE DADOS ———
 function exportarTudo(){
   return Promise.all([
-    getVendas(), getPedidos(), getAuditoria(), getParametros(), loadDespesas(), getPrecos()
+    getVendas(), getPedidos(), getParametros(), loadDespesas(), getPrecos()
   ]).catch(function(){});
 }
 function expTabela(headers, rows, emptyMsg){
@@ -2101,7 +2188,6 @@ function exportarDados(){
     var vendas = state.vendasRaw || [];
     var pedidos = state.pedidos || [];
     var despesas = state.despesas || [];
-    var auditoria = state.auditoria || [];
     var agora = new Date();
     var pagos = pedidos.filter(function(p){ return p.status==='pago'||p.status==='impresso'; });
     var receita = pagos.reduce(function(s,p){ return s+toNum(p.total); },0);
@@ -2123,7 +2209,6 @@ function exportarDados(){
       '<div class="rs"><b>'+fmtInt(pedidos.length)+'</b><span>pedidos consolidados</span></div>'+
       '<div class="rs"><b>'+fmtBRL(receita)+'</b><span>receita (pedidos pago/impresso)</span></div>'+
       '<div class="rs"><b>'+fmtBRL(totalDesp)+'</b><span>despesas lançadas</span></div>'+
-      '<div class="rs"><b>'+fmtInt(auditoria.length)+'</b><span>registros de auditoria</span></div>'+
       '</div>';
 
     html += '<h2>Lojas</h2>' + expTabela(
@@ -2168,13 +2253,6 @@ function exportarDados(){
           esc(d.descricao||'—'), fmtBRL(toNum(d.valor)) ];
       }));
 
-    html += '<h2>Auditoria</h2>' + expTabela(
-      ['Quando','Loja','Operador','Título','Motivo'],
-      auditoria.sort(function(a,b){ return String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')); }).map(function(u){
-        return [ fmtDt(u.criadoEm), esc(u.lojaNome||u.lojaId||'—'), esc(u.operador||'—'),
-          esc(u.titulo||'—'), esc(u.motivo||'—') ];
-      }));
-
     html += '<h2>Parâmetros (estoque)</h2>' + expTabela(
       ['Parâmetro','Valor'],
       [
@@ -2207,7 +2285,6 @@ function exportarJSON(){
       vendas: state.vendasRaw,
       pedidos: state.pedidos,
       despesas: state.despesas,
-      auditoria: state.auditoria,
       parametros: state.parametros,
       precos: state.precos || {}
     };
@@ -2225,26 +2302,150 @@ function exportarJSON(){
 $('#btn-exportar-relatorio').addEventListener('click', exportarDados);
 $('#btn-exportar-json').addEventListener('click', exportarJSON);
 
-// ——— CATÁLOGO DE PRODUTOS (preços por loja) ———
-var PRODUTOS_PRECO = [
-  ['10x15','Foto 10x15','foto impressa'],
-  ['15x20','Foto 15x20','foto impressa'],
-  ['bolinha','Bolinha 7,5x7,5','com bola de acrílico'],
-  ['polaroide','Polaroide 2 poses','2 poses por folha 10x15'],
-  ['porta-retrato-10x15','Porta-retrato 10x15',''],
-  ['porta-retrato-15x20','Porta-retrato 15x20',''],
-  ['ima','Ímã de geladeira','adicional a uma foto 10x15'],
-  ['item-encarte','Item Encarte','dentro dos combos'],
-  ['porta-cartao-postal','Porta-cartão postal','dentro dos combos'],
-  ['foto-digital','Envio digital (foto no QR)','envio da foto escolhida pelo código'],
-  ['combo1','Combo: Foto + Porta-retrato 10x15',''],
-  ['combo2','Combo: Foto + Porta-retrato 15x20',''],
-  ['combo3','Combo: Encarte (2 fotos 15x20)',''],
-  ['combo4','Combo: Foto 10x15 + Porta + Bolinha',''],
-  ['combo5','Combo: Cartão de Natal — Layout 1',''],
-  ['combo6','Combo: Cartão de Natal — Layout 2',''],
+// ——— CATÁLOGO DE PRODUTOS (tamanhos/extras/combos por loja) ———
+var MODELOS_CAT = [
+  ['10x15', 'Foto 10x15 (papel 10x15)'],
+  ['15x20', 'Foto 15x20 (papel 15x20)'],
+  ['bolinha', 'Bolinha (molde 10x15)'],
+  ['polaroide', 'Polaroide (molde 10x15)'],
 ];
+var catalogoEdit = null;
 var precosCarregados = null;
+
+function catClone(o){ return JSON.parse(JSON.stringify(o)); }
+function catSlug(s){
+  var out = String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,32);
+  return out || 'item';
+}
+function catIdUnico(base, cat){
+  var usados = {};
+  (cat.tamanhos||[]).concat(cat.extras||[]).concat(cat.combos||[]).forEach(function(x){ usados[x.id]=1; });
+  var id = base, n = 2;
+  while(usados[id]){ id = base + '-' + n; n++; }
+  return id;
+}
+function catNormalizar(cat){
+  cat = (cat && typeof cat === 'object') ? cat : {};
+  return {
+    tamanhos: (cat.tamanhos||[]).map(function(t){
+      var modelo = MODELOS_CAT.some(function(m){ return m[0]===t.modelo; }) ? t.modelo
+        : (MODELOS_CAT.some(function(m){ return m[0]===t.id; }) ? t.id : '10x15');
+      return {
+        id: String(t.id), label: t.label || t.id, preco: Number(t.preco) || 0,
+        modelo: modelo, unidades: Number(t.unidades) || (modelo==='15x20'?2:1), nota: t.nota || '',
+      };
+    }),
+    extras: (cat.extras||[]).map(function(e){
+      return { id:String(e.id), label:e.label||e.id, preco:Number(e.preco)||0, oculto:!!e.oculto, digital:!!e.digital, nota:e.nota||'' };
+    }),
+    combos: (cat.combos||[]).map(function(c){
+      return {
+        id:String(c.id), nome:c.nome||c.id, valorCombo:Number(c.valorCombo)||0,
+        inline:!!c.inline, encarte:!!c.encarte,
+        itens:(c.itens||[]).map(function(it){ return { produtoId:String(it.produtoId), qtd:Number(it.qtd)||1 }; }),
+      };
+    }),
+  };
+}
+function catOpcoesProdutos(){
+  var opts = [];
+  (catalogoEdit.tamanhos||[]).forEach(function(t){ opts.push({ id:t.id, label:t.label+' (tamanho)' }); });
+  (catalogoEdit.extras||[]).forEach(function(e){ opts.push({ id:e.id, label:e.label+(e.oculto?' (interno)':'') }); });
+  return opts;
+}
+function catOptionsHtml(sel){
+  return catOpcoesProdutos().map(function(o){
+    return '<option value="'+escAttr(o.id)+'"'+(o.id===sel?' selected':'')+'>'+esc(o.label)+'</option>';
+  }).join('');
+}
+
+function renderCatalogo(){
+  if(!catalogoEdit) return;
+  var tBox = $('#cat-tamanhos');
+  tBox.innerHTML = (catalogoEdit.tamanhos||[]).length ? catalogoEdit.tamanhos.map(function(t){
+    var fixo = (t.id==='10x15' || t.id==='15x20');
+    return '<div class="cat-row" data-id="'+escAttr(t.id)+'">'+
+      '<input class="form-input cat-label" value="'+escAttr(t.label)+'" placeholder="Nome">'+
+      '<select class="form-input cat-modelo"'+(fixo?' disabled':'')+'>'+
+        MODELOS_CAT.map(function(m){ return '<option value="'+m[0]+'"'+(t.modelo===m[0]?' selected':'')+'>'+esc(m[1])+'</option>'; }).join('')+
+      '</select>'+
+      '<input type="number" min="0" step="0.1" class="form-input cat-preco" value="'+escAttr(t.preco)+'" title="Preço (R$)">'+
+      '<input type="number" class="form-input cat-unid" value="'+(t.modelo==='15x20'?2:1)+'" title="Unidades de ribbon (definido pelo modelo)" disabled>'+
+      '<button class="cat-del" title="'+(fixo?'Obrigatório para a impressão':'Excluir')+'"'+(fixo?' disabled':'')+'>✕</button>'+
+    '</div>';
+  }).join('') : '<div class="cat-hint">Nenhum tamanho cadastrado.</div>';
+
+  var eBox = $('#cat-extras');
+  eBox.innerHTML = (catalogoEdit.extras||[]).length ? catalogoEdit.extras.map(function(e){
+    return '<div class="cat-row cat-row-extra" data-id="'+escAttr(e.id)+'">'+
+      '<input class="form-input cat-label" value="'+escAttr(e.label)+'" placeholder="Nome">'+
+      '<input type="number" min="0" step="0.1" class="form-input cat-preco" value="'+escAttr(e.preco)+'" title="Preço (R$)">'+
+      '<label class="cat-chk"><input type="checkbox" class="cat-oculto"'+(e.oculto?' checked':'')+'> uso interno (só em combos)</label>'+
+      '<button class="cat-del" title="Excluir">✕</button>'+
+    '</div>';
+  }).join('') : '<div class="cat-hint">Nenhum produto extra cadastrado.</div>';
+
+  var cBox = $('#cat-combos');
+  cBox.innerHTML = (catalogoEdit.combos||[]).length ? catalogoEdit.combos.map(function(c){
+    var itens = (c.itens||[]).map(function(it, ii){
+      return '<div class="cat-ci" data-idx="'+ii+'">'+
+        '<select class="form-input cat-ci-prod">'+catOptionsHtml(it.produtoId)+'</select>'+
+        '<input type="number" min="1" step="1" class="form-input cat-ci-qtd" value="'+escAttr(it.qtd)+'" title="Quantidade">'+
+        '<button class="cat-ci-del" title="Remover item">✕</button>'+
+      '</div>';
+    }).join('');
+    return '<div class="cat-combo" data-id="'+escAttr(c.id)+'">'+
+      '<div class="cat-row">'+
+        '<input class="form-input cat-c-nome" value="'+escAttr(c.nome)+'" placeholder="Nome do combo">'+
+        '<input type="number" min="0" step="0.1" class="form-input cat-c-valor" value="'+escAttr(c.valorCombo)+'" title="Preço fechado (R$)">'+
+        '<label class="cat-chk"><input type="checkbox" class="cat-c-exibir"'+(c.inline?'':' checked')+'> exibir no PDV</label>'+
+        '<label class="cat-chk"><input type="checkbox" class="cat-c-encarte"'+(c.encarte?' checked':'')+'> encarte</label>'+
+        '<button class="cat-del" title="Excluir combo">✕</button>'+
+      '</div>'+
+      '<div class="cat-ci-list">'+itens+'<button class="btn btn-ghost cat-ci-add">+ Item</button></div>'+
+    '</div>';
+  }).join('') : '<div class="cat-hint">Nenhum combo cadastrado.</div>';
+}
+
+// Lê o que está na tela para o modelo (sem validar) — chamado antes de qualquer
+// ação estrutural, para não perder edições digitadas.
+function coletarCatalogoDoDom(){
+  if(!catalogoEdit) return;
+  $$('#cat-tamanhos .cat-row').forEach(function(row){
+    var t = catalogoEdit.tamanhos.filter(function(x){ return x.id===row.dataset.id; })[0];
+    if(!t) return;
+    t.label = row.querySelector('.cat-label').value.trim() || t.id;
+    t.modelo = row.querySelector('.cat-modelo').value;
+    var p = parseFloat(row.querySelector('.cat-preco').value);
+    t.preco = isNaN(p) ? 0 : p;
+    t.unidades = t.modelo==='15x20' ? 2 : 1;
+  });
+  $$('#cat-extras .cat-row').forEach(function(row){
+    var e = catalogoEdit.extras.filter(function(x){ return x.id===row.dataset.id; })[0];
+    if(!e) return;
+    e.label = row.querySelector('.cat-label').value.trim() || e.id;
+    var p = parseFloat(row.querySelector('.cat-preco').value);
+    e.preco = isNaN(p) ? 0 : p;
+    e.oculto = row.querySelector('.cat-oculto').checked;
+  });
+  $$('#cat-combos .cat-combo').forEach(function(el){
+    var c = catalogoEdit.combos.filter(function(x){ return x.id===el.dataset.id; })[0];
+    if(!c) return;
+    c.nome = el.querySelector('.cat-c-nome').value.trim() || c.id;
+    var p = parseFloat(el.querySelector('.cat-c-valor').value);
+    c.valorCombo = isNaN(p) ? 0 : p;
+    c.inline = !el.querySelector('.cat-c-exibir').checked;
+    c.encarte = el.querySelector('.cat-c-encarte').checked;
+    Array.prototype.slice.call(el.querySelectorAll('.cat-ci')).forEach(function(ci, idx){
+      if(!c.itens[idx]) return;
+      c.itens[idx].produtoId = ci.querySelector('.cat-ci-prod').value;
+      var q = parseInt(ci.querySelector('.cat-ci-qtd').value, 10);
+      c.itens[idx].qtd = (isNaN(q) || q < 1) ? 1 : q;
+    });
+  });
+}
+
 async function renderPrecos(){
   var sel = $('#precos-loja');
   if(!sel.options.length && state.lojas.length){
@@ -2253,34 +2454,143 @@ async function renderPrecos(){
     }).join('');
   }
   var lojaId = sel.value || (state.lojas[0] && state.lojas[0].id) || '';
-  if(!lojaId){ $('#precos-grid').innerHTML = '<div class="empty">Nenhuma loja cadastrada — crie uma em Lojas.</div>'; return; }
+  var areas = ['#cat-tamanhos', '#cat-extras', '#cat-combos'];
+  if(!lojaId){
+    areas.forEach(function(s){ $(s).innerHTML = '<div class="empty">Nenhuma loja cadastrada — crie uma em Lojas.</div>'; });
+    return;
+  }
   var res = null;
   try{ res = await call('precos', { lojaId: lojaId }); }catch(e){ res = null; }
   precosCarregados = (res && res.ok && res.precos && typeof res.precos === 'object') ? res.precos : {};
-  var grid = $('#precos-grid');
-  grid.innerHTML = PRODUTOS_PRECO.map(function(pp){
-    var v = precosCarregados[pp[0]];
-    if(v == null) v = '';
-    var sub = pp[2] ? '<small>'+esc(pp[2])+'</small>' : '';
-    return '<label class="preco-item"><div class="preco-nome">'+esc(pp[1])+sub+'</div>'+
-      '<div class="preco-val"><span>R$</span><input type="number" min="0" step="0.1" class="form-input" id="preco-'+escAttr(pp[0])+'" value="'+escAttr(v)+'"></div></label>';
-  }).join('');
+  catalogoEdit = catNormalizar((res && res.ok && res.catalogo) ? res.catalogo : {});
+  if(!catalogoEdit.tamanhos.length){
+    areas.forEach(function(s){ $(s).innerHTML = '<div class="empty">Sem catálogo — recarregue ou crie os produtos.</div>'; });
+    return;
+  }
+  renderCatalogo();
 }
+
+function abrirNovoCatalogo(tipo){
+  coletarCatalogoDoDom();
+  var titulo = tipo==='combo' ? 'Novo combo' : (tipo==='extra' ? 'Novo produto extra' : 'Novo tamanho');
+  var modeloCampo = tipo==='tamanho' ?
+    '<label class="cat-hint">Modelo de impressão (papel/molde)</label>'+
+    '<select id="nc-modelo" class="form-input" style="width:100%;margin:4px 0 12px;">'+
+      MODELOS_CAT.map(function(m){ return '<option value="'+m[0]+'">'+esc(m[1])+'</option>'; }).join('')+
+    '</select>' : '';
+  openPortalModal(
+    '<div class="modal-head"><h3>'+titulo+'</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
+    '<label class="cat-hint">Nome</label>'+
+    '<input id="nc-nome" class="form-input" style="width:100%;margin:4px 0 12px;" placeholder="Ex.: Porta-retrato 20x25">'+
+    modeloCampo+
+    '<div class="modal-actions"><button class="btn btn-primary" id="nc-salvar">Adicionar</button></div>'
+  );
+  $('#nc-salvar').addEventListener('click', function(){
+    var nome = $('#nc-nome').value.trim();
+    if(!nome){ toast('Informe o nome', true); return; }
+    var id = catIdUnico(catSlug(nome), catalogoEdit);
+    if(tipo==='tamanho'){
+      var modelo = $('#nc-modelo').value;
+      catalogoEdit.tamanhos.push({ id:id, label:nome, preco:0, modelo:modelo, unidades:modelo==='15x20'?2:1, nota:'' });
+    } else if(tipo==='extra'){
+      catalogoEdit.extras.push({ id:id, label:nome, preco:0, oculto:false, digital:false, nota:'' });
+    } else {
+      catalogoEdit.combos.push({ id:id, nome:nome, valorCombo:0, inline:false, encarte:false, itens:[] });
+    }
+    closePortalModal();
+    renderCatalogo();
+  });
+}
+
+function nomeItemEmUso(id){
+  return (catalogoEdit.combos||[]).some(function(c){
+    return (c.itens||[]).some(function(it){ return it.produtoId===id; });
+  });
+}
+
+$('#cat-tamanhos').addEventListener('change', function(e){
+  if(!e.target.closest('.cat-modelo')) return;
+  coletarCatalogoDoDom();
+  renderCatalogo();
+});
+$('#cat-tamanhos').addEventListener('click', function(e){
+  var btn = e.target.closest('.cat-del');
+  if(!btn) return;
+  var id = btn.closest('.cat-row').dataset.id;
+  if(id==='10x15' || id==='15x20') return;
+  coletarCatalogoDoDom();
+  if(nomeItemEmUso(id)){ toast('Este tamanho está em um combo — remova dos combos antes de excluir', true); return; }
+  if(!confirm('Excluir o tamanho "'+id+'"? O PDV aplica a mudança em até 60s.')) return;
+  catalogoEdit.tamanhos = catalogoEdit.tamanhos.filter(function(t){ return t.id!==id; });
+  renderCatalogo();
+});
+
+$('#cat-extras').addEventListener('click', function(e){
+  var btn = e.target.closest('.cat-del');
+  if(!btn) return;
+  var id = btn.closest('.cat-row').dataset.id;
+  coletarCatalogoDoDom();
+  if(nomeItemEmUso(id)){ toast('Este produto está em um combo — remova dos combos antes de excluir', true); return; }
+  if(!confirm('Excluir o produto "'+id+'"? O PDV aplica a mudança em até 60s.')) return;
+  catalogoEdit.extras = catalogoEdit.extras.filter(function(x){ return x.id!==id; });
+  renderCatalogo();
+});
+
+$('#cat-combos').addEventListener('click', function(e){
+  var comboEl = e.target.closest('.cat-combo');
+  if(!comboEl) return;
+  var id = comboEl.dataset.id;
+  var combo = catalogoEdit.combos.filter(function(c){ return c.id===id; })[0];
+  if(!combo) return;
+  coletarCatalogoDoDom();
+  if(e.target.closest('.cat-del')){
+    if(!confirm('Excluir o combo "'+combo.nome+'"? O PDV aplica a mudança em até 60s.')) return;
+    catalogoEdit.combos = catalogoEdit.combos.filter(function(c){ return c.id!==id; });
+    renderCatalogo();
+    return;
+  }
+  if(e.target.closest('.cat-ci-del')){
+    var idx = Number(e.target.closest('.cat-ci').dataset.idx);
+    combo.itens.splice(idx, 1);
+    renderCatalogo();
+    return;
+  }
+  if(e.target.closest('.cat-ci-add')){
+    var op = catOpcoesProdutos()[0];
+    if(!op){ toast('Crie um tamanho ou produto extra antes de montar o combo', true); return; }
+    combo.itens.push({ produtoId: op.id, qtd: 1 });
+    renderCatalogo();
+  }
+});
+
 function salvarPrecos(){
   var lojaId = $('#precos-loja').value;
   if(!lojaId){ toast('Sem loja selecionada', true); return; }
-  var precos = {};
-  PRODUTOS_PRECO.forEach(function(pp){
-    var el = document.getElementById('preco-'+pp[0]);
-    var str = (el ? el.value : '').trim();
-    if(str === '') return; // campo vazio = volta ao preço oficial (backend reseta o default)
-    var num = parseFloat(str.replace(',', '.'));
-    if(!isNaN(num)) precos[pp[0]] = num; // texto inválido = volta ao default (nunca vira R$ 0)
+  coletarCatalogoDoDom();
+  var cat = catClone(catalogoEdit);
+  if(!cat.tamanhos.some(function(t){ return t.id==='10x15'; }) || !cat.tamanhos.some(function(t){ return t.id==='15x20'; })){
+    toast('Os tamanhos 10x15 e 15x20 são obrigatórios (base da impressão)', true);
+    return;
+  }
+  var semNome = cat.tamanhos.concat(cat.extras).some(function(x){ return !String(x.label||'').trim(); }) ||
+    cat.combos.some(function(c){ return !String(c.nome||'').trim(); });
+  if(semNome){ toast('Preencha o nome de todos os produtos', true); return; }
+  var comboInvalido = null;
+  cat.combos.forEach(function(c){
+    if(!c.itens.length) comboInvalido = comboInvalido || ('Combo "'+c.nome+'" está sem itens');
+    c.itens.forEach(function(it){
+      var existe = cat.tamanhos.some(function(t){ return t.id===it.produtoId; }) ||
+        cat.extras.some(function(e){ return e.id===it.produtoId; });
+      if(!existe) comboInvalido = comboInvalido || ('Combo "'+c.nome+'" usa um item que não existe mais');
+    });
   });
-  call('precos.save', { lojaId: lojaId, precos: precos }).then(function(res){
+  if(comboInvalido){ toast(comboInvalido, true); return; }
+  call('precos.save', { lojaId: lojaId, catalogo: cat }).then(function(res){
     if(res && res.ok){
       precosCarregados = res.precos || precosCarregados;
-      toast('Preços salvos — o PDV atualiza sozinho em até 60s');
+      catalogoEdit = catNormalizar(res.catalogo);
+      renderCatalogo();
+      toast('Catálogo salvo — o PDV atualiza sozinho em até 60s');
     } else {
       toast((res && res.error) || 'Falha ao salvar', true);
     }
@@ -2289,6 +2599,9 @@ function salvarPrecos(){
 $('#precos-loja').addEventListener('change', renderPrecos);
 $('#btn-salvar-precos').addEventListener('click', salvarPrecos);
 $('#btn-recargar-precos').addEventListener('click', renderPrecos);
+$('#cat-add-tamanho').addEventListener('click', function(){ abrirNovoCatalogo('tamanho'); });
+$('#cat-add-extra').addEventListener('click', function(){ abrirNovoCatalogo('extra'); });
+$('#cat-add-combo').addEventListener('click', function(){ abrirNovoCatalogo('combo'); });
 
 // ——— NOTIFICAÇÕES UI ———
 $('#btn-notif').addEventListener('click', function(e){

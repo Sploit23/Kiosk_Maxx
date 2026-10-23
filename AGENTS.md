@@ -99,14 +99,14 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 | GET | `/api/pdv/caixas` | Histórico de caixas fechados (persistido em `caixas.json`, ordenado do mais recente primeiro) |
 | POST | `/api/pdv/caixa/abrir` | Abre caixa (`CX-...`) |
 | POST | `/api/pdv/caixa/fechar` | Fecha caixa (conciliação: totalVendido, totalPorMeio, meiosDeclarados, totalRecebido, diferenca, valorEnvelope, saldoRestante, fechadoPor, numero) e arquiva no histórico |
-| GET | `/api/portal/fila` | Fila de envio ao portal: `{ itens, total, enviados }` (`itens` **incluem `payload`**) |
-| POST | `/api/portal/fila` | Enfileira item `{tipo: vendas\|pedido\|auditoria, chave, payload}` (dedup por tipo+chave → `criado`) |
-| POST | `/api/portal/fila/confirmar` | Confirma envio `{ids, status}` → remove e grava em `enviados-portal.json` |
+| GET | `/api/portal/fila` | Fila de envio ao portal: `{ itens, total, enviados, enviadosAt }` (`itens` **incluem `payload`**; `enviadosAt` = quando cada chave foi confirmada) |
+| POST | `/api/portal/fila` | Enfileira item `{tipo: vendas\|pedido\|auditoria, chave, payload}` (dedup por tipo+chave → `criado`; se o hash do payload já foi confirmado → `inalterado` e não enfileira) |
+| POST | `/api/portal/fila/confirmar` | Confirma envio `{ids, status}` → remove e grava `{em, hash}` em `enviados-portal.json` |
 | POST | `/api/portal/fila/erro` | Registra falha `{id, erro}` → `tentativas++`, `ultimoErro` |
 | POST | `/api/portal/fila/limpar` | Limpa a fila (**exige senha**: body `{senha}`, default `HCss221087`, env `NATAL_LIMPEZA_SENHA`) |
 | POST | `/api/portal/enviados/limpar` | Limpa o registro de enviados (permite reenviar do zero) |
-| GET | `/api/cache/portal` | Cache offline `{precos, equipe, credenciais}` (credenciais só como hash sha256) |
-| POST | `/api/cache/portal` | Salva/atualiza o cache (`{precos}\|{equipe}\|{credenciais}`) |
+| GET | `/api/cache/portal` | Cache offline `{precos, catalogo, equipe, credenciais}` (credenciais só como hash sha256) |
+| POST | `/api/cache/portal` | Salva/atualiza o cache (`{precos}\|{catalogo}\|{equipe}\|{credenciais}`) |
 | POST | `/api/cache/portal/conferir` | Valida login offline `{usuario, senha}` contra o cache TOFU → `{ ok }` |
 | OPTIONS | qualquer | CORS preflight |
 
@@ -130,12 +130,12 @@ Autenticação pública por usuário; ações admin exigem header `X-Token` (ou 
 | `health` | — | Status da API: `{ ok, app, version, php, time }` |
 | `login` | `lojaId`, `usuario`, `senha` | Valida loja + usuário (usuário ou nome) + senha → `{ user, loja }` |
 | `equipe` | `lojaId` | Lista usuários ativos da loja: `{ loja, usuarios }` |
-| `precos` | `lojaId` | Preços do catálogo da loja (fonte de verdade do PDV): `{ ok, lojaId, precos }` — defaults oficiais + overlay salvo no admin (`data/precos.json`) |
+| `precos` | `lojaId` | Catálogo + preços da loja (fonte de verdade do PDV): `{ ok, lojaId, precos, catalogo }` — `precos` = mapa chave→valor (compat. PDVs antigos), `catalogo` = `{ tamanhos, extras, combos }` estruturado salvo no admin ou os defaults oficiais (`data/precos.json`) |
 | `kiosk.seed` | `kioskCode`, `nome` (+ `pdvNome`, `machineId`) | Wizard de 1º uso: grava RASCUNHO do nome do local em `db.pendentes[kioskCode]` (não cria loja — senão o `kiosk.pair` casaria cedo demais) → `{ ok, pendente }`; loja já existente com o código → `{ ok, jaRegistrado }`; `DADOS_INCOMPLETOS`/`NOME_INVALIDO` |
 | `kiosk.pair` | `kioskCode` (+ `pdvNome`, `machineId`; legado `lojaId`+`pairingCode`) | Emparelha o kiosk com a loja: resolve a loja pelo código exibido NA TELA do PDV, registra `pareamento` e bloqueia máquina já usada por outra loja (`KIOSK_NAO_EMPARELELHADO`, `MAQUINA_JA_EMPARELHADA`) → `{ loja, pareamento }` |
 | `vendas.push` | `lojaId`, `machineId`, `data` (YYYY-MM-DD) + snapshot | PDV → portal: snapshot diário de vendas por loja. Exige `machineId` == `pareamento.machineId` da loja (`LOJA_NAO_EMPARELELHADA` 403, com delay anti-bruteforce). Upsert em `data/vendas.json` por loja+data: `lojaNome`, `pdvNome`, `totalVendido`, `pedidos`, `sessoesCriadas`, `sessoesVendidas`, `taxacombo`, `ribbonRestante`, `papel10x15`/`papel15x20` (papel REAL da impressora via checkPrinter, `null` se sem resposta), `meios {dinheiro,debito,credito,pix}`, `ultimaVenda`, `caixa {numero,aberto}`, `enviadoEm` |
 | `pedido.push` | `lojaId`, `machineId` + `pedido` (objeto) | PDV → portal: pedido completo, **idempotente pelo `pedido.id`** (reenvio só sobrescreve). Exige máquina pareada (mesmo bloqueio do `vendas.push`). Normaliza `itens [{tipo,produtoId,label,qtd,unidades,precoUnit,subtotal}]` — `precoUnit`/`subtotal` podem ser **negativos** (linha de ajuste de desconto/diferença) —, `pagamentos [{meio,forma,valor,parcelas}]`, `pagoEm` (hora real do pagamento), `sessoes`, `desconto`, `caixaId`, `origemPedidoId`, `guiaImpressa`, `unidadesTotal` (somada dos itens de tamanho). Alimenta Pedidos/Ranking/DRE. Persistido em `data/pedidos.json` |
-| `auditoria.push` | `lojaId`, `machineId` + `uso` (objeto) | PDV → portal: uso de senha master (perda, desconto/cancelamento, cobrança de diferença), **idempotente pelo `uso.id`**. Campos: `titulo`, `operador`, `motivo`, `data`, `criadoEm`, `pedidoContexto`, `pedidoGeradoId`. Persistido em `data/auditoria.json`, alimenta a tela Auditoria |
+| `auditoria.push` | `lojaId`, `machineId` + `uso` (objeto) | PDV → portal: uso de senha master (perda, desconto/cancelamento, cobrança de diferença), **idempotente pelo `uso.id`**. Campos: `titulo`, `operador`, `motivo`, `data`, `criadoEm`, `pedidoContexto`, `pedidoGeradoId`. Persistido em `data/auditoria.json` (a aba "Auditoria" foi removida do admin; os dados continuam disponíveis via `auditoria.list`) |
 
 **Admin (token):** `admin.login` (valida senha SHA-256 → `{ token, expiraEm }`),
 `lojas.list` (lojas com status de conexão: `online`/`ultimaConexao`/
@@ -148,8 +148,12 @@ resolve nome/pdv/máquina no rascunho `pendentes`, gera `id` por `slugLoja()`
 (com sufixo `-2`…), grava `pareamento` na hora e apaga o rascunho →
 `{ ok, loja, criada:true }`; sem rascunho → `RASCUNHO_NAO_ENCONTRADO` 404),
 `lojas.delete`, `usuarios.list`, `usuarios.save`,
-`usuarios.delete`, `precos.save` (salva `{ lojaId, precos }` em
-`data/precos.json`; valores vazios resetam para os defaults),
+`usuarios.delete`, `precos.save` (salva `{ lojaId, precos }` **ou**
+`{ lojaId, catalogo }` em `data/precos.json`; com `catalogo` valida
+`sanitizarCatalogo()` — exige os tamanhos `10x15` e `15x20`, deriva o mapa flat
+das chaves oficiais e grava também `__catalogo`; catálogo inválido →
+`CATALOGO_INVALIDO`; sem catálogo, valores vazios resetam para os defaults),
+`precos.list` (overlay bruto + `defaults` + `catalogoDefault` — admin/backup),
 `vendas.resumo` (todos os snapshots de `data/vendas.json`, data desc → lojaId asc →
 `{ ok, vendas }`), `pedido.list` (pedidos consolidados de `data/pedidos.json`,
 filtros `lojaId`/`dataIni`/`dataFim`/`q`/`status` — `status` é case-insensitive,
@@ -258,10 +262,13 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `{id, tipo: vendas|pedido|auditoria, chave, payload, tentativas, ultimoErro,
   criadoEm, atualizadoEm}` — o `payload` é o **corpo completo** guardado no
   enqueue; o drain reenvia exatamente ele. Dedup por `tipo`+`chave`.
-- **Enviados (`database/enviados-portal.json`):** objeto `tipo:chave → ms`,
-  gravado no confirmar — evita reenvio duplicado.
+- **Enviados (`database/enviados-portal.json`):** objeto
+  `tipo:chave → { em, hash }` (hash sha256 do payload confirmado), gravado no
+  confirmar — evita reenvio duplicado, mas **permite reenviar quando o payload
+  mudou** (ex.: pedido cancelado depois de pago). Entradas antigas em `ms`
+  (número) continuam válidas e são tratadas como hash desconhecido.
 - **Cache offline (`database/cache-portal.json`):**
-  `{ precos, equipe, credenciais, atualizadoEm }`; credenciais são
+  `{ precos, catalogo, equipe, credenciais, atualizadoEm }`; credenciais são
   `{ usuario: {hash: sha256(senha), atualizadoEm} }` (nunca senha em claro).
 - **Envio digital (`galeria/<CODIGO>/`):** fila durável do produto
   `foto-digital`. `meta.json` = `{ codigo, criadoEm, pedidoId, total,
@@ -302,19 +309,15 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   "Vendas & BI" (`admin.html`, `vendas.resumo`); a tela "Estoque" usa o papel
   real (menor dos dois gaveteiros) como saldo efetivo, com o ribbon como fallback.
 - **Pedidos (`data/pedidos.json`):** array de pedidos consolidados por `pedido.id`
-  (`pedido.push`), em ordem de chegada. Campos: `id` (origem: `_realId` do PDV),
-  `numero`, `lojaId`, `lojaNome`, `pdvNome`, `machineId`, `data`, `criadoEm`,
-  `pagoEm`, `total`, `status` (pago/impresso/cancelado), `operador`,
-  `unidadesTotal`, `itens [{tipo,produtoId,label,qtd,unidades,precoUnit,subtotal}]`,
-  `pagamentos [{meio,forma,valor,parcelas}]`, `sessoes`, `desconto`, `caixaId`,
-  `origemPedidoId`, `guiaImpressa`, `enviadoEm`. Alimenta as telas "Pedidos",
-  "Ranking" (agrega por operador/loja) e o DRE do "Financeiro"
-  (`pedido.list`).
+  (`pedido.push`), em ordem de chegada. Alimenta as telas "Financeiro"
+  (lista + DRE), "Ranking" (agrega por operador/loja) e o resultado do período
+  em "Despesas & Taxas" (`pedido.list`).
 - **Auditoria (`data/auditoria.json`):** array de usos de senha master por
   `uso.id` (`auditoria.push`). Campos: `id`, `lojaId`, `lojaNome`, `pdvNome`,
   `machineId`, `data`, `criadoEm`, `titulo` (perda/desconto/cancelamento/
   cobrança de diferença), `operador`, `motivo`, `pedidoContexto`,
-  `pedidoGeradoId`, `enviadoEm`. Tela "Auditoria" (`auditoria.list`).
+  `pedidoGeradoId`, `enviadoEm`. A aba "Auditoria" foi removida do admin; os
+  dados continuam disponíveis via `auditoria.list`.
 - **Parâmetros (`data/parametros.json`):** parâmetros globais da gestão
   (`parametros.save`), defaults em `PARAMS_DEFAULT` do `api.php` — ver sessão
   "Admin (token)" acima.
@@ -327,13 +330,23 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `lojaId` (`teste`), `lojaNome`, `pairingCode`, `pdvNome`, formatos de foto,
   produtos, pricing, overlays, estados, meios de pagamento (`dinheiro`, `pix`,
   `debito`, `credito`) e timers.
-- **Preços — fonte de verdade no portal:** o PDV (`vendas.html`) busca
-  `portalApi.precos()` no boot e a cada emparelhamento e sobrescreve o catálogo
-  local (`TAMANHOS`/`EXTRAS`/combos). O admin edita por loja em "Catálogo de
-  produtos". `shared/config.js` `PRICING` é apenas o fallback offline (valores
-  oficiais do evento). **Offline:** o último catálogo recebido é salvo no
-  `cache-portal.json` (`POST /api/cache/portal {precos}`) e reaplicado no
-  próximo boot ("[precos] catálogo do cache local aplicado").
+- **Catálogo — fonte de verdade no portal:** o PDV (`vendas.html`) busca
+  `portalApi.precos()` no boot, a cada 60s e a cada emparelhamento e reconstrói o
+  catálogo local (`TAMANHOS`/`EXTRAS`/`COMBOS`) com o `catalogo` estruturado
+  devolvido. O admin edita/cria/exclui produtos por loja em "Catálogo de
+  produtos" (tela `#screen-precos`: 3 listas + modal "novo"; `precos.save` com
+  `{catalogo}`). Cada **tamanho** tem um `modelo` — formato físico de impressão
+  (`10x15`/`15x20`/`bolinha`/`polaroide`) — que manda na composição e no `media`
+  do Java; `10x15` e `15x20` são obrigatórios (base da impressão/pareamento de
+  ribbon) e `unidades` de ribbon é derivado do modelo (não editável). `extras`
+  com `oculto:true` (Item Encarte, Porta-cartão postal) só aparecem dentro de
+  combos. O PDV aplica o catálogo em `aplicarCatalogoPortal()` (com assinatura
+  para não re-renderizar à toa) e mapeia `modeloDe(t)`/`modeloProduto(id)` em
+  tudo que depende de molde/`media` (`renderFrame`, `addToCart`,
+  `iniciarImpressaoFotos`). `shared/config.js` `PRICING` é apenas o fallback
+  offline (valores oficiais do evento). **Offline:** o último catálogo recebido é
+  salvo no `cache-portal.json` (`POST /api/cache/portal {precos, catalogo}`) e
+  reaplicado no próximo boot ("[precos] catálogo do cache local aplicado").
 - **Envio digital (`foto-digital`)** — produto extra do PDV: a foto escolhida é
   composta em **10x15 pose única** (`composePrintImage({ key:'10x15', single:true })`)
   e sobe para a galeria por **código da venda** (6 chars, alfabeto sem ambíguos).
@@ -415,7 +428,9 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   ou registra erro (`/api/portal/fila/erro`, com `ultimoErro`). Gatilhos:
   ~4s após o boot, `setInterval` de 5 min, eventos SSE, botão "Sincronizar
   agora" do ⚙ e logo após venda/caixa. `enviados-portal.json` impede reenvio
-  já confirmado; para reenviar de propósito use "Limpar fila de envio" (⚙,
+  do que já foi confirmado **com o mesmo hash** (mudou → reenvia; é assim que
+  cancelamento/correção de um pedido já enviado chega ao portal); para reenviar
+  de propósito use "Limpar fila de envio" (⚙,
   senha `HCss221087`) ou `POST /api/portal/enviados/limpar`. A topbar **não**
   mostra mais pendências (`#sync-chip` removido); o estado aparece só no ⚙
   Config → aba **Sincronizar** (pendentes / sincronizando).
@@ -435,7 +450,7 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 - **Login offline (TOFU)** — o primeiro login bem-sucedido de um usuário salva
   `{usuario: senha}` no cache (`POST /api/cache/portal {credenciais}` → hash
   sha256, nunca em claro); no offline o PDV valida contra esse hash
-  (`POST /api/cache/portal/conferir`). Equipe e preços também são cacheados no
+  (`POST /api/cache/portal/conferir`). Equipe, preços e catálogo também são cacheados no
   sucesso e reaplicados quando o portal não responde.
 - **Config da máquina (sidecar)** — `%APPDATA%\natal-app\database\config.json`
   guarda `{ pdvNome, photosFolder, thermalPrinterName, machineId, lojaId,
