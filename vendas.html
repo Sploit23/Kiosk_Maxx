@@ -1141,6 +1141,7 @@
     <div class="op-chip sales-eye" id="sales-eye">
       <span id="sales-eye-icon">👁️</span> <span id="sales-eye-value">Vendas de hoje</span>
     </div>
+    <button class="op-chip op-chip-btn" id="import-chip" style="display:none;" title="Fotos recebidas do cartão">💳 Cartão</button>
     <div class="op-chip" id="ribbon-chip">🖨️ Ribbon: — un.</div>
     <button class="op-chip op-chip-btn" id="user-chip">👤 —</button>
     <button class="op-chip op-chip-btn" id="btn-config" title="Configurações">⚙</button>
@@ -2303,6 +2304,95 @@ function renderSyncChip(){
     : (p > 0 ? 'Envios aguardando internet no kiosk' : 'Portal em dia');
 }
 
+/* Fotos do cartão (importador embutido — Pegar_Fotos headless).
+   O importador roda junto do app, baixa os lotes do cartão e grava em
+   <pasta de fotos>\_cartao; o sidecar transforma cada lote em sessão PRONTA.
+   Aqui só mostramos o estado (chip da topbar + aba "Cartão" do ⚙). */
+let _importStatus = null;
+
+function renderImportChip(){
+  const el = document.getElementById('import-chip');
+  if(!el) return;
+  const r = _importStatus;
+  if(!r || !r.success){ el.style.display = 'none'; return; }
+  el.style.display = '';
+  const imp = r.importer || {};
+  const card = imp.card || {};
+  const prog = imp.progress || {};
+  const dl = imp.download || {};
+  const batches = Array.isArray(imp.batches) ? imp.batches : [];
+  const sessoes = r.sessoes || {};
+  const pendentes = batches.filter(b => b.done && !sessoes[b.name]).length;
+  let txt;
+  if(!r.online) txt = '💳 Cartão: sem conexão';
+  else if(dl && dl.total) txt = `💳 Baixando ${dl.count || 0}/${dl.total}`;
+  else if(prog && prog.total) txt = `💳 Copiando ${prog.count || 0}/${prog.total}`;
+  else if(card.state === 'copying' || imp.copying) txt = '💳 Lendo cartão…';
+  else if(pendentes > 0) txt = `💳 ${pendentes} lote${pendentes === 1 ? '' : 's'} aguardando`;
+  else if(card.state === 'detected') txt = `💳 Cartão detectado${card.drive ? ' (' + card.drive + ')' : ''}`;
+  else if(card.state === 'finished' || card.state === 'all_imported') txt = '💳 Cartão: em dia';
+  else txt = '💳 Cartão';
+  el.textContent = txt;
+  el.title = !r.online
+    ? 'O importador de fotos do cartão não está respondendo nesta máquina.'
+    : (card.message || card.badge || 'Fotos recebidas do cartão');
+}
+
+async function atualizarStatusImport(){
+  try{
+    _importStatus = await natalApi.importStatus();
+  }catch{
+    _importStatus = null;
+  }
+  renderImportChip();
+}
+
+/* Aba "Cartão" do ⚙: estado do importador + lotes recebidos + toggle. */
+async function renderImportConfigPanel(){
+  const info = document.getElementById('cfg-import-info');
+  if(!info) return;
+  let r = null;
+  try{ r = await natalApi.importStatus(); }catch{}
+  _importStatus = r;
+  renderImportChip();
+  if(!r || !r.success){
+    info.innerHTML = '<div style="font-size:12px;color:var(--red-400);">Não foi possível falar com o sidecar.</div>';
+    return;
+  }
+  const imp = r.importer || {};
+  const card = imp.card || {};
+  const online = !!r.online;
+  const sessoes = r.sessoes || {};
+  const batches = Array.isArray(imp.batches) ? imp.batches : [];
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const pasta = r.importFolder || '';
+  info.innerHTML = `
+    <div style="font-size:12.5px;color:${online ? 'var(--green-400)' : 'var(--red-400)'};font-weight:700;">
+      ${online ? '● Importador ativo' : '○ Importador não está rodando'}
+      <span style="color:var(--slate-400);font-weight:400;">— ${esc(card.badge || card.message || 'aguardando cartão')}</span>
+    </div>
+    <div style="font-size:11px;color:var(--slate-500);margin-top:4px;word-break:break-all;">Pasta dos lotes: ${esc(pasta || '—')}</div>`;
+
+  const list = document.getElementById('cfg-import-list');
+  if(!list) return;
+  if(!batches.length){
+    list.innerHTML = '<div style="font-size:12px;color:var(--slate-500);">Nenhum lote recebido ainda.</div>';
+    return;
+  }
+  list.innerHTML = batches.slice().reverse().map(b => {
+    const sid = sessoes[b.name];
+    const st = !b.done
+      ? { txt: 'recebendo…', cor: 'var(--amber-500)' }
+      : sid
+        ? { txt: 'sessão ' + sid, cor: 'var(--green-400)' }
+        : { txt: 'aguardando importação', cor: 'var(--slate-400)' };
+    return `<div style="display:flex;align-items:center;gap:10px;background:var(--navy-800);border:1px solid var(--navy-line);border-radius:8px;padding:7px 10px;font-size:12px;">
+      <b style="color:var(--gold-300);white-space:nowrap;">${esc(b.name)}</b>
+      <span style="color:var(--slate-400);white-space:nowrap;">${Number(b.count) || 0} arq.</span>
+      <span style="color:${st.cor};font-weight:600;margin-left:auto;white-space:nowrap;">${esc(st.txt)}</span>
+    </div>`;
+  }).join('');
+}
 /* Enfileira um registro para o portal (dedup no sidecar por tipo+chave). */
 async function enfileirarPortal(tipo, chave, payload){
   try{
@@ -4667,15 +4757,19 @@ document.getElementById('numpad-overlay').addEventListener('pointerdown', e=>{
 });
 
 /* ---------------- CONFIGURAÇÕES (modal) ---------------- */
-async function showConfigModal(){
+async function showConfigModal(tabInicial){
   await garantirIdentidade(); // garante o código do kiosk para exibir aqui
-  const [cfg, printer, fila] = await Promise.all([
+  const [cfg, printer, fila, impStatus] = await Promise.all([
     natalApi.getConfig().catch(()=>({})),
     natalApi.printerStatus().catch(()=>({})),
     natalApi.filaImpressao().catch(()=>({ success:false, fila: [] })),
+    natalApi.importStatus().catch(()=>null),
   ]);
   const filaJobs = (fila && Array.isArray(fila.fila)) ? fila.fila : [];
   const filaLimpar = filaJobs.filter(j => j.estado !== 'IMPRIMINDO');
+  const importFolderCfg = String((impStatus && impStatus.importFolder) || cfg.importFolder || '');
+  const importFolderCustomCfg = String(cfg.importFolderCustom || '');
+  const importSessoesCfg = (impStatus ? impStatus.importSessoes !== false : cfg.importSessoes !== false);
   const folder = cfg.photosFolder || '';
   const logoTextoCfg = String(cfg.logoTexto || '').trim() || 'SHOPPING PALLADIUM';
   const logoTextoEsc = logoTextoCfg.replace(/"/g, '&quot;');
@@ -4703,6 +4797,7 @@ async function showConfigModal(){
 
     <div style="display:flex;gap:6px;margin-top:14px;border-bottom:1px solid var(--navy-line);padding-bottom:0;">
       <button type="button" data-cfg-tab="sync" style="padding:9px 16px;border:1px solid var(--navy-line);border-bottom:none;border-radius:8px 8px 0 0;background:var(--navy-800);color:var(--slate-200);font-size:12.5px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">Sincronizar</button>
+      <button type="button" data-cfg-tab="card" style="padding:9px 16px;border:1px solid var(--navy-line);border-bottom:none;border-radius:8px 8px 0 0;background:transparent;color:var(--slate-300);font-size:12.5px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">💳 Cartão</button>
       <button type="button" data-cfg-tab="system" style="padding:9px 16px;border:1px solid var(--navy-line);border-bottom:none;border-radius:8px 8px 0 0;background:transparent;color:var(--slate-300);font-size:12.5px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">🔒 Sistema</button>
     </div>
 
@@ -4726,6 +4821,17 @@ async function showConfigModal(){
         <button id="cfg-browse" style="padding:10px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;white-space:nowrap;font-family:Arial,sans-serif;">Procurar</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Onde o software do fotógrafo salva as fotos nesta máquina.</div>
+    </div>
+
+    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Pasta dos lotes do cartão</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="cfg-import-folder" type="text" value="${importFolderCustomCfg.replace(/"/g,'&quot;')}"
+          placeholder="${importFolderCfg.replace(/"/g,'&quot;') || 'vazio = pasta de fotos\\_cartao'}"
+          style="flex:1;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:Arial,sans-serif;outline:none;" />
+        <button id="cfg-import-browse" style="padding:10px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;white-space:nowrap;font-family:Arial,sans-serif;">Procurar</button>
+      </div>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Onde o importador grava os lotes recebidos do cartão. Vazio = <b>_cartao</b> dentro da pasta de fotos.</div>
     </div>
 
     <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
@@ -4817,6 +4923,25 @@ async function showConfigModal(){
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Vendeu com o PC sem internet? As fotos ficam guardadas aqui. Quando a internet voltar, toque em <b>Sincronizar</b> para subir na hora.</div>
     </div>
 
+    <div data-cfg-sec="card" style="margin-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Fotos do cartão (importador embutido)</div>
+      <div id="cfg-import-info" style="font-size:12px;color:var(--slate-300);">—</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button id="cfg-import-sync" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">🔄 Procurar fotos agora</button>
+        <button id="cfg-import-open" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">📂 Abrir pasta</button>
+        <button id="cfg-import-refresh" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:transparent;color:var(--slate-400);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">Atualizar</button>
+      </div>
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:12px;color:var(--slate-300);cursor:pointer;">
+        <input id="cfg-import-sessoes" type="checkbox" ${importSessoesCfg ? 'checked' : ''} style="margin-top:2px;" />
+        <span>Criar sessões das fotos recebidas neste PC<br>
+          <span style="font-size:11px;color:var(--slate-500);">Deixe desmarcado no PC do fotógrafo (só recebe os lotes). No PC da venda, deixe marcado.</span>
+        </span>
+      </label>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:10px;">Lotes recebidos:</div>
+      <div id="cfg-import-list" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;max-height:220px;overflow-y:auto;"></div>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:8px;">O importador roda junto do PDV (sem janela). Cada lote com pelo menos 1 JPEG vira uma sessão pronta para venda.</div>
+    </div>
+
     <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Versão e atualização</div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -4890,11 +5015,12 @@ async function showConfigModal(){
     btn.onclick = ()=>{
       const tab = btn.getAttribute('data-cfg-tab');
       if(tab === 'system' && !cfgUnlocked){ mostrarSenha(true); return; }
-      if(tab === 'sync') mostrarSenha(false);
+      if(tab === 'sync' || tab === 'card') mostrarSenha(false);
       ativarCfgTab(tab);
     };
   });
-  ativarCfgTab('sync');
+  const tabIni = tabInicial || 'sync';
+  if(tabIni === 'card') ativarCfgTab('card'); else if(tabIni === 'system'){ if(!cfgUnlocked){ mostrarSenha(true); ativarCfgTab('sync'); } else { ativarCfgTab('system'); } } else ativarCfgTab('sync');
 
   document.getElementById('cfg-browse').onclick = async ()=>{
     try{
@@ -4902,6 +5028,34 @@ async function showConfigModal(){
       if(sel) document.getElementById('cfg-folder').value = sel;
     }catch{}
   };
+  const cfgImpBrowse = document.getElementById('cfg-import-browse');
+  if(cfgImpBrowse) cfgImpBrowse.onclick = async ()=>{
+    try{
+      const sel = await window.natal?.selectFolder();
+      if(sel) document.getElementById('cfg-import-folder').value = sel;
+    }catch{}
+  };
+
+  // ─── Aba Cartão: status do importador, busca manual e pasta ───
+  renderImportConfigPanel();
+  const impSyncBtn = document.getElementById('cfg-import-sync');
+  if(impSyncBtn) impSyncBtn.onclick = async ()=>{
+    impSyncBtn.disabled = true;
+    try{
+      const r = await natalApi.importSincronizar();
+      if(r && r.success) toast('Procurando fotos no cartão…');
+      else toast('⚠ Importador indisponível' + (r && r.error ? ': ' + r.error : ''));
+    }catch(e){ toast('⚠ ' + (e && e.message ? e.message : 'Falha ao procurar o cartão')); }
+    setTimeout(() => { renderImportConfigPanel(); impSyncBtn.disabled = false; }, 1200);
+  };
+  const impOpenBtn = document.getElementById('cfg-import-open');
+  if(impOpenBtn) impOpenBtn.onclick = async ()=>{
+    const alvo = importFolderCfg || (_importStatus && _importStatus.importFolder) || '';
+    if(!alvo){ toast('Pasta dos lotes não configurada'); return; }
+    try{ await window.natal?.openPath(alvo); }catch{}
+  };
+  const impRefreshBtn = document.getElementById('cfg-import-refresh');
+  if(impRefreshBtn) impRefreshBtn.onclick = ()=> renderImportConfigPanel();
 
   // ─── Manutenção: limpar dados de teste (protegido por senha) ───
   const resumoLimpar = document.getElementById('cfg-limpar-resumo');
@@ -5050,10 +5204,16 @@ const r = await natalApi.limparFila({ pedidoId });
     const lojaNomeEl = document.getElementById('cfg-loja-nome');
     const lojaIdVal = (lojaIdEl ? lojaIdEl.value.trim() : '');
     const lojaNomeVal = (lojaNomeEl ? lojaNomeEl.value.trim() : '');
+    const impFolderEl = document.getElementById('cfg-import-folder');
+    const impFolderVal = (impFolderEl ? impFolderEl.value.trim() : '');
+    const impSessoesEl = document.getElementById('cfg-import-sessoes');
+    const impSessoesVal = impSessoesEl ? !!impSessoesEl.checked : true;
     try{
       const partial = { photosFolder: val, logoTexto: logoVal };
       if(lojaIdEl) partial.lojaId = lojaIdVal;
       if(lojaNomeEl) partial.lojaNome = lojaNomeVal;
+      if(impFolderEl) partial.importFolder = impFolderVal;
+      if(impSessoesEl) partial.importSessoes = impSessoesVal;
       // _allowLojaChange: mudar a loja pelo ⚙ é uma ação deliberada do
       // operador — o sidecar preserva a loja em saves automáticos, mas aqui
       // a edição vale (machineId/kioskCode continuam protegidos).
@@ -5067,6 +5227,13 @@ const r = await natalApi.limparFila({ pedidoId });
       }
       publicarIdentidade();
       atualizarLojaHeader();
+      // A raiz/pasta do importador é resolvida pelo main no start: se mudou,
+      // reinicia o importador para ele passar a gravar/ler no lugar certo.
+      const impFolderMudou = impFolderEl && impFolderVal !== importFolderCustomCfg;
+      const fotosFolderMudou = val !== String(cfg.photosFolder || '');
+      if((impFolderMudou || fotosFolderMudou) && window.natal?.restartImporter){
+        try{ await window.natal.restartImporter(); }catch{}
+      }
       if(lojaIdEl && lojaIdVal) agendarSincronizacao(1000);
       toast('Configurações salvas');
       closeModal();
@@ -6667,7 +6834,8 @@ async function INIT(){
     btnFullscreen.textContent = isFullscreen ? '⛶' : '🗗';
     btnFullscreen.title = isFullscreen ? 'Sair da tela cheia' : 'Tela cheia';
   });
-  document.getElementById('btn-config').addEventListener('click', showConfigModal);
+  document.getElementById('btn-config').addEventListener('click', ()=> showConfigModal());
+  document.getElementById('import-chip').addEventListener('click', ()=> showConfigModal('card'));
   const btnTema = document.getElementById('btn-tema');
   btnTema.addEventListener('click', ()=>{
     const light = document.documentElement.getAttribute('data-theme') === 'light';
@@ -6711,6 +6879,8 @@ async function INIT(){
   renderCaixaChip();
   renderSyncChip(); // estado de sync com o portal (fila de envio)
   setInterval(carregarRibbon, 15000); // ribbon real do sidecar (igual ao React)
+  atualizarStatusImport(); // chip do cartão (importador embutido)
+  setInterval(atualizarStatusImport, 20000);
   setInterval(enviarSnapshotVendas, 300000); // sync de vendas → portal a cada 5 min (e nos eventos abaixo)
   setInterval(async ()=>{
     try{

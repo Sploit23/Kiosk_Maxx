@@ -7,4 +7,7 @@ jre8/
 /overlay1.png
 .opencode/node_modules/
 .playwright-mcp/
+__pycache__/
+*.pyc
+tools/pegar-fotos/build/
 

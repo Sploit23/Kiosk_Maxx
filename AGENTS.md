@@ -17,6 +17,11 @@ no editor de enquadramento, paga e imprime na hora numa **Fujifilm ASK-400**.
   para cadastro de lojas/equipe (portal de gestão).
 - **Backend de impressão:** `impressora/status_ok/sidecar-ask400.jar` — sidecar
   Java que controla a ASK-400 via JNI/DLL, na porta **8080**.
+- **Importador de cartão:** `tools/pegar-fotos/` (Pegar_Fotos vendorizado, Python
+  → `Natal_Foto_Import.exe` no CI) roda **headless** junto do Electron (porta
+  **8099** + descoberta UDP **50000**), recebe os lotes do cartão do fotógrafo e
+  grava em `<photosFolder>\_cartao`; o sidecar Node transforma cada lote em
+  sessão PRONTA.
 
 Persistência é **sem banco SQL**: tudo em arquivos JSON (local em
 `%APPDATA%\natal-app\`, cloud em `backend/data\`).
@@ -76,6 +81,8 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 | GET | `/api/printer/status` | Status real da ASK-400 (proxy p/ Java: papel 10x15/15x20, connected, lastError) |
 | GET | `/api/config` | Config da máquina + ribbon |
 | POST | `/api/config` | Salva config da máquina |
+| GET | `/api/import/status` | Status do importador do cartão (proxy do `:8099/api/status`) + pasta/flag + mapa `lote → sessão` |
+| POST | `/api/import/sincronizar` | Força o importador a procurar o cartão agora (proxy do `:8099/api/sync-now`) |
 | POST | `/api/sessoes` | Criar sessão (`NATAL-<numero>`, estado `CRIADA`) |
 | GET | `/api/sessoes` | Listar sessões (com fotos) |
 | GET | `/api/sessoes/:id` | Buscar uma sessão |
@@ -172,7 +179,9 @@ despesas manuais da gestão em `data/despesas.json`,
 **Parâmetros globais (`data/parametros.json`, defaults em `PARAMS_DEFAULT` do
 `api.php`):** `custoRibbonUnitario` (R$/un, 0), `comissaoVendedor` (%) e
 `comissaoFotografo` (%) aplicadas sobre a receita de cada operador no DRE,
-`ribbonCritico` (un., 100) — limite usado pela tela Estoque no status do kit.
+`ribbonCritico` (un., 100) — limite usado pela tela Estoque no status do kit —
+e as taxas das maquininhas `taxaCredito`/`taxaDebito`/`taxaPix` (%) aplicadas
+sobre os recebimentos de cada forma no Financeiro (dinheiro não tem taxa).
 
 ## Endpoints — sidecar Java ASK-400 (`http://localhost:8080`)
 
@@ -230,6 +239,9 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 │   ├── native_libs/picgo-ask400/   # DLLs da ASK-400 + perfil ICC
 │   └── status_ok/                   # Sidecar Java (build/, build.ps1, RESUMO.md)
 ├── public/overlays/         # PNGs de overlay (bolinha, 10x15, 15x20)
+├── tools/pegar-fotos/       # Importador de cartão (fonte Python + spec PyInstaller)
+│   └── dist/Natal_Foto_Import.exe  # gerado por build:importador → resources/importador
+├── build/installer.nsh      # regras de firewall do importador (NSIS elevado)
 ├── dist/                    # Build Vite (index.html, vendas.html, assets/, overlays/)
 └── .github/workflows/       # ci.yml + release.yml (tag v* → build win + publish)
 ```
@@ -296,9 +308,8 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `backend/config.php`), **`tokens.json`:** `{ token: expiraEm }`.
 - **Despesas (`data/despesas.json`):** array de despesas lançadas manualmente
   pela gestão (não vêm do PDV): `{ id: 'DESP-*', lojaId, data
-  (YYYY-MM-DD), categoria, descricao, valor, criadoEm }`. Administrado pela
-  tela "Despesas & Taxas" (`admin.html`, render `despesas.list/save/delete`,
-  resultado = receita do período − despesas).
+  (YYYY-MM-DD), categoria, descricao, valor, criadoEm }`. Administrado dentro
+  da tela "Financeiro" (`admin.html`, `despesas.list/save/delete`).
 - **Vendas (`data/vendas.json`):** array de snapshots diários por
   `(lojaId, data)` enviados pelo PDV (`vendas.push`). Campos: `lojaId`,
   `lojaNome`, `pdvNome`, `machineId`, `data`, `totalVendido`, `pedidos`,
@@ -310,8 +321,8 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   real (menor dos dois gaveteiros) como saldo efetivo, com o ribbon como fallback.
 - **Pedidos (`data/pedidos.json`):** array de pedidos consolidados por `pedido.id`
   (`pedido.push`), em ordem de chegada. Alimenta as telas "Financeiro"
-  (lista + DRE), "Ranking" (agrega por operador/loja) e o resultado do período
-  em "Despesas & Taxas" (`pedido.list`).
+  (resultado, DRE e despesas), "Ranking" (agrega por operador/loja) e o
+  resultado do período (`pedido.list`).
 - **Auditoria (`data/auditoria.json`):** array de usos de senha master por
   `uso.id` (`auditoria.push`). Campos: `id`, `lojaId`, `lojaNome`, `pdvNome`,
   `machineId`, `data`, `criadoEm`, `titulo` (perda/desconto/cancelamento/
@@ -454,36 +465,66 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   sucesso e reaplicados quando o portal não responde.
 - **Config da máquina (sidecar)** — `%APPDATA%\natal-app\database\config.json`
   guarda `{ pdvNome, photosFolder, thermalPrinterName, machineId, lojaId,
-  lojaNome, pairingCode }` via `GET/POST /api/config`; a UI salva também no
-  `electron-config.json`.
-- **Botão ⚙ Config** (`vendas.html`) — modal `showConfigModal()` com **2 abas**:
+  lojaNome, pairingCode, importFolder, importSessoes }` via `GET/POST
+  /api/config`; a UI salva também no `electron-config.json`. `importFolder`
+  vazio = `<photosFolder>\_cartao` (valor efetivo exposto por `GET /api/config`
+  como `importFolder`, e o custom como `importFolderCustom`); `importSessoes`
+  (default `true`) liga/desliga a criação de sessões no sidecar.
+- **Botão ⚙ Config** (`vendas.html`) — modal `showConfigModal(tab)` com **3 abas**:
   **Sincronizar** (aberta por padrão, qualquer operador) = painel "Sincronização
   com o portal" (pendentes, "Sincronizar agora", "Limpar fila de envio") +
   painel "Envio digital" com um botão **Sincronizar** por código pendente (força
   o upload na hora em que a internet volta; o worker de 60s continua de
-  fallback); **🔒 Sistema** (exige senha **`8694`**, `SENHA_CFG_SISTEMA`, digitada
+  fallback); **💳 Cartão** (qualquer operador, `data-cfg-tab="card"`) = estado do
+  importador, lotes recebidos (`lote → sessão`), "Procurar fotos agora"
+  (`POST /api/import/sincronizar`), "Abrir pasta" (IPC `natal:openPath`) e o
+  toggle **Criar sessões das fotos recebidas neste PC** (`importSessoes`);
+  **🔒 Sistema** (exige senha **`8694`**, `SENHA_CFG_SISTEMA`, digitada
   num campo dentro do próprio modal — `#cfg-senha-box`; **nunca** usar
   `window.prompt`, que o Electron não implementa e lança erro) = pasta de fotos
   nativa (IPC `natal:selectFolder` →
-  `dialog.showOpenDialog`), logo do shopping, status real da impressora
-  (10x15/15x20, connected, lastError), fila de impressão, "Loja desta máquina"
-  (`lojaId`/`lojaNome`), emparelhamento/kioskCode, versão/atualização,
-  manutenção ("Limpar dados") e o botão **Salvar** (grava nos dois lugares). O
-  desbloqueio vale só enquanto o modal está aberto. As seções são marcadas com
-  `data-cfg-sec="sync|system"` e as abas com `data-cfg-tab`. Entradas de valor e
-  senha usam os modais `askValor()` / `askSenhaTexto()` (o Electron não suporta
-  `window.prompt`; usos antigos de prompt foram convertidos).
-- **Importador de pasta de fotos** (`natal-core.cjs`) — regra da drop zone em
-  `photosFolder`: **1 subpasta = 1 sessão**. O programa externo cria uma
-  subpasta por cliente e salva `*.jpg|*.jpeg|*.png` nela; o sidecar escaneia a
-  cada 1,5s e, quando a subpasta fica estável por 8s (sem alterações), cria a
-  sessão `NATAL-XXXXX`, copia as fotos (original + preview normalizado `.jpg`),
-  marca `PRONTA` automaticamente e move a subpasta para
-  `photosFolder/importadas/NATAL-XXXXX/`. `criadaEm` da sessão = o instante em
-  que a subpasta foi criada (birthtime; fallback: criação da 1ª foto) — momento
-  em que o cliente terminou de fotografar —, e `prontaEm` = instante do import.
-  Arquivos < 1KB ou com tail `.part/.tmp/.crdownload/.download` são ignorados
-  (cópia pela metade). Troca de pasta na config vale na hora.
+  `dialog.showOpenDialog`), pasta dos lotes do cartão, logo do shopping, status
+  real da impressora (10x15/15x20, connected, lastError), fila de impressão,
+  "Loja desta máquina" (`lojaId`/`lojaNome`), emparelhamento/kioskCode,
+  versão/atualização, manutenção ("Limpar dados") e o botão **Salvar** (grava
+  nos dois lugares; se a pasta de fotos/lotes mudar, o main reinicia o
+  importador via IPC `natal:restartImporter`). O desbloqueio vale só enquanto o
+  modal está aberto. As seções são marcadas com `data-cfg-sec="sync|card|system"`
+  e as abas com `data-cfg-tab`. Entradas de valor e senha usam os modais
+  `askValor()` / `askSenhaTexto()` (o Electron não suporta `window.prompt`; usos
+  antigos de prompt foram convertidos).
+- **Importador de fotos do cartão** — `electron-main.cjs` sobe
+  `resources/importador/Natal_Foto_Import.exe --headless` (dev: `python
+  tools/pegar-fotos/app.py`) com `--root <importFolder> --port 8099
+  --no-firewall --config <userData>\importador-config.json --log
+  <userData>\logs\importador.log`; adota uma instância órfã na mesma pasta,
+  reinicia até 5x e para no `will-quit`. O app NÃO pede UAC: as regras de
+  firewall (TCP 8099 + UDP 50000 para o exe do importador) são criadas pelo
+  instalador NSIS elevado (`build/installer.nsh`, `perMachine: true`).
+- **Importação de lotes do cartão** (`natal-core.cjs`) — regra da drop zone:
+  **1 subpasta = 1 sessão**, tanto em `photosFolder` (programa externo) quanto em
+  `importFolder` (importador embutido). No `importFolder`, a subpasta só é
+  importada quando existe o marcador **`.natal_done`** (o importador grava
+  depois de copiar tudo) e ≥1 `*.jpg|*.jpeg|*.png`; lote só-RAW/vídeo é
+  ignorado. O watcher roda a cada 900ms (`PHOTOS_POLL_MS`) e exige 3s de
+  estabilidade (`PHOTOS_SETTLE_MS`); cria a sessão `NATAL-XXXXX`, copia as fotos
+  (original + preview normalizado `.jpg`), marca `PRONTA` automaticamente e
+  registra em `pasta-importadas.json` (chave = caminho absoluto + snapshot do
+  conteúdo, para não reimportar). Na raiz de `photosFolder` são ignoradas as
+  pastas `importadas`, a própria pasta do cartão e pastas ocultas (`.tmp_*`).
+  `criadaEm` da sessão = o instante em que a subpasta foi criada (birthtime;
+  fallback: criação da 1ª foto), e `prontaEm` = instante do import. Arquivos <
+  1KB ou com tail `.part/.tmp/.crdownload/.download` são ignorados (cópia pela
+  metade). Troca de pasta na config vale na hora.
+- **Financeiro (admin, `admin.html`)** — tela `#screen-financeiro` (`renderFinanc`):
+  filtros por mês/intervalo e "Todo o período", cards (faturamento, taxas,
+  despesas & custos, líquido), gráfico de barras divergentes "Líquido por loja"
+  (com tooltip), tabela por loja, card de taxas Crédito/Débito/PIX editáveis
+  via `parametros.save` e CRUD de despesas do período. A receita por loja usa
+  pedidos consolidados (`pago`/`impresso`) e cai para o snapshot diário **só
+  nas lojas sem pedido no período** (não conta duas vezes). Líquido =
+  faturamento − taxas − ribbon − comissões − despesas. A antiga tela
+  "Despesas & Taxas" foi absorvida (item de nav removido).
 - **`vite.config.js`** — alias `@shared` → `./shared`, dedupe de React, porta
   de dev 5173.
 
@@ -492,8 +533,10 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 - `npm start` / `npm run electron:dev` — Vite (5173) + Electron (PDV real)
 - `npm run dev` — só Vite
 - `npm run build` — build Vite (main + pdv) para `dist/`
-- `npm run build:win` — build + empacotador (NSIS)
-- `npm run release` — build + publish GitHub (release)
+- `npm run build:importador` — compila `tools/pegar-fotos/dist/Natal_Foto_Import.exe`
+  (requer Python 3 + `pip install pyinstaller`; o CI usa Python 3.12)
+- `npm run build:win` — compila o importador + build Vite + empacotador (NSIS elevado)
+- `npm run release` — build completo + publish GitHub (release)
 - `npm run lint` — ESLint
 - `backend/publish.ps1` — deploy FTP do portal PHP **+ página `/natal`** (credenciais em `../../credencial.txt`)
 - `tools/limpar-dados-pdv.ps1` — zera os dados de teste do PDV (sessões, pedidos, caixa, fila de impressão, auditoria, contador de ribbon) com backup automático. Acha a pasta de dados sozinho (API `:9877/api/config` → ponteiro `%APPDATA%\natal-kiosk\database\fotos-folder.txt` → `electron-config.json` → `config.json`) e **recusa rodar com o app aberto** (o sidecar reescreve os arquivos em memória). Flags: `-DryRun` (só mostra), `-Completo` (apaga `database\config.json` + o backup `C:\ProgramData\MaxxNatal\kiosk-identity.json` → novo `machineId`/`kioskCode`, exigindo re-emparelhamento no portal), `-Forcar`. Depois de limpar é preciso **abrir um novo caixa** no PDV.

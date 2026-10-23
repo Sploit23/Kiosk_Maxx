@@ -102,6 +102,10 @@ const natalApi = {
   // Config da máquina (salva no sidecar)
   getConfig: () => api('GET', '/api/config'),
   saveConfig: (partial) => api('POST', '/api/config', partial),
+  // Importador de fotos do cartão (Pegar_Fotos headless): statusProxy (porta
+  // 8099 via sidecar) + força busca no cartão agora.
+  importStatus: () => api('GET', '/api/import/status'),
+  importSincronizar: () => api('POST', '/api/import/sincronizar'),
   // Manutenção: apaga sessões, pedidos, caixa, fila de impressão, auditoria e
   // contador de ribbon (preserva config.json → pareamento com a loja).
   // Exige { senha } no body; com caixa aberto precisa de { forcar: true }.

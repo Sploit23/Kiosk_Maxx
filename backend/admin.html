@@ -348,6 +348,137 @@ select.form-input{appearance:none;}
 }
 #toast.err{background:var(--red-400);color:#fff;}
 #toast.show{opacity:1;}
+
+/* ——— FINANCEIRO (painel de resultado) ——— */
+.fin2-filters{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:10px;}
+.fin2-field{display:flex;flex-direction:column;gap:4px;}
+.fin2-field label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--slate-400);font-weight:600;}
+.fin2-input,.fin2-select{
+  background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);
+  border-radius:8px;padding:7px 10px;font-size:12px;font-family:inherit;outline:none;min-height:32px;
+}
+.fin2-input:focus,.fin2-select:focus{border-color:var(--gold-500);box-shadow:0 0 0 3px rgba(212,162,76,.12);}
+.fin2-btn{
+  min-height:32px;padding:7px 13px;border-radius:8px;border:1px solid var(--navy-line);
+  background:var(--navy-850);color:var(--slate-300);font-size:12px;font-weight:600;
+  display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+}
+.fin2-btn:hover{border-color:var(--gold-500);color:var(--gold-300);}
+.fin2-btn.primary{background:var(--gold-600);border-color:var(--gold-600);color:#fff;}
+.fin2-btn.primary:hover{background:var(--gold-500);border-color:var(--gold-500);color:var(--navy-950);}
+.fin2-btn.danger{color:var(--red-400);border-color:rgba(193,102,107,.45);}
+.fin2-btn.mini{padding:3px 8px;min-height:24px;font-size:11px;border-radius:6px;font-weight:500;}
+.fin2-range{font-size:11.5px;color:var(--slate-400);margin:0 0 16px;}
+.fin2-range b{color:var(--gold-300);}
+.fin2-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+.fin2-stat{
+  background:var(--navy-900);border:1px solid var(--navy-line);border-radius:12px;
+  padding:13px 16px;position:relative;overflow:hidden;
+}
+.fin2-stat::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;}
+.fin2-stat.blue::before{background:#5b8def;}
+.fin2-stat.purple::before{background:#9d7ae8;}
+.fin2-stat.amber::before{background:var(--amber-500);}
+.fin2-stat.green::before{background:var(--green-500);}
+.fin2-stat.red::before{background:var(--red-400);}
+.fin2-stat .l{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--slate-400);margin-bottom:5px;}
+.fin2-stat .v{font-family:'Fraunces',serif;font-size:24px;font-weight:300;line-height:1.1;color:var(--cream-100);}
+.fin2-stat .v.neg{color:#e58a8f;}
+.fin2-stat .v.pos{color:#6fd3a4;}
+.fin2-stat .s{font-size:10.5px;color:var(--slate-500);margin-top:4px;}
+
+.fin2-graph{
+  background:linear-gradient(180deg,var(--navy-900) 0%,var(--navy-850) 100%);
+  border:1px solid var(--navy-line);border-radius:16px;padding:20px;margin-bottom:18px;
+  position:relative;overflow:hidden;box-shadow:var(--shadow);
+}
+.fin2-graph::before{content:'';position:absolute;inset:0 0 auto 0;height:2px;
+  background:linear-gradient(90deg,var(--green-500),#5b8def,var(--red-400));opacity:.85;}
+.fin2-graph-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px;}
+.fin2-kicker{display:flex;align-items:center;gap:7px;color:var(--slate-400);font-size:9.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;margin-bottom:5px;}
+.fin2-kicker i{width:6px;height:6px;border-radius:50%;background:#5b8def;box-shadow:0 0 0 4px rgba(91,141,239,.14);}
+.fin2-title{font-family:'Fraunces',serif;font-size:19px;font-weight:300;color:var(--gold-100);margin:0;}
+.fin2-subtitle{font-size:11.5px;color:var(--slate-400);margin:5px 0 0;max-width:620px;line-height:1.45;}
+.fin2-head-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-left:auto;}
+.fin2-period{display:inline-flex;align-items:center;min-height:28px;padding:5px 10px;border:1px solid var(--navy-line);border-radius:999px;background:var(--navy-850);color:var(--slate-300);font-size:10.5px;font-weight:700;white-space:nowrap;}
+.fin2-legend{display:flex;align-items:center;gap:11px;flex-wrap:wrap;font-size:10.5px;color:var(--slate-400);}
+.fin2-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
+.fin2-dot{display:inline-block;width:8px;height:8px;border-radius:999px;}
+.fin2-dot.g{background:#3fbf85;}.fin2-dot.r{background:#d66060;}.fin2-dot.b{background:#5b8def;}
+
+.fin2-summary{display:grid;grid-template-columns:1.35fr 1fr 1fr 1fr;gap:10px;margin-bottom:18px;}
+.fin2-sum{border:1px solid var(--navy-line);background:var(--navy-850);border-radius:12px;padding:11px 13px;min-width:0;}
+.fin2-sum.main{background:linear-gradient(135deg,rgba(79,174,127,.16),rgba(10,26,46,.2) 70%);border-color:rgba(79,174,127,.38);}
+.fin2-sum .l{font-size:9.5px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:4px;}
+.fin2-sum .v{font-size:19px;line-height:1.1;font-weight:700;color:var(--cream-100);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fin2-sum.main .v{color:#6fd3a4;}
+.fin2-sum .v.neg{color:#e58a8f;}
+.fin2-sum .f{margin-top:4px;font-size:10px;color:var(--slate-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+.fin2-chart-top{display:grid;grid-template-columns:170px minmax(0,1fr) 104px;gap:12px;align-items:center;padding:9px 10px 7px;border-bottom:1px solid var(--navy-line);}
+.fin2-cap{font-size:9px;color:var(--slate-500);font-weight:800;letter-spacing:.08em;text-transform:uppercase;}
+.fin2-cap.right{text-align:right;}
+.fin2-scale{display:flex;justify-content:space-between;color:var(--slate-500);font-size:9px;font-variant-numeric:tabular-nums;}
+.fin2-scale .c{color:var(--slate-300);font-weight:800;}
+.fin2-list{padding:7px 4px 2px;}
+.fin2-row{display:grid;grid-template-columns:170px minmax(0,1fr) 104px;gap:12px;align-items:center;min-height:46px;padding:4px 6px;border-radius:10px;transition:background .15s;}
+.fin2-row:hover{background:rgba(255,255,255,.025);}
+.fin2-row.total{background:linear-gradient(90deg,rgba(91,141,239,.13),rgba(91,141,239,.04));border:1px solid rgba(91,141,239,.35);margin-top:8px;}
+.fin2-name{min-width:0;}
+.fin2-name .n{font-size:12px;color:var(--cream-100);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fin2-row.total .fin2-name .n{color:#9dbcf5;font-weight:800;}
+.fin2-name .s{font-size:9px;color:var(--slate-500);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fin2-track{position:relative;height:28px;display:grid;grid-template-columns:minmax(0,1fr) 2px minmax(0,1fr);align-items:center;}
+.fin2-lane{position:relative;height:100%;display:flex;align-items:center;z-index:1;}
+.fin2-lane.neg{justify-content:flex-end;padding-right:6px;}
+.fin2-lane.pos{justify-content:flex-start;padding-left:6px;}
+.fin2-zero{width:2px;height:30px;border-radius:2px;background:var(--navy-line);z-index:3;}
+.fin2-bar{height:14px;min-width:3px;border-radius:999px;box-shadow:0 4px 10px rgba(0,0,0,.3);}
+.fin2-bar.g{background:linear-gradient(90deg,#2f9e6b,#5ed39a);}
+.fin2-bar.r{background:linear-gradient(90deg,#d66060,#a63a3a);}
+.fin2-bar.b{background:linear-gradient(90deg,#3c6fc9,#79aaf0);}
+.fin2-pill{display:inline-flex;align-items:center;min-height:22px;padding:3px 7px;border:1px solid var(--navy-line);border-radius:7px;background:var(--navy-900);font-size:9.5px;font-weight:800;line-height:1;color:var(--slate-300);white-space:nowrap;z-index:5;}
+.fin2-pill.pos{color:#6fd3a4;border-color:rgba(79,174,127,.4);}
+.fin2-pill.neg{color:#e58a8f;border-color:rgba(193,102,107,.4);}
+.fin2-pill.tot{color:#9dbcf5;border-color:rgba(91,141,239,.45);background:rgba(91,141,239,.1);}
+.fin2-result{font-size:9px;font-weight:800;letter-spacing:.05em;text-align:right;text-transform:uppercase;color:var(--slate-400);}
+.fin2-result.pos{color:#3fbf85;}.fin2-result.neg{color:#e58a8f;}.fin2-result.tot{color:#79aaf0;}
+.fin2-empty{min-height:220px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--slate-400);font-size:12px;padding:30px;}
+.fin2-foot{display:flex;align-items:center;justify-content:flex-end;gap:7px;padding:10px 3px 0;font-size:10px;color:var(--slate-500);}
+.fin2-foot b{color:var(--slate-300);}
+.fin2-tip{position:fixed;left:0;top:0;display:none;z-index:99999;width:min(320px,calc(100vw - 24px));padding:12px 13px;border:1px solid var(--navy-line);border-radius:12px;background:rgba(7,18,34,.98);box-shadow:0 18px 42px rgba(0,0,0,.55);pointer-events:none;}
+.fin2-tip .t{font-size:12px;font-weight:700;color:var(--cream-100);display:flex;justify-content:space-between;gap:10px;}
+.fin2-tip .b{font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:3px 6px;border-radius:999px;white-space:nowrap;}
+.fin2-tip .b.g{color:#6fd3a4;background:rgba(79,174,127,.16);}
+.fin2-tip .b.r{color:#e58a8f;background:rgba(193,102,107,.16);}
+.fin2-tip .b.t{color:#9dbcf5;background:rgba(91,141,239,.16);}
+.fin2-tip .net{font-size:16px;font-weight:800;margin-top:3px;}
+.fin2-tip .net.g{color:#6fd3a4;}.fin2-tip .net.r{color:#e58a8f;}.fin2-tip .net.t{color:#9dbcf5;}
+.fin2-tip .g2{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px;margin-top:9px;padding-top:9px;border-top:1px solid var(--navy-line);}
+.fin2-tip .it span{display:block;font-size:8.5px;color:var(--slate-500);}
+.fin2-tip .it strong{display:block;margin-top:1px;font-size:10px;color:var(--slate-300);}
+.fin2-form{display:grid;grid-template-columns:130px 130px 170px 1fr 120px auto;gap:8px;align-items:center;margin-bottom:12px;}
+.fin2-form.tax{grid-template-columns:repeat(3,1fr) auto;align-items:flex-end;}
+.fin2-form.desp{grid-template-columns:1fr 1fr;align-items:flex-end;}
+.fin2-form.desp .wide{grid-column:1/-1;}
+.fin2-form.tax .fin2-field{gap:4px;}
+.fin2-edit-note{display:none;font-size:11px;color:var(--gold-300);margin:-4px 0 9px;}
+.fin2-edit-note.on{display:block;}
+@media (max-width:1000px){
+  .fin2-stats{grid-template-columns:1fr 1fr;}
+  .fin2-summary{grid-template-columns:1fr 1fr;}
+  .fin2-form,.fin2-form.tax,.fin2-form.desp{grid-template-columns:1fr 1fr;}
+  .fin2-chart-top,.fin2-row{grid-template-columns:130px minmax(0,1fr) 86px;gap:8px;}
+}
+@media (max-width:640px){
+  .fin2-graph{padding:14px;}
+  .fin2-stats,.fin2-summary{grid-template-columns:1fr;}
+  .fin2-form,.fin2-form.tax,.fin2-form.desp{grid-template-columns:1fr;}
+  .fin2-form.desp .wide{grid-column:auto;}
+  .fin2-chart-top{display:none;}
+  .fin2-row{display:block;padding:9px;}
+  .fin2-track{margin-top:8px;height:28px;}
+}
 </style>
 </head>
 <body>
@@ -380,7 +511,6 @@ select.form-input{appearance:none;}
     <div class="sb-item active" data-screen="dashboard"><span class="ico">🏠</span> Dashboard</div>
     <div class="sb-item" data-screen="lojas"><span class="ico">🏪</span> Lojas <span class="badge" id="lojas-badge">0</span></div>
     <div class="sb-item" data-screen="financeiro"><span class="ico">💰</span> Financeiro</div>
-    <div class="sb-item" data-screen="despesas"><span class="ico">💸</span> Despesas &amp; Taxas</div>
     <div class="sb-item" data-screen="fluxo"><span class="ico">💧</span> Fluxo de Caixa</div>
     <div class="sb-item" data-screen="estoque"><span class="ico">📦</span> Estoque</div>
     <div class="sb-item" data-screen="precos"><span class="ico">🛍</span> Catálogo de produtos</div>
@@ -524,21 +654,82 @@ select.form-input{appearance:none;}
       <div class="section-head">
         <div>
           <h2>Financeiro</h2>
-          <p>Recebimentos por forma de pagamento e caixas dos PDVs — do snapshot diário enviado por cada kiosk</p>
+          <p>Resultado do período: faturamento, taxas das maquininhas, custos, despesas e líquido por loja</p>
         </div>
-        <div class="period-tabs" id="fin-periodo">
-          <button class="period-tab active" data-period="hoje">Hoje</button>
-          <button class="period-tab" data-period="7d">7 dias</button>
-          <button class="period-tab" data-period="mes">Este mês</button>
-          <button class="period-tab" data-period="temporada">Temporada</button>
-        </div>
+        <div class="fin2-head-actions"><div class="fin2-period" id="fin2-header-label">—</div></div>
       </div>
-      <div class="kpi-grid" id="fin-kpis"></div>
+      <div class="card" style="padding:16px 18px;">
+        <div class="fin2-filters">
+          <div class="fin2-field"><label>Mês</label><select class="fin2-select" id="fin2-mes"></select></div>
+          <div class="fin2-field"><label>De</label><input class="fin2-input" type="date" id="fin2-de"></div>
+          <div class="fin2-field"><label>Até</label><input class="fin2-input" type="date" id="fin2-ate"></div>
+          <button class="fin2-btn primary" id="fin2-aplicar">Aplicar</button>
+          <button class="fin2-btn" id="fin2-exportar" title="Baixa um CSV com o resultado por loja do período">Exportar CSV</button>
+          <button class="fin2-btn" id="fin2-limpar">Limpar filtro</button>
+        </div>
+        <div class="fin2-range" id="fin2-range"></div>
+      </div>
+      <div class="fin2-stats" id="fin2-stats"></div>
+      <div class="fin2-graph">
+        <div class="fin2-graph-head">
+          <div>
+            <div class="fin2-kicker"><i></i> Resultado líquido</div>
+            <h3 class="fin2-title">Líquido por loja</h3>
+            <p class="fin2-subtitle">Faturamento menos taxas das maquininhas, custo de ribbon, comissões e despesas lançadas. Barra para a direita é lucro; para a esquerda, prejuízo.</p>
+          </div>
+          <div class="fin2-head-actions">
+            <div class="fin2-legend">
+              <span><i class="fin2-dot g"></i>Lucro</span>
+              <span><i class="fin2-dot r"></i>Prejuízo</span>
+              <span><i class="fin2-dot b"></i>Total</span>
+            </div>
+          </div>
+        </div>
+        <div class="fin2-summary" id="fin2-summary"></div>
+        <div class="fin2-chart-top">
+          <div class="fin2-cap">Loja</div>
+          <div class="fin2-scale" id="fin2-scale">
+            <span id="fin2-scale-min">Prejuízo</span><span class="c">R$ 0</span><span id="fin2-scale-max">Lucro</span>
+          </div>
+          <div class="fin2-cap right">Líquido</div>
+        </div>
+        <div class="fin2-list" id="fin2-chart"></div>
+        <div class="fin2-foot" id="fin2-foot">Passe o mouse nas barras para ver o detalhamento.</div>
+      </div>
       <div class="card">
-        <h3>Recebimentos por forma de pagamento — período</h3>
-        <div class="grid4-pay" id="fin-pagamentos"></div>
-        <div id="fin-pag-alerta" style="font-size:11px;color:var(--red-400);margin-top:10px;display:none;"></div>
-        <div id="fin-total-rodape" style="font-size:11px;color:var(--slate-500);margin-top:12px;"></div>
+        <h3>Resultado por loja</h3>
+        <div style="overflow-x:auto;"><table id="fin2-tabela"></table></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h3>Taxas por forma de pagamento</h3>
+          <p style="margin:-6px 0 12px;font-size:11.5px;color:var(--slate-400);">Percentual descontado pela maquininha/PSP. Dinheiro não tem taxa. As taxas entram no líquido do período.</p>
+          <div class="fin2-form tax">
+            <div class="fin2-field"><label>Crédito (%)</label><input class="fin2-input" id="fin2-taxa-credito" type="number" min="0" max="100" step="0.01"></div>
+            <div class="fin2-field"><label>Débito (%)</label><input class="fin2-input" id="fin2-taxa-debito" type="number" min="0" max="100" step="0.01"></div>
+            <div class="fin2-field"><label>PIX (%)</label><input class="fin2-input" id="fin2-taxa-pix" type="number" min="0" max="100" step="0.01"></div>
+            <button class="fin2-btn primary" id="fin2-salvar-taxas">Salvar taxas</button>
+          </div>
+          <table id="fin2-taxas"></table>
+        </div>
+        <div class="card">
+          <h3>Despesas do período</h3>
+          <div class="fin2-form desp">
+            <div class="fin2-field"><label>Categoria</label>
+              <select class="fin2-select" id="f-desp-categoria">
+                <option>Aluguel</option><option>Embalagem</option><option>Internet</option>
+                <option>Consumível (papel, ribbon, insumos)</option><option>Transporte</option>
+                <option>Gasolina</option><option>Manutenção de equipamento</option><option>Taxa de cartão</option><option>Outro</option>
+              </select>
+            </div>
+            <div class="fin2-field"><label>Valor (R$)</label><input class="fin2-input" id="f-desp-valor" type="number" min="0" step="0.01" placeholder="0,00"></div>
+            <div class="fin2-field"><label>Data</label><input class="fin2-input" id="f-desp-data" type="date"></div>
+            <div class="fin2-field"><label>Loja / Kiosk</label><select class="fin2-select" id="f-desp-loja"></select></div>
+            <div class="fin2-field wide"><label>Descrição</label><input class="fin2-input" id="f-desp-desc" placeholder="Ex.: Aluguel dezembro/2026"></div>
+            <div class="wide"><button class="fin2-btn primary" id="btn-lancar-despesa">+ Lançar despesa</button></div>
+          </div>
+          <div style="max-height:300px;overflow-y:auto;"><table id="tabela-despesas"></table></div>
+        </div>
       </div>
       <div class="card">
         <h3 class="h3-toggle" id="fin-caixas-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="fin-caixas-wrap" title="Clique para ver/ocultar os caixas">
@@ -551,16 +742,6 @@ select.form-input{appearance:none;}
         </div>
       </div>
       <div class="card">
-        <h3 class="h3-toggle" id="fin-tabela-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="fin-tabela-wrap" title="Clique para ver/ocultar a receita por loja">
-          <span class="caret" id="fin-tabela-caret">&#9656;</span>
-          Receita por loja — período
-          <span class="h3-count" id="fin-tabela-count"></span>
-        </h3>
-        <div id="fin-tabela-wrap" style="display:none;">
-          <table id="fin-tabela"></table>
-        </div>
-      </div>
-      <div class="card">
         <h3 class="h3-toggle" id="fin-pedidos-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="fin-pedidos-wrap" title="Clique para ver/ocultar a lista de pedidos">
           <span class="caret" id="fin-pedidos-caret">&#9656;</span>
           Pedidos do período <em style="color:var(--slate-400);font-size:11px;font-weight:400;font-style:normal;">(consolidado dos PDVs)</em>
@@ -570,6 +751,7 @@ select.form-input{appearance:none;}
           <table id="fin-pedidos"></table>
         </div>
       </div>
+      <div class="fin2-tip" id="fin2-tip"></div>
     </div>
 
     <!-- ====== FLUXO DE CAIXA ====== -->
@@ -593,57 +775,6 @@ select.form-input{appearance:none;}
       <div class="card">
         <h3>Detalhamento dia × loja</h3>
         <table id="fluxo-tabela"></table>
-      </div>
-    </div>
-
-    <!-- ====== DESPESAS & TAXAS ====== -->
-    <div class="screen" id="screen-despesas">
-      <div class="section-head">
-        <div>
-          <h2>Despesas &amp; Taxas</h2>
-          <p>Lançamento de despesas por loja (cadastro manual na gestão — não vem do PDV) e resultado do período</p>
-        </div>
-        <div class="period-tabs" id="desp-periodo">
-          <button class="period-tab" data-period="hoje">Hoje</button>
-          <button class="period-tab" data-period="7d">7 dias</button>
-          <button class="period-tab active" data-period="mes">Este mês</button>
-          <button class="period-tab" data-period="temporada">Temporada</button>
-        </div>
-      </div>
-      <div class="kpi-grid" id="desp-kpis"></div>
-      <div class="card">
-        <h3>Resultado do período (DRE)</h3>
-        <p style="margin:0 0 10px;color:var(--slate-400);font-size:12px;" id="desp-dre-base"></p>
-        <table id="desp-dre"></table>
-      </div>
-      <div class="grid2">
-        <div class="card">
-          <h3>Nova despesa</h3>
-          <div class="form-row-h">
-            <div class="form-row"><label class="form-label">Categoria</label>
-              <select class="form-input" id="f-desp-categoria">
-                <option>Aluguel</option><option>Embalagem</option><option>Internet</option>
-                <option>Consumível (papel, ribbon, insumos)</option><option>Transporte</option>
-                <option>Gasolina</option><option>Manutenção de equipamento</option><option>Taxa de cartão</option><option>Outro</option>
-              </select>
-            </div>
-            <div class="form-row"><label class="form-label">Valor (R$)</label><input class="form-input" id="f-desp-valor" type="number" min="0" step="0.5" placeholder="0,00"></div>
-            <div class="form-row"><label class="form-label">Data</label><input class="form-input" id="f-desp-data" type="date"></div>
-          </div>
-          <div class="form-row-h">
-            <div class="form-row" style="flex:2;"><label class="form-label">Loja / Kiosk</label>
-              <select class="form-input" id="f-desp-loja"></select>
-            </div>
-            <div class="form-row" style="flex:3;"><label class="form-label">Descrição</label><input class="form-input" id="f-desp-desc" placeholder="Ex.: Aluguel dezembro/2026"></div>
-          </div>
-          <div style="margin-top:6px;"><button class="btn btn-primary" id="btn-lancar-despesa">+ Lançar despesa</button></div>
-        </div>
-        <div class="card">
-          <h3>Despesas lançadas — período</h3>
-          <div style="max-height:360px;overflow-y:auto;">
-            <table id="tabela-despesas"></table>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -758,7 +889,7 @@ var FN_LABEL = { vendedor:'Vendedora', fotografo:'Fotógrafo', admin:'Administra
 var FN_ACESSO = { vendedor:'Kiosk', fotografo:'Kiosk', admin:'Total', gerente:'Regional' };
 
 var token = sessionStorage.getItem('nac_token') || '';
-var state = { currentUser:null, lojas:[], usuarios:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', finPeriodo:'hoje', fluxoPeriodo:'hoje', despesasPeriodo:'mes', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje' };
+var state = { currentUser:null, lojas:[], usuarios:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje' };
 var notificacoes = [];
 var currentScreen = 'dashboard';
 
@@ -833,7 +964,7 @@ var titles = {
   dashboard:'Dashboard', lojas:'Lojas', equipe:'Colaboradores', ranking:'Ranking',
   config:'Configurações', precos:'Catálogo de produtos',
   financeiro:'Financeiro', fluxo:'Fluxo de Caixa',
-  despesas:'Despesas & Taxas', estoque:'Estoque'
+  estoque:'Estoque'
 };
 $$('.sb-item[data-screen]').forEach(function(item){
   item.addEventListener('click', function(){
@@ -858,7 +989,6 @@ function goScreen(name){
   if(name==='precos') renderPrecos();
   if(name==='financeiro') renderFinanc();
   if(name==='fluxo') renderFluxo();
-  if(name==='despesas') renderDespesas();
   if(name==='estoque') renderEstoque();
   if(name==='ranking') renderRanking();
 }
@@ -947,7 +1077,6 @@ function iniciarAutoRefresh(){
     if(s === 'dashboard') renderDashboard();
     else if(s === 'financeiro') renderFinanc();
     else if(s === 'fluxo') renderFluxo();
-    else if(s === 'despesas') renderDespesas();
     else if(s === 'estoque') renderEstoque();
     else if(s === 'ranking') renderRanking();
     else if(s === 'lojas') loadAll().then(renderLojas);
@@ -1316,47 +1445,537 @@ function renderBarChart(elId, byDay, cut){
 }
 
 // ——— FINANCEIRO ———
-async function renderFinanc(){
-  await Promise.all([getVendas(), getPedidos()]);
-  var period = state.finPeriodo;
-  var cut = periodCutoff(period);
-  var rows = state.vendasRaw.filter(function(v){ return cut ? (v.data||'') >= dayStr(cut) : true; });
-  var a = aggVendas(rows);
-  var label = typeVal(null, period);
-  var recebido = PAY_META.reduce(function(s,pm){ return s + a.meios[pm.k]; }, 0);
-  // Regra do portal: a forma de pagamento é OBRIGATÓRIA — o PDV sempre registra
-  // uma forma no seletor (Dinheiro/Débito/Crédito/PIX). Então não existe uma
-  // forma "Não informado" no relatório: a diferença entre a receita e a soma das
-  // formas é DADO QUEBRADO de PDV antigo e aparece só como alerta abaixo.
-  var semForma = Math.max(0, +(a.total - recebido).toFixed(2));
-  var ticket = a.pedidos ? a.total/a.pedidos : 0;
-
-  $('#fin-kpis').innerHTML =
-    kpi('Receita ('+label+')', fmtBRL(a.total), a.pedidos+' pedido(s)', a.pedidos?'ok':'alert') +
-    kpi('Recebido ('+label+')', fmtBRL(recebido), 'soma das formas de pagamento', recebido?'ok':'alert') +
-    kpi('Ticket médio', fmtBRL(ticket), 'receita ÷ pedidos', a.pedidos?'ok':'alert') +
-    kpi('Dinheiro', fmtBRL(a.meios.dinheiro), (a.total?(a.meios.dinheiro/a.total*100):0).toFixed(1)+'% da receita', 'ok') +
-    kpi('PIX', fmtBRL(a.meios.pix), (a.total?(a.meios.pix/a.total*100):0).toFixed(1)+'% da receita', 'ok');
-
-  var tot = 0;
-  $('#fin-pagamentos').innerHTML = PAY_META.map(function(pm){
-    var v = a.meios[pm.k];
-    tot += v;
-    var pct = a.total ? (v/a.total*100).toFixed(1) : '0,0';
-    return '<div class="pay-total-box"><div class="pt-ico">'+pm.ico+'</div>'+
-      '<div class="pt-label">'+pm.label+'</div><div class="pt-val">'+fmtBRL(v)+'</div>'+
-      '<div class="pt-pct">'+pct+'% da receita</div></div>';
-  }).join('');
-  var alerta = $('#fin-pag-alerta');
-  if(alerta){
-    alerta.style.display = semForma>0 ? '' : 'none';
-    alerta.textContent = semForma>0
-      ? ('⚠ '+fmtBRL(semForma)+' da receita está sem forma de pagamento registrada (PDV não informou a forma). Reenvie o snapshot desse PDV para o valor entrar na forma correta.')
-      : '';
+// Painel de resultado por loja: filtros de período (mês/intervalo), cards,
+// gráfico de barras divergentes (lucro × prejuízo), tabela e despesas.
+var FIN2_MEIOS = [
+  { k:'credito',  label:'Crédito',  taxa:'taxaCredito', ico:'💳' },
+  { k:'debito',   label:'Débito',   taxa:'taxaDebito',  ico:'💳' },
+  { k:'pix',      label:'PIX',      taxa:'taxaPix',     ico:'⚡' },
+  { k:'dinheiro', label:'Dinheiro', taxa:null,          ico:'💵' }
+];
+function fin2MeioKey(s){
+  s = String(s || '').toLowerCase();
+  if(s.indexOf('cred') >= 0) return 'credito';
+  if(s.indexOf('deb') >= 0) return 'debito';
+  if(s.indexOf('pix') >= 0) return 'pix';
+  if(s.indexOf('din') >= 0 || s.indexOf('esp') >= 0) return 'dinheiro';
+  return '';
+}
+function fin2NovoBucket(id, nome){
+  return {
+    lojaId:id, lojaNome:nome || id, faturamento:0, pedidos:0,
+    meios:{ dinheiro:0, debito:0, credito:0, pix:0 },
+    taxas:0, ribbon:0, comissoes:0, despesas:0, unidades:0,
+    revVend:0, revFoto:0, semForma:0
+  };
+}
+function fin2MeioSoma(meios){
+  return FIN2_MEIOS.reduce(function(s,m){ return s + toNum(meios[m.k]); }, 0);
+}
+function fin2Aggregar(){
+  var params = state.parametros || {};
+  var taxasPct = {
+    credito: toNum(params.taxaCredito),
+    debito: toNum(params.taxaDebito),
+    pix: toNum(params.taxaPix)
+  };
+  var de = state.fin2De || '';
+  var ate = state.fin2Ate || '';
+  function inRange(d){
+    d = String(d || '');
+    if(!d) return false;
+    if(de && d < de) return false;
+    if(ate && d > ate) return false;
+    return true;
   }
-  $('#fin-total-rodape').textContent = 'Total recebido no período: '+fmtBRL(tot)+' · receita '+fmtBRL(a.total)+' · '+
-    (rows.length ? rows.length+' snapshot(s) de '+new Set(rows.map(function(r){return r.lojaId;})).size+' loja(s)' : 'nenhum snapshot enviado ainda');
+  var pedRows = state.pedidos.filter(function(p){
+    var st = String(p.status || '').toLowerCase();
+    if(st !== 'pago' && st !== 'impresso') return false;
+    return inRange(p.data || (p.pagoEm ? String(p.pagoEm).slice(0,10) : ''));
+  });
+  var pedidosPeriodo = state.pedidos.filter(function(p){
+    return inRange(p.data || (p.pagoEm ? String(p.pagoEm).slice(0,10) : p.criadoEm ? String(p.criadoEm).slice(0,10) : ''));
+  });
+  var snapRows = state.vendasRaw.filter(function(v){ return inRange(v.data); });
+  var lojasComPedido = {};
+  pedRows.forEach(function(p){ lojasComPedido[p.lojaId || '__sem_loja'] = true; });
+  // Snapshot só cobre as lojas que ainda não têm pedido consolidado no período
+  // (evita contar a mesma venda duas vezes).
+  var snapUsados = snapRows.filter(function(v){ return !lojasComPedido[v.lojaId || '__sem_loja']; });
+  var basePedidos = pedRows.length > 0;
+  var bucket = {};
 
+  function get(id, nome){
+    if(!bucket[id]) bucket[id] = fin2NovoBucket(id, nome);
+    return bucket[id];
+  }
+  function nomeLoja(id){
+    var l = state.lojas.find(function(x){ return x.id === id; });
+    return l ? l.nome : id;
+  }
+
+  pedRows.forEach(function(p){
+    var id = p.lojaId || '__sem_loja';
+    var b = get(id, p.lojaNome || nomeLoja(id));
+    b.faturamento += toNum(p.total);
+    b.pedidos += 1;
+    b.unidades += toNum(p.unidadesTotal);
+    var pagos = Array.isArray(p.pagamentos) && p.pagamentos.length
+      ? p.pagamentos
+      : [{ meio: p.meio, valor: p.total }];
+    pagos.forEach(function(pg){
+      var k = fin2MeioKey(pg.meio || pg.forma);
+      if(k) b.meios[k] += toNum(pg.valor);
+    });
+    // Comissões: identifica o operador do pedido entre os colaboradores da
+    // loja e separa a receita por função (vendedor/fotógrafo).
+    var nome = String(p.operador || '');
+    var u = state.usuarios.find(function(x){
+      if(String(x.nome) !== nome && String(x.usuario) !== nome) return false;
+      return !p.lojaId || !x.lojaId || x.lojaId === p.lojaId;
+    });
+    var f = u ? u.funcao : '';
+    if(f === 'vendedor') b.revVend += toNum(p.total);
+    else if(f === 'fotografo') b.revFoto += toNum(p.total);
+  });
+
+  // Fallback: snapshot diário das lojas sem pedido consolidado no período.
+  snapUsados.forEach(function(v){
+    var id = v.lojaId || '__sem_loja';
+    var b = get(id, v.lojaNome || nomeLoja(id));
+    b.faturamento += toNum(v.totalVendido);
+    b.pedidos += toNum(v.pedidos);
+    FIN2_MEIOS.forEach(function(m){ b.meios[m.k] += toNum((v.meios || {})[m.k]); });
+  });
+
+  state.despesas.forEach(function(d){
+    var data = String(d.data || '');
+    if(!inRange(data)) return;
+    var id = d.lojaId || '__geral';
+    var b = get(id, d.lojaId ? nomeLoja(d.lojaId) : 'Geral / operação');
+    b.despesas += toNum(d.valor);
+  });
+
+  var rows = Object.keys(bucket).map(function(id){
+    var b = bucket[id];
+    FIN2_MEIOS.forEach(function(m){
+      if(!m.taxa) return;
+      b.taxas += toNum(b.meios[m.k]) * toNum(taxasPct[m.k]) / 100;
+    });
+    var custoRibbon = toNum(params.custoRibbonUnitario);
+    b.ribbon = b.unidades * custoRibbon;
+    b.comissoes = b.revVend * toNum(params.comissaoVendedor)/100
+                + b.revFoto * toNum(params.comissaoFotografo)/100;
+    b.semForma = Math.max(0, b.faturamento - fin2MeioSoma(b.meios));
+    b.liquido = b.faturamento - b.taxas - b.ribbon - b.comissoes - b.despesas;
+    b.margem = b.faturamento > 0 ? (b.liquido / b.faturamento * 100) : 0;
+    return b;
+  });
+
+  var geral = null;
+  rows = rows.filter(function(r){
+    if(r.lojaId === '__geral'){ geral = r; return false; }
+    return true;
+  });
+  rows.sort(function(a,b){ return b.liquido - a.liquido || a.lojaNome.localeCompare(b.lojaNome); });
+
+  var total = fin2NovoBucket('__total', 'Todas as lojas');
+  rows.concat(geral ? [geral] : []).forEach(function(r){
+    total.faturamento += r.faturamento;
+    total.pedidos += r.pedidos;
+    total.unidades += r.unidades;
+    FIN2_MEIOS.forEach(function(m){ total.meios[m.k] += r.meios[m.k]; });
+    total.taxas += r.taxas;
+    total.ribbon += r.ribbon;
+    total.comissoes += r.comissoes;
+    total.despesas += r.despesas;
+    total.semForma += r.semForma;
+    total.revVend += r.revVend;
+    total.revFoto += r.revFoto;
+  });
+  total.liquido = total.faturamento - total.taxas - total.ribbon - total.comissoes - total.despesas;
+  total.margem = total.faturamento > 0 ? (total.liquido / total.faturamento * 100) : 0;
+
+  var despRows = state.despesas.filter(function(d){ return inRange(d.data); })
+    .sort(function(a,b){ return String(b.data||'').localeCompare(String(a.data||'')) || String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')); });
+
+  return {
+    rows: rows, geral: geral, total: total, despRows: despRows,
+    pedRows: pedRows, pedidosPeriodo: pedidosPeriodo, snapRows: snapRows,
+    snapUsados: snapUsados, basePedidos: basePedidos,
+    taxasPct: taxasPct, de: de, ate: ate
+  };
+}
+function fin2Short(v){
+  var a = Math.abs(v);
+  var sign = v < 0 ? '−' : '';
+  if(a >= 1000000) return sign+'R$ '+(a/1000000).toFixed(1).replace('.',',')+' mi';
+  if(a >= 1000) return sign+'R$ '+(a/1000).toFixed(1).replace('.',',')+' mil';
+  return sign+'R$ '+fmtInt(a);
+}
+function fin2RangeLabel(){
+  var de = state.fin2De, ate = state.fin2Ate;
+  function d(s){ return s ? s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4) : ''; }
+  if(!de && !ate) return 'Todo o período';
+  if(de && ate) return d(de)+' a '+d(ate);
+  if(de) return 'A partir de '+d(de);
+  return 'Até '+d(ate);
+}
+function fin2InitFiltros(){
+  if(state.fin2Mes === null && state.fin2De === null && state.fin2Ate === null){
+    var now = new Date();
+    state.fin2Mes = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    state.fin2De = state.fin2Mes+'-01';
+    state.fin2Ate = dayStr(new Date(now.getFullYear(), now.getMonth()+1, 0));
+  }
+  var sel = $('#fin2-mes');
+  if(sel && !sel.options.length){
+    var hoje = new Date(), opts = [];
+    for(var i=0; i<24; i++){
+      var d = new Date(hoje.getFullYear(), hoje.getMonth()-i, 1);
+      var v = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      var nome = d.toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+      opts.push('<option value="'+v+'">'+esc(nome.charAt(0).toUpperCase()+nome.slice(1))+'</option>');
+    }
+    opts.push('<option value="all">Todo o período</option>');
+    opts.push('<option value="custom">Personalizado</option>');
+    sel.innerHTML = opts.join('');
+  }
+  var deEl = $('#fin2-de'), ateEl = $('#fin2-ate');
+  if(deEl && document.activeElement !== deEl) deEl.value = state.fin2De || '';
+  if(ateEl && document.activeElement !== ateEl) ateEl.value = state.fin2Ate || '';
+  if(sel && document.activeElement !== sel){
+    var opt = sel.querySelector('option[value="'+String(state.fin2Mes)+'"]');
+    sel.value = opt ? String(state.fin2Mes) : 'custom';
+  }
+  var dataEl = $('#f-desp-data');
+  if(dataEl){
+    var hojeStr = dayStr(new Date());
+    var alvo = hojeStr;
+    if(state.fin2De && alvo < state.fin2De) alvo = state.fin2De;
+    if(state.fin2Ate && alvo > state.fin2Ate) alvo = state.fin2Ate;
+    var fora = dataEl.value && ((state.fin2De && dataEl.value < state.fin2De) || (state.fin2Ate && dataEl.value > state.fin2Ate));
+    if(!dataEl.value || (fora && document.activeElement !== dataEl)) dataEl.value = alvo;
+  }
+  var lojaSel = $('#f-desp-loja');
+  if(lojaSel && lojaSel.options.length !== state.lojas.length + 1){
+    var lojaAtual = lojaSel.value;
+    lojaSel.innerHTML = '<option value="">Geral / despesa da operação</option>' +
+      state.lojas.map(function(l){ return '<option value="'+escAttr(l.id)+'">'+esc(l.nome)+'</option>'; }).join('');
+    lojaSel.value = lojaAtual;
+  }
+  if(state._fin2Bound) return;
+  state._fin2Bound = true;
+  if(sel) sel.addEventListener('change', function(){
+    var v = sel.value;
+    if(v === 'custom') return;
+    if(v === 'all'){ state.fin2Mes = 'all'; state.fin2De = null; state.fin2Ate = null; }
+    else {
+      var y = +v.slice(0,4), m = +v.slice(5,7);
+      state.fin2Mes = v;
+      state.fin2De = v+'-01';
+      state.fin2Ate = dayStr(new Date(y, m, 0));
+    }
+    renderFinanc();
+  });
+  $('#fin2-aplicar').addEventListener('click', function(){
+    var de = $('#fin2-de').value, ate = $('#fin2-ate').value;
+    if(de && ate && de > ate){ toast('A data inicial não pode ser maior que a final', true); return; }
+    state.fin2De = de || null;
+    state.fin2Ate = ate || null;
+    if(!de && !ate) state.fin2Mes = 'all';
+    else if(de && ate && de.slice(0,7) === ate.slice(0,7) && de === de.slice(0,7)+'-01'){
+      state.fin2Mes = de.slice(0,7);
+    } else state.fin2Mes = 'custom';
+    renderFinanc();
+  });
+  $('#fin2-limpar').addEventListener('click', function(){
+    var now = new Date();
+    state.fin2Mes = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    state.fin2De = state.fin2Mes+'-01';
+    state.fin2Ate = dayStr(new Date(now.getFullYear(), now.getMonth()+1, 0));
+    renderFinanc();
+  });
+  $('#fin2-exportar').addEventListener('click', fin2Exportar);
+  $('#fin2-salvar-taxas').addEventListener('click', fin2SalvarTaxas);
+  $('#btn-lancar-despesa').addEventListener('click', fin2SalvarDespesa);
+}
+function fin2Exportar(){
+  var agg = state._fin2Agg;
+  if(!agg){ toast('Nada para exportar ainda', true); return; }
+  function n(v){ return toNum(v).toFixed(2).replace('.',','); }
+  var out = [[
+    'Loja','Faturamento','Taxas','Ribbon','Comissoes','Despesas','Liquido','Margem %',
+    'Pedidos','Dinheiro','Debito','Credito','PIX','Sem forma'
+  ].join(';')];
+  agg.rows.concat(agg.geral ? [agg.geral] : [], [agg.total]).forEach(function(r){
+    out.push([
+      '"'+String(r.lojaNome||'').replace(/"/g,'""')+'"', n(r.faturamento), n(r.taxas),
+      n(r.ribbon), n(r.comissoes), n(r.despesas), n(r.liquido),
+      toNum(r.margem).toFixed(1).replace('.',','), String(toNum(r.pedidos)),
+      n(r.meios.dinheiro), n(r.meios.debito), n(r.meios.credito), n(r.meios.pix), n(r.semForma)
+    ].join(';'));
+  });
+  var csv = '\ufeff' + out.join('\r\n');
+  var blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'financeiro_'+String(state.fin2De||'inicio')+'_a_'+String(state.fin2Ate||'fim')+'.csv';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1200);
+}
+async function fin2SalvarTaxas(){
+  var vals = {
+    taxaCredito: parseFloat($('#fin2-taxa-credito').value),
+    taxaDebito: parseFloat($('#fin2-taxa-debito').value),
+    taxaPix: parseFloat($('#fin2-taxa-pix').value)
+  };
+  for(var k in vals){
+    if(isNaN(vals[k]) || vals[k] < 0 || vals[k] > 100){ toast('Informe taxas entre 0% e 100%', true); return; }
+  }
+  var res = await call('parametros.save', vals);
+  if(!res || !res.ok){ toast((res && res.error) || 'Falha ao salvar as taxas', true); return; }
+  state.parametros = res.parametros || Object.assign({}, state.parametros || {}, vals);
+  state._paramAt = Date.now();
+  state._paramProm = Promise.resolve(state.parametros);
+  toast('Taxas atualizadas');
+  renderFinanc();
+}
+async function fin2SalvarDespesa(){
+  var valor = parseFloat($('#f-desp-valor').value);
+  var data = $('#f-desp-data').value;
+  if(isNaN(valor) || valor <= 0){ toast('Informe um valor maior que zero', true); return; }
+  if(!data){ toast('Informe a data', true); return; }
+  var res = await call('despesas.save', {
+    lojaId: $('#f-desp-loja').value || '',
+    data: data,
+    categoria: $('#f-desp-categoria').value,
+    descricao: $('#f-desp-desc').value.trim(),
+    valor: valor
+  });
+  if(!res || !res.ok){ toast((res && res.error) || 'Falha ao lançar', true); return; }
+  toast('Despesa lançada');
+  $('#f-desp-valor').value = '';
+  $('#f-desp-desc').value = '';
+  notif('💸','Despesa lançada', res.despesa.categoria+' — '+fmtBRL(res.despesa.valor)+' ('+res.despesa.data+')');
+  state._despDirty = true;
+  renderFinanc();
+}
+async function renderFinanc(){
+  fin2InitFiltros();
+  await Promise.all([getVendas(), getPedidos(), loadDespesas(), getParametros()]);
+  fin2InitFiltros();
+  var agg = fin2Aggregar();
+  state._fin2Agg = agg;
+  fin2RenderFiltros(agg);
+  fin2RenderStats(agg);
+  fin2RenderGrafico(agg);
+  fin2RenderTabela(agg);
+  fin2RenderTaxas(agg);
+  fin2RenderDespesas(agg);
+  fin2RenderCaixas();
+  fin2RenderPedidos(agg);
+}
+function fin2RenderFiltros(agg){
+  var base = [];
+  if(agg.pedRows.length) base.push(fmtInt(agg.pedRows.length)+' pedido(s) consolidado(s)');
+  if(agg.snapUsados.length) base.push('snapshot de '+fmtInt(new Set(agg.snapUsados.map(function(v){ return v.lojaId; })).size)+' loja(s)');
+  var txt = 'Período: <b>'+fin2RangeLabel()+'</b> · '+fmtInt(agg.rows.length)+' loja(s) com movimento'+
+    (agg.despRows.length ? ' · '+fmtInt(agg.despRows.length)+' despesa(s) lançada(s)' : '')+
+    (base.length ? ' · base: '+base.join(' + ') : ' · nenhum dado no período');
+  var el = $('#fin2-range');
+  if(el) el.innerHTML = txt;
+  var hl = $('#fin2-header-label');
+  if(hl) hl.textContent = fin2RangeLabel();
+}
+function fin2RenderStats(agg){
+  var t = agg.total;
+  var custos = t.despesas + t.ribbon + t.comissoes;
+  var ticket = t.pedidos ? t.faturamento / t.pedidos : 0;
+  var pctTaxas = t.faturamento > 0 ? t.taxas / t.faturamento * 100 : 0;
+  var cls = t.liquido >= 0 ? 'pos' : 'neg';
+  var cardCls = t.liquido >= 0 ? 'green' : 'red';
+  $('#fin2-stats').innerHTML =
+    '<div class="fin2-stat blue"><div class="l">Faturamento</div><div class="v">'+fmtBRL(t.faturamento)+'</div>'+
+      '<div class="s">'+fmtInt(t.pedidos)+' pedido(s) · ticket '+fmtBRL(ticket)+'</div></div>'+
+    '<div class="fin2-stat purple"><div class="l">Taxas das maquininhas</div><div class="v">'+fmtBRL(t.taxas)+'</div>'+
+      '<div class="s">'+pctTaxas.toFixed(2).replace('.',',')+'% do faturamento</div></div>'+
+    '<div class="fin2-stat amber"><div class="l">Despesas &amp; custos</div><div class="v">'+fmtBRL(custos)+'</div>'+
+      '<div class="s">despesas '+fmtBRL(t.despesas)+' · ribbon '+fmtBRL(t.ribbon)+' · comissões '+fmtBRL(t.comissoes)+'</div></div>'+
+    '<div class="fin2-stat '+cardCls+'"><div class="l">Líquido</div><div class="v '+cls+'">'+
+      (t.liquido < 0 ? '−' : '')+fmtBRL(Math.abs(t.liquido))+'</div>'+
+      '<div class="s">margem '+t.margem.toFixed(1).replace('.',',')+'% · '+(t.liquido>=0?'lucro':'prejuízo')+' no período</div></div>';
+}
+function fin2RenderGrafico(agg){
+  var t = agg.total;
+  $('#fin2-summary').innerHTML =
+    '<div class="fin2-sum main"><div class="l">Líquido do período</div><div class="v '+(t.liquido<0?'neg':'')+'">'+
+      (t.liquido < 0 ? '−' : '')+fmtBRL(Math.abs(t.liquido))+'</div><div class="f">margem '+t.margem.toFixed(1).replace('.',',')+'%</div></div>'+
+    '<div class="fin2-sum"><div class="l">Faturamento</div><div class="v">'+fmtBRL(t.faturamento)+'</div>'+
+      '<div class="f">'+fmtInt(t.pedidos)+' pedido(s)</div></div>'+
+    '<div class="fin2-sum"><div class="l">Despesas &amp; custos</div><div class="v">'+fmtBRL(t.despesas+t.ribbon+t.comissoes)+'</div>'+
+      '<div class="f">despesas '+fmtBRL(t.despesas)+'</div></div>'+
+    '<div class="fin2-sum"><div class="l">Taxas</div><div class="v">'+fmtBRL(t.taxas)+'</div>'+
+      '<div class="f">crédito/débito/pix</div></div>';
+
+  var rows = agg.rows.concat(agg.geral ? [agg.geral] : []);
+  var max = rows.reduce(function(m,r){ return Math.max(m, Math.abs(r.liquido)); }, 0);
+  $('#fin2-scale-min').textContent = '−'+fin2Short(max);
+  $('#fin2-scale-max').textContent = '+'+fin2Short(max);
+
+  if(!rows.length || (max < 0.005 && !t.faturamento && !t.despesas)){
+    $('#fin2-chart').innerHTML = '<div class="fin2-empty">Sem resultado no período — os PDVs enviam o snapshot diário e as despesas são lançadas aqui.</div>';
+    $('#fin2-foot').innerHTML = '';
+    return;
+  }
+  state._fin2Tips = rows.concat([t]);
+  var html = rows.map(function(r, idx){
+    return fin2BarRow(r, 'loja', max, idx);
+  }).join('');
+  html += fin2BarRow(t, 'total', max, rows.length);
+  $('#fin2-chart').innerHTML = html;
+  fin2BindTips();
+  var extra = [];
+  var base = [];
+  if(agg.pedRows.length) base.push(fmtInt(agg.pedRows.length)+' pedido(s) consolidado(s)');
+  if(agg.snapUsados.length) base.push('snapshot de '+fmtInt(new Set(agg.snapUsados.map(function(v){ return v.lojaId; })).size)+' loja(s)');
+  if(agg.snapUsados.length) extra.push('lojas com apenas snapshot ainda não têm ribbon/comissões no líquido');
+  if(t.semForma > 0.009) extra.push('⚠ '+fmtBRL(t.semForma)+' sem forma de pagamento registrada');
+  $('#fin2-foot').innerHTML = 'Base: '+(base.length?base.join(' + '):'sem dados')+(extra.length ? ' · '+extra.join(' · ') : '');
+}
+function fin2BarRow(r, kind, max, idx){
+  var v = toNum(r.liquido);
+  var w = max > 0 ? Math.min(100, Math.abs(v)/max*100) : 0;
+  var barCls = kind === 'total' ? 'b' : (v >= 0 ? 'g' : 'r');
+  var lane = v < 0 ? 'neg' : 'pos';
+  var bar = Math.abs(v) >= 0.005
+    ? '<span class="fin2-bar '+barCls+'" style="width:'+w.toFixed(1)+'%"></span>' : '';
+  var zero = Math.abs(v) < 0.005;
+  var pillCls = kind === 'total' ? 'tot' : (zero ? '' : (v >= 0 ? 'pos' : 'neg'));
+  var valor = (v < 0 ? '−' : '')+fmtBRL(Math.abs(v));
+  var resultado = kind === 'total' ? 'Total' : (zero ? '—' : (v >= 0 ? 'Lucro' : 'Prejuízo'));
+  var sub;
+  if(kind === 'total') sub = fmtInt(r.pedidos)+' pedido(s) · '+fmtBRL(r.faturamento)+' de faturamento';
+  else if(r.lojaId === '__geral') sub = 'despesas sem loja · '+fmtBRL(r.despesas);
+  else sub = fmtInt(r.pedidos)+' pedido(s) · '+fmtBRL(r.faturamento);
+  return '<div class="fin2-row'+(kind==='total'?' total':'')+'" data-tip-idx="'+idx+'">'+
+    '<div class="fin2-name"><div class="n">'+esc(r.lojaNome)+'</div><div class="s">'+sub+'</div></div>'+
+    '<div class="fin2-track"><div class="fin2-lane neg">'+(lane==='neg'?bar:'')+'</div>'+
+      '<div class="fin2-zero"></div><div class="fin2-lane pos">'+(lane==='pos'?bar:'')+'</div></div>'+
+    '<div style="text-align:right;"><span class="fin2-pill '+pillCls+'">'+valor+'</span>'+
+      '<div class="fin2-result '+pillCls+'">'+resultado+'</div></div></div>';
+}
+function fin2BindTips(){
+  var tip = $('#fin2-tip');
+  if(!tip) return;
+  $$('#fin2-chart .fin2-row[data-tip-idx]').forEach(function(el){
+    var idx = +el.getAttribute('data-tip-idx');
+    var r = (state._fin2Tips || [])[idx];
+    if(!r) return;
+    el.addEventListener('mouseenter', function(e){
+      var v = toNum(r.liquido);
+      var cls = r.lojaId === '__total' ? 't' : (v >= 0 ? 'g' : 'r');
+      tip.innerHTML = '<div class="t"><span>'+esc(r.lojaNome)+'</span><span class="b '+cls+'">'+
+        (r.lojaId==='__total'?'Total':(v>=0?'Lucro':'Prejuízo'))+'</span></div>'+
+        '<div class="net '+cls+'">'+(v<0?'−':'')+fmtBRL(Math.abs(v))+'</div>'+
+        '<div class="g2">'+
+          '<div class="it"><span>Faturamento</span><strong>'+fmtBRL(r.faturamento)+'</strong></div>'+
+          '<div class="it"><span>Despesas</span><strong>'+fmtBRL(r.despesas)+'</strong></div>'+
+          '<div class="it"><span>Taxas</span><strong>'+fmtBRL(r.taxas)+'</strong></div>'+
+          '<div class="it"><span>Ribbon</span><strong>'+fmtBRL(r.ribbon)+'</strong></div>'+
+          '<div class="it"><span>Comissões</span><strong>'+fmtBRL(r.comissoes)+'</strong></div>'+
+          '<div class="it"><span>Pedidos</span><strong>'+fmtInt(r.pedidos)+'</strong></div>'+
+        '</div>';
+      tip.style.display = 'block';
+      fin2MoveTip(e);
+    });
+    el.addEventListener('mousemove', fin2MoveTip);
+    el.addEventListener('mouseleave', function(){ tip.style.display = 'none'; });
+  });
+}
+function fin2MoveTip(e){
+  var tip = $('#fin2-tip');
+  if(!tip || tip.style.display === 'none') return;
+  var x = e.clientX + 16, y = e.clientY + 16;
+  var rect = tip.getBoundingClientRect();
+  if(x + rect.width > window.innerWidth - 10) x = e.clientX - rect.width - 16;
+  if(y + rect.height > window.innerHeight - 10) y = e.clientY - rect.height - 16;
+  tip.style.left = Math.max(8, x)+'px';
+  tip.style.top = Math.max(8, y)+'px';
+}
+function fin2RenderTabela(agg){
+  var rows = agg.rows.concat(agg.geral ? [agg.geral] : [], [agg.total]);
+  var html = '<tr><th>Loja</th><th style="text-align:right;">Faturamento</th><th style="text-align:right;">Taxas</th>'+
+    '<th style="text-align:right;">Ribbon</th><th style="text-align:right;">Comissões</th><th style="text-align:right;">Despesas</th>'+
+    '<th style="text-align:right;">Líquido</th><th style="text-align:right;">Margem</th></tr>';
+  html += rows.map(function(r){
+    var v = toNum(r.liquido);
+    var total = r.lojaId === '__total';
+    return '<tr'+(total?' style="background:rgba(91,141,239,.08);font-weight:700;"':'')+'>'+
+      '<td><b>'+esc(r.lojaNome)+'</b>'+(total?'':(r.pedidos?' <span style="color:var(--slate-500);font-size:10.5px;">· '+fmtInt(r.pedidos)+' ped.</span>':''))+'</td>'+
+      '<td style="text-align:right;">'+fmtBRL(r.faturamento)+'</td>'+
+      '<td style="text-align:right;color:var(--slate-400);">'+(r.taxas?'−'+fmtBRL(r.taxas):'—')+'</td>'+
+      '<td style="text-align:right;color:var(--slate-400);">'+(r.ribbon?'−'+fmtBRL(r.ribbon):'—')+'</td>'+
+      '<td style="text-align:right;color:var(--slate-400);">'+(r.comissoes?'−'+fmtBRL(r.comissoes):'—')+'</td>'+
+      '<td style="text-align:right;color:var(--slate-400);">'+(r.despesas?'−'+fmtBRL(r.despesas):'—')+'</td>'+
+      '<td style="text-align:right;font-weight:700;color:'+(v>=0?'var(--green-500)':'var(--red-400)')+';">'+
+        (v<0?'−':'')+fmtBRL(Math.abs(v))+'</td>'+
+      '<td style="text-align:right;color:var(--slate-400);">'+(r.faturamento>0?toNum(r.margem).toFixed(1).replace('.',',')+'%':'—')+'</td></tr>';
+  }).join('');
+  $('#fin2-tabela').innerHTML = html;
+}
+function fin2RenderTaxas(agg){
+  var t = agg.total;
+  var inputs = {
+    '#fin2-taxa-credito': agg.taxasPct.credito,
+    '#fin2-taxa-debito': agg.taxasPct.debito,
+    '#fin2-taxa-pix': agg.taxasPct.pix
+  };
+  Object.keys(inputs).forEach(function(sel){
+    var el = $(sel);
+    if(el && document.activeElement !== el) el.value = String(inputs[sel]);
+  });
+  var html = '<tr><th>Forma</th><th style="text-align:right;">Recebido</th><th style="text-align:right;">Taxa</th>'+
+    '<th style="text-align:right;">Desconto</th></tr>';
+  var totRec = 0, totTax = 0;
+  FIN2_MEIOS.forEach(function(m){
+    var rec = toNum(t.meios[m.k]);
+    var pct = m.taxa ? toNum(agg.taxasPct[m.k]) : 0;
+    var desc = rec * pct / 100;
+    totRec += rec; totTax += desc;
+    html += '<tr><td>'+m.ico+' '+m.label+'</td>'+
+      '<td style="text-align:right;">'+fmtBRL(rec)+'</td>'+
+      '<td style="text-align:right;color:var(--slate-400);">'+(m.taxa?pct.toFixed(2).replace('.',',')+'%':'—')+'</td>'+
+      '<td style="text-align:right;color:var(--red-400);">'+(desc?'−'+fmtBRL(desc):'—')+'</td></tr>';
+  });
+  html += '<tr style="font-weight:700;"><td>Total</td><td style="text-align:right;">'+fmtBRL(totRec)+'</td><td></td>'+
+    '<td style="text-align:right;color:var(--red-400);">'+(totTax?'−'+fmtBRL(totTax):'—')+'</td></tr>';
+  $('#fin2-taxas').innerHTML = html;
+}
+function fin2RenderDespesas(agg){
+  var tb = $('#tabela-despesas');
+  if(!tb) return;
+  var rows = agg.despRows;
+  if(rows.length){
+    tb.innerHTML = '<tr><th>Data</th><th>Loja</th><th>Categoria</th><th>Descrição</th><th style="text-align:right;">Valor</th><th></th></tr>' +
+      rows.map(function(d){
+        var loja = d.lojaId && state.lojas.find(function(l){ return l.id === d.lojaId; });
+        return '<tr><td style="white-space:nowrap;">'+esc(d.data)+'</td>'+
+          '<td>'+esc(loja ? loja.nome : (d.lojaId || 'Geral'))+'</td>'+
+          '<td>'+esc(d.categoria)+'</td>'+
+          '<td style="color:var(--slate-400);">'+esc(d.descricao || '')+'</td>'+
+          '<td style="text-align:right;">'+fmtBRL(toNum(d.valor))+'</td>'+
+          '<td><button class="fin2-btn danger mini" data-del-despesa="'+escAttr(d.id)+'">Excluir</button></td></tr>';
+      }).join('');
+    tb.querySelectorAll('[data-del-despesa]').forEach(function(b){
+      b.addEventListener('click', function(){ excluirDespesa(b.dataset.delDespesa); });
+    });
+  } else {
+    tb.innerHTML = '<tr><td class="empty" colspan="6">Nenhuma despesa lançada no período.</td></tr>';
+  }
+}
+function fin2RenderCaixas(){
   var cxs = latestByLoja(state.vendasRaw);
   var cxEl = $('#fin-caixas');
   if(cxs.length){
@@ -1364,12 +1983,12 @@ async function renderFinanc(){
       cxs.map(function(v){
         var cx = v.caixa || {};
         var aberto = !!cx.aberto;
-        var ua = (v.ultimaVenda||v.enviadoEm||'');
+        var ua = (v.ultimaVenda || v.enviadoEm || '');
         var uaTxt = '—';
         var dt = new Date(ua);
         if(!isNaN(dt)) uaTxt = dt.toLocaleDateString('pt-BR')+' '+dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-        return '<tr><td><b>'+esc(v.lojaNome||v.lojaId)+'</b></td><td>'+esc(v.pdvNome||'—')+'</td>'+
-          '<td>'+esc(cx.numero||'—')+'</td>'+
+        return '<tr><td><b>'+esc(v.lojaNome || v.lojaId)+'</b></td><td>'+esc(v.pdvNome || '—')+'</td>'+
+          '<td>'+esc(cx.numero || '—')+'</td>'+
           '<td><span class="pill '+(aberto?'pill-green':'pill-red')+'">'+(cx.numero?(aberto?'Aberto':'Fechado'):'Sem caixa')+'</span></td>'+
           '<td style="color:var(--slate-400);font-size:11px;">'+esc(uaTxt)+'</td>'+
           '<td>'+efetivoTxt(v)+'</td></tr>';
@@ -1377,36 +1996,21 @@ async function renderFinanc(){
   } else {
     cxEl.innerHTML = '<tr><td class="empty" colspan="6">Nenhum snapshot recebido ainda — o PDV envia sozinho assim que emparelha.</td></tr>';
   }
-  var cxAbertos = cxs.filter(function(v){ return v.caixa && v.caixa.aberto; }).length;
-  setCardCount('#fin-caixas-count', cxs.length ? (fmtInt(cxs.length)+' PDV(s) · '+fmtInt(cxAbertos)+' caixa(s) aberto(s)') : 'sem snapshot');
-
-  var lojas = aggPorLoja(rows);
-  var tb = $('#fin-tabela');
-  if(lojas.length){
-    tb.innerHTML = '<tr><th>Loja</th><th>PDV</th><th>Receita</th><th>Dinheiro</th><th>Débito</th><th>Crédito</th><th>PIX</th><th>Pedidos</th><th>Ticket médio</th></tr>' +
-      lojas.map(function(l){
-        var tic = l.pedidos ? l.total/l.pedidos : 0;
-        return '<tr><td><b>'+esc(l.nome)+'</b></td><td>'+esc(l.pdv)+'</td>'+
-          '<td>'+fmtBRL(l.total)+'</td>'+
-          '<td>'+fmtBRL(l.meios.dinheiro)+'</td><td>'+fmtBRL(l.meios.debito)+'</td>'+
-          '<td>'+fmtBRL(l.meios.credito)+'</td><td>'+fmtBRL(l.meios.pix)+'</td>'+
-          '<td>'+fmtInt(l.pedidos)+'</td><td>'+fmtBRL(tic)+'</td></tr>';
-      }).join('');
-  } else {
-    tb.innerHTML = '<tr><td class="empty" colspan="9">Sem vendas no período.</td></tr>';
-  }
-  setCardCount('#fin-tabela-count', lojas.length ? (fmtInt(lojas.length)+' loja(s) · '+fmtBRL(a.total)+' · '+fmtInt(a.pedidos)+' pedido(s)') : 'sem vendas no período');
-
-  var peds = state.pedidos.filter(function(p){ return cut ? (p.data||'') >= dayStr(cut) : true; })
-    .sort(function(a,b){ return String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')); });
+  var abertos = cxs.filter(function(v){ return v.caixa && v.caixa.aberto; }).length;
+  setCardCount('#fin-caixas-count', cxs.length ? (fmtInt(cxs.length)+' PDV(s) · '+fmtInt(abertos)+' caixa(s) aberto(s)') : 'sem snapshot');
+}
+function fin2RenderPedidos(agg){
+  var peds = agg.pedidosPeriodo.slice().sort(function(a,b){
+    return String(b.criadoEm || '').localeCompare(String(a.criadoEm || ''));
+  });
   var ptb = $('#fin-pedidos');
   ptb.innerHTML = pedidosTabelaHTML(peds, 200);
   bindPedidoVer(ptb);
-  var pedLiquidos = peds.filter(function(p){ return p.status!=='cancelado'; });
-  var totPed = pedLiquidos.reduce(function(s,p){ return s + toNum(p.total); }, 0);
-  var cancelados = peds.length - pedLiquidos.length;
+  var liquidos = peds.filter(function(p){ return p.status !== 'cancelado'; });
+  var tot = liquidos.reduce(function(s,p){ return s + toNum(p.total); }, 0);
+  var canc = peds.length - liquidos.length;
   setCardCount('#fin-pedidos-count', peds.length
-    ? (fmtInt(pedLiquidos.length)+' pedido(s) · '+fmtBRL(totPed)+(cancelados?' · '+fmtInt(cancelados)+' cancelado(s)':''))
+    ? (fmtInt(liquidos.length)+' pedido(s) · '+fmtBRL(tot)+(canc ? ' · '+fmtInt(canc)+' cancelado(s)' : ''))
     : 'nenhum pedido no período');
 }
 
@@ -1457,7 +2061,6 @@ function bindPeriodTabs(sel, onPeriod){
     });
   });
 }
-bindPeriodTabs('#fin-periodo', function(p){ state.finPeriodo = p; renderFinanc(); });
 bindPeriodTabs('#fluxo-periodo', function(p){ state.fluxoPeriodo = p; renderFluxo(); });
 
 // ——— FINANCEIRO: tabelas recolhidas (seta no título) ———
@@ -1481,11 +2084,10 @@ function bindCardToggle(headId, wrapId, caretId){
   return { abrir: function(){ aplicar(true); } };
 }
 bindCardToggle('#fin-caixas-toggle', '#fin-caixas-wrap', '#fin-caixas-caret');
-bindCardToggle('#fin-tabela-toggle', '#fin-tabela-wrap', '#fin-tabela-caret');
 bindCardToggle('#fin-pedidos-toggle', '#fin-pedidos-wrap', '#fin-pedidos-caret');
 function setCardCount(id, txt){ var el = $(id); if(el) el.textContent = txt || ''; }
 
-// ——— DESPESAS & TAXAS ———
+// ——— DESPESAS (dentro do Financeiro) ———
 function loadDespesas(){
   if(!state._despProm || state._despDirty || !cacheFresh(state._despAt)){
     state._despDirty = false;
@@ -1497,126 +2099,13 @@ function loadDespesas(){
   }
   return state._despProm;
 }
-async function renderDespesas(){
-  if(!$('#f-desp-data').value) $('#f-desp-data').value = dayStr(new Date());
-  var lojaSel = $('#f-desp-loja');
-  if(lojaSel && lojaSel.options.length === 0){
-    lojaSel.innerHTML = '<option value="">Geral / despesa da operação</option>' +
-      state.lojas.map(function(l){ return '<option value="'+escAttr(l.id)+'">'+esc(l.nome)+'</option>'; }).join('');
-  }
-  await Promise.all([getVendas(), getPedidos(), loadDespesas(), getParametros()]);
-  var period = state.despesasPeriodo;
-  var cut = periodCutoff(period);
-  var despRows = state.despesas.filter(function(d){ return cut ? (d.data||'') >= dayStr(cut) : true; });
-  var totalDesp = despRows.reduce(function(s,d){ return s + toNum(d.valor); }, 0);
-
-  // Receita do DRE: pedidos reais (pago/impresso) — cada item e cada pagamento
-  // enviados pelo PDV. Se ainda não houver pedido no período, cai no snapshot
-  // diário (vendas.push) para o resultado nunca aparecer zerado por atraso.
-  var pedRows = state.pedidos.filter(function(p){
-    if(p.status !== 'pago' && p.status !== 'impresso') return false;
-    return cut ? (p.data||'') >= dayStr(cut) : true;
-  });
-  var vendasRows = state.vendasRaw.filter(function(v){ return cut ? (v.data||'') >= dayStr(cut) : true; });
-  var receita = pedRows.reduce(function(s,p){ return s + toNum(p.total); }, 0);
-  var baseDre = pedRows.length
-    ? fmtInt(pedRows.length)+' pedido(s) consolidado(s)'
-    : 'snapshot(s) diário(s) — nenhum pedido consolidado no período';
-  if(!pedRows.length) receita = aggVendas(vendasRows).total;
-
-  var params = state.parametros || {};
-  var unidades = pedRows.reduce(function(s,p){ return s + toNum(p.unidadesTotal); }, 0);
-  var custoRibbon = unidades * toNum(params.custoRibbonUnitario);
-  // Comissões: aplica o % sobre a receita dos operadores de cada função
-  // (vendedor/fotógrafo), usando o cadastro de colaboradores do portal.
-  var revVend = 0, revFoto = 0;
-  pedRows.forEach(function(p){
-    var nome = String(p.operador||'');
-    var u = state.usuarios.find(function(x){
-      if(String(x.nome)!==nome && String(x.usuario)!==nome) return false;
-      // nomes repetidos entre lojas: prioriza o colaborador da loja do pedido
-      return !p.lojaId || !x.lojaId || x.lojaId === p.lojaId;
-    });
-    var f = u ? u.funcao : '';
-    if(f === 'vendedor') revVend += toNum(p.total);
-    else if(f === 'fotografo') revFoto += toNum(p.total);
-  });
-  var comVend = revVend * toNum(params.comissaoVendedor)/100;
-  var comFoto = revFoto * toNum(params.comissaoFotografo)/100;
-  var resultado = receita - totalDesp - custoRibbon - comVend - comFoto;
-  var margem = receita > 0 ? (resultado/receita*100) : 0;
-
-  $('#desp-kpis').innerHTML =
-    kpi('Receita ('+typeVal(null,period)+')', fmtBRL(receita), pedRows.length+' pedido(s)', 'ok') +
-    kpi('Despesas ('+typeVal(null,period)+')', fmtBRL(totalDesp), despRows.length+' lançamento(s)', despRows.length?'ok':'alert') +
-    kpi('Custo de ribbon', fmtBRL(custoRibbon), fmtInt(unidades)+' unidade(s)', unidades?'ok':'alert') +
-    kpi('Comissões', fmtBRL(comVend+comFoto), 'vendedoras + fotógrafos', (comVend+comFoto)?'ok':'alert') +
-    kpi('Resultado', fmtBRL(resultado), resultado>=0 ? 'lucro no período' : 'prejuízo no período', resultado>=0?'ok':'alert') +
-    kpi('Margem', (receita>0?margem.toFixed(1):'—')+'%', 'resultado ÷ receita', resultado>=0?'ok':'alert');
-
-  var dre = $('#desp-dre');
-  if(dre){
-    var zeroParams = !toNum(params.custoRibbonUnitario) && !toNum(params.comissaoVendedor) && !toNum(params.comissaoFotografo);
-    dre.innerHTML =
-      '<tr><th>Descrição</th><th style="text-align:right;">Valor</th></tr>' +
-      '<tr><td>Receita de vendas</td><td style="text-align:right;"><b>'+fmtBRL(receita)+'</b></td></tr>' +
-      '<tr><td style="color:var(--slate-400);">(−) Despesas lançadas</td><td style="text-align:right;color:var(--red-400);">−'+fmtBRL(totalDesp)+'</td></tr>' +
-      '<tr><td style="color:var(--slate-400);">(−) Custo de ribbon ('+fmtInt(unidades)+' un. × '+fmtBRL(toNum(params.custoRibbonUnitario))+')</td><td style="text-align:right;color:var(--red-400);">−'+fmtBRL(custoRibbon)+'</td></tr>' +
-      '<tr><td style="color:var(--slate-400);">(−) Comissão vendedoras ('+toNum(params.comissaoVendedor)+'% de '+fmtBRL(revVend)+')</td><td style="text-align:right;color:var(--red-400);">−'+fmtBRL(comVend)+'</td></tr>' +
-      '<tr><td style="color:var(--slate-400);">(−) Comissão fotógrafos ('+toNum(params.comissaoFotografo)+'% de '+fmtBRL(revFoto)+')</td><td style="text-align:right;color:var(--red-400);">−'+fmtBRL(comFoto)+'</td></tr>' +
-      '<tr><td><b>'+(resultado>=0?'Lucro do período':'Prejuízo do período')+'</b></td><td style="text-align:right;"><b style="color:'+(resultado>=0?'var(--green-500)':'var(--red-400)')+';">'+fmtBRL(resultado)+'</b></td></tr>' +
-      (zeroParams ? '<tr><td colspan="2" style="color:var(--amber-500);font-size:12px;">Configure custo de ribbon e comissões em <b>Configurações → Parâmetros financeiros</b> para o resultado ficar completo.</td></tr>' : '');
-    var baseEl = $('#desp-dre-base');
-    if(baseEl) baseEl.textContent = 'Base da receita: '+baseDre+' · '+fmtInt(pedRows.reduce(function(s,p){ return s + toNum(p.unidadesTotal); },0))+' unidade(s) de ribbon.';
-  }
-
-  var tb = $('#tabela-despesas');
-  if(despRows.length){
-    tb.innerHTML = '<tr><th>Data</th><th>Loja</th><th>Categoria</th><th>Descrição</th><th>Valor</th><th></th></tr>' +
-      despRows.map(function(d){
-        var loja = d.lojaId && state.lojas.find(function(l){ return l.id===d.lojaId; });
-        return '<tr><td style="white-space:nowrap;">'+d.data+'</td>'+
-          '<td>'+esc(loja ? loja.nome : (d.lojaId || 'Geral'))+'</td>'+
-          '<td>'+esc(d.categoria)+'</td>'+
-          '<td style="color:var(--slate-400);">'+esc(d.descricao||'')+'</td>'+
-          '<td>'+fmtBRL(toNum(d.valor))+'</td>'+
-          '<td><button class="btn btn-ghost" style="padding:3px 8px;font-size:11px;color:var(--red-400);border-color:var(--red-400);" data-del-despesa="'+escAttr(d.id)+'">Excluir</button></td></tr>';
-      }).join('');
-    tb.querySelectorAll('[data-del-despesa]').forEach(function(b){
-      b.addEventListener('click', function(){ excluirDespesa(b.dataset.delDespesa); });
-    });
-  } else {
-    tb.innerHTML = '<tr><td class="empty" colspan="6">Nenhuma despesa lançada no período.</td></tr>';
-  }
-}
 async function excluirDespesa(id){
   var res = await call('despesas.delete', { id:id });
-  if(!res || !res.ok){ toast((res&&res.error)||'Falha ao excluir', true); return; }
+  if(!res || !res.ok){ toast((res && res.error) || 'Falha ao excluir', true); return; }
   toast('Despesa excluída');
   state._despDirty = true;
-  renderDespesas();
+  renderFinanc();
 }
-$('#btn-lancar-despesa').addEventListener('click', async function(){
-  var valor = parseFloat($('#f-desp-valor').value);
-  var data = $('#f-desp-data').value;
-  if(isNaN(valor) || valor <= 0){ toast('Informe um valor maior que zero', true); return; }
-  if(!data){ toast('Informe a data', true); return; }
-  var res = await call('despesas.save', {
-    lojaId: $('#f-desp-loja').value || '',
-    data: data,
-    categoria: $('#f-desp-categoria').value,
-    descricao: $('#f-desp-desc').value.trim(),
-    valor: valor
-  });
-  if(!res || !res.ok){ toast((res&&res.error)||'Falha ao lançar', true); return; }
-  toast('Despesa lançada');
-  $('#f-desp-valor').value = '';
-  $('#f-desp-desc').value = '';
-  notif('💸','Despesa lançada', res.despesa.categoria+' — '+fmtBRL(res.despesa.valor)+' ('+res.despesa.data+')');
-  state._despDirty = true;
-  renderDespesas();
-});
-bindPeriodTabs('#desp-periodo', function(p){ state.despesasPeriodo = p; renderDespesas(); });
 
 // ——— ESTOQUE (papel/ribbon via snapshot do PDV) ———
 // O PDV reporta o PAPEL REAL da impressora (10x15/15x20, via checkPrinter do

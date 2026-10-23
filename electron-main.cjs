@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
@@ -234,6 +234,196 @@ function startJavaSidecar() {
   javaProcess.on('close', (code) => { console.log(`[Java] Finalizado (${code})`); javaProcess = null; });
 }
 
+// ─── 2b. Importador de fotos do cartao (Pegar_Fotos headless) ─
+// Sobe junto do PDV, sem janela. O importador vigia/baixa os lotes do cartao
+// (porta 8099 + descoberta UDP 50000) e grava em <photosFolder>\_cartao; o
+// sidecar transforma cada lote em sessao. O PDV mostra o status via
+// GET /api/import/status (proxy do sidecar).
+const IMPORTER_PORT = 8099;
+const IMPORTER_MAX_RESTARTS = 5;
+let importerProcess = null;
+let importerPid = null;
+let importerRestartCount = 0;
+let importerStopping = false;
+let importerFolderRetries = 0;
+let importerBusy = false;
+
+function getImporterPath() {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'importador', 'Natal_Foto_Import.exe');
+  return path.join(__dirname, 'tools', 'pegar-fotos', 'dist', 'Natal_Foto_Import.exe');
+}
+function importerScriptPath() {
+  return path.join(__dirname, 'tools', 'pegar-fotos', 'app.py');
+}
+function importerConfigFile() {
+  return path.join(app.getPath('userData'), 'importador-config.json');
+}
+function importerLogFile() {
+  return path.join(app.getPath('userData'), 'logs', 'importador.log');
+}
+
+function fetchJson(port, urlPath, host = '127.0.0.1', timeout = 2000) {
+  return new Promise((resolve) => {
+    const req = http.get({ host, port, path: urlPath, timeout }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; if (data.length > 256 * 1024) { req.destroy(); resolve(null); } });
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+    });
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.on('error', () => resolve(null));
+  });
+}
+
+async function importerStatus() {
+  return fetchJson(IMPORTER_PORT, '/api/status', '127.0.0.1', 1500);
+}
+
+// O exe onefile do PyInstaller pode rodar como pai + filho; matar só o PID
+// inicial deixa o filho escutando a porta 8099. No Windows usamos taskkill /T.
+function killImporterPid(pid) {
+  if (!pid) return;
+  try {
+    if (process.platform === 'win32') spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
+    else process.kill(pid);
+  } catch {}
+}
+
+async function resolverImportFolder() {
+  const cfg = await fetchJson(9877, '/api/config');
+  if (!cfg) return null;
+  const base = String(cfg.photosFolder || '').trim();
+  if (!base) return null;
+  const folder = String(cfg.importFolder || '').trim() || path.join(base, '_cartao');
+  return { folder };
+}
+
+async function startImporter() {
+  if (importerBusy || importerStopping) return;
+  importerBusy = true;
+  try {
+    await startImporterInner();
+  } finally {
+    importerBusy = false;
+  }
+}
+
+async function startImporterInner() {
+  if (importerStopping) return;
+  if (importerRestartCount >= IMPORTER_MAX_RESTARTS) {
+    console.warn('[Importador] Limite de reinicios atingido. Importador desativado.');
+    return;
+  }
+  const info = await resolverImportFolder();
+  if (!info) {
+    // Sidecar ainda subindo ou maquina sem pasta de fotos (wizard). Tenta por
+    // ate 2 min; depois so reinicia com um save de config (IPC).
+    if (importerFolderRetries++ < 24) setTimeout(startImporter, 5000);
+    return;
+  }
+  importerFolderRetries = 0;
+
+  const exe = getImporterPath();
+  const script = importerScriptPath();
+  const usarExe = fs.existsSync(exe);
+  if (!usarExe && !fs.existsSync(script)) {
+    console.warn('[Importador] Executavel/script nao encontrado. Fotos do cartao desativadas.');
+    return;
+  }
+
+  // Instancia orfa de uma execucao anterior: adota se estiver na mesma pasta,
+  // senao mata para relancar com a config atual.
+  const atual = await importerStatus();
+  if (atual && atual.ok) {
+    if (path.resolve(atual.root || '') === path.resolve(info.folder)) {
+      importerPid = atual.pid || null;
+      console.warn(`[Importador] Ja rodando em ${info.folder} (pid ${importerPid}). Usando a instancia existente.`);
+      return;
+    }
+    if (atual.pid) {
+      console.warn(`[Importador] Rodando em pasta antiga (${atual.root}). Substituindo...`);
+      try { killImporterPid(atual.pid); } catch {}
+      for (let i = 0; i < 20; i++) {
+        if (!(await isPortInUse(IMPORTER_PORT))) break;
+        await sleep(200);
+      }
+    }
+  }
+  if (await isPortInUse(IMPORTER_PORT)) {
+    console.warn('[Importador] Porta 8099 ocupada por outro programa. Tentando de novo em 5s.');
+    setTimeout(startImporter, 5000);
+    return;
+  }
+
+  const args = [
+    '--headless',
+    '--root', info.folder,
+    '--port', String(IMPORTER_PORT),
+    '--config', importerConfigFile(),
+    '--no-firewall',
+    '--log', importerLogFile(),
+  ];
+  const cmd = usarExe ? exe : 'python';
+  const cmdArgs = usarExe ? args : [script, ...args];
+  fs.mkdirSync(path.dirname(importerLogFile()), { recursive: true });
+  fs.mkdirSync(info.folder, { recursive: true });
+
+  console.log(`[Importador] Iniciando (${usarExe ? 'exe' : 'python'}) -> ${info.folder}`);
+  importerProcess = spawn(cmd, cmdArgs, { windowsHide: true, env: { ...process.env } });
+  importerPid = importerProcess.pid || null;
+  let importerSpawnError = false;
+  importerProcess.on('error', (e) => {
+    importerSpawnError = true;
+    console.error('[Importador] Falha ao iniciar:', e.message);
+    importerProcess = null;
+    importerPid = null;
+    importerRestartCount++;
+    setTimeout(startImporter, 5000);
+  });
+  if (importerProcess.stdout) importerProcess.stdout.on('data', (d) => console.log(`[Importador] ${d}`.trim()));
+  if (importerProcess.stderr) importerProcess.stderr.on('data', (d) => console.error(`[Importador] ${d}`.trim()));
+  importerProcess.on('close', (code) => {
+    console.warn(`[Importador] Finalizado (${code})`);
+    importerProcess = null;
+    if (importerSpawnError || importerStopping || code === 0 || code === null) return;
+    importerRestartCount++;
+    setTimeout(startImporter, 3000);
+  });
+
+  // Se em 6s nao responder, mata e tenta de novo (porta nao subiu).
+  setTimeout(async () => {
+    if (importerStopping || !importerProcess) return;
+    const st = await importerStatus();
+    if (!st || !st.ok) {
+      console.warn('[Importador] Nao respondeu em 6s. Relancando...');
+      importerRestartCount++;
+      killImporterPid(importerProcess.pid);
+      setTimeout(startImporter, 1500);
+    }
+  }, 6000);
+}
+
+function stopImporter() {
+  importerStopping = true;
+  const pid = (importerProcess && importerProcess.pid) || importerPid;
+  if (pid) {
+    console.log(`[Importador] Finalizando (pid ${pid})...`);
+    killImporterPid(pid);
+  }
+  importerProcess = null;
+  importerPid = null;
+}
+
+function restartImporter() {
+  importerStopping = true;
+  const pid = (importerProcess && importerProcess.pid) || importerPid;
+  if (pid) killImporterPid(pid);
+  importerProcess = null;
+  importerPid = null;
+  importerRestartCount = 0;
+  importerFolderRetries = 0;
+  setTimeout(() => { importerStopping = false; startImporter(); }, 800);
+}
+
 // ─── 3. Janela principal ────────────────────────────────────
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -289,6 +479,18 @@ ipcMain.handle('natal:saveConfig', async (_event, partial) => {
   config = { ...config, ...partial };
   try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8'); } catch {}
   return { success: true };
+});
+// Reinicia o importador depois de salvar pasta/config (a raiz pode ter mudado).
+ipcMain.handle('natal:restartImporter', async () => {
+  restartImporter();
+  return { success: true };
+});
+// Abre uma pasta/arquivo no Explorer (botoes da aba "Cartao").
+ipcMain.handle('natal:openPath', async (_event, target) => {
+  const p = String(target || '').trim();
+  if (!p) return { success: false, error: 'caminho vazio' };
+  const err = await shell.openPath(p);
+  return err ? { success: false, error: err } : { success: true };
 });
 
 // ─── 5. IPC: impressão da guia (impressora térmica via driver) ──
@@ -387,6 +589,7 @@ app.whenReady().then(() => {
   startSidecar();
   startJavaSidecar();
   createWindow();
+  setTimeout(startImporter, 4000);
 
   setTimeout(() => {
     performAutoUpdate();
@@ -399,6 +602,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
 app.on('will-quit', () => {
+  stopImporter();
   for (const [name, proc] of [['Sidecar', sidecarProcess], ['Java', javaProcess]]) {
     if (proc) { console.log(`[${name}] Finalizando...`); proc.kill(); }
   }

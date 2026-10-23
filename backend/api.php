@@ -642,6 +642,11 @@ const PARAMS_DEFAULT = [
     'comissaoVendedor' => 0.0,
     'comissaoFotografo' => 0.0,
     'ribbonCritico' => 100.0,
+    // Taxas das maquininhas/PSP aplicadas sobre o faturamento por forma de
+    // pagamento no Financeiro (dinheiro não tem taxa).
+    'taxaCredito' => 0.0,
+    'taxaDebito' => 0.0,
+    'taxaPix' => 0.0,
 ];
 
 function parametrosEfetivos(): array
@@ -656,6 +661,9 @@ function parametrosEfetivos(): array
     }
     $out['custoRibbonUnitario'] = round($out['custoRibbonUnitario'], 2);
     $out['ribbonCritico'] = round($out['ribbonCritico'], 0);
+    foreach (['taxaCredito', 'taxaDebito', 'taxaPix'] as $k) {
+        $out[$k] = round($out[$k], 2);
+    }
     return $out;
 }
 

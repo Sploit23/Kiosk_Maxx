@@ -193,7 +193,7 @@ function sanitizeSegment(s) {
 // ─── Config da máquina ───────────────────────────────────────
 // machineId: gerado pelo PDV no primeiro boot e persistido aqui — identifica
 // a máquina física p/ emparelhamento no portal (kiosk.pair) e carimbos futuros.
-const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', lojaNome: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM' };
+const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', lojaNome: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM', importFolder: '', importSessoes: true };
 let machineConfig = { ...MACHINE_DEFAULTS, ...readJson(CONFIG_FILE, {}) };
 
 // ─── Backup da identidade (machineId + kioskCode) ────────────
@@ -321,7 +321,36 @@ function getFtpConfig() {
 function configPublica() {
   const { ftpPass, ...resto } = machineConfig;
   void ftpPass;
-  return { ...resto, ribbon: getRibbon() };
+  return { ...resto, importFolder: getImportFolder(), importFolderCustom: String(machineConfig.importFolder || ''), ribbon: getRibbon() };
+}
+
+// ─── Pasta dos lotes do cartao (importador embutido) ─────────
+// O importador (Pegar_Fotos headless) grava lotes NATAL-S#### nessa pasta.
+// Default: <photosFolder>\_cartao. Pode ser trocada no ⚙ (ex.: outro disco).
+function getImportFolder() {
+  const custom = String(machineConfig.importFolder || '').trim();
+  if (custom) return custom;
+  const base = String(machineConfig.photosFolder || '').trim();
+  return base ? path.join(base, '_cartao') : '';
+}
+// Subpastas de photosFolder que NAO sao drop zone de sessao.
+function pastasReservadas(folder) {
+  const reservadas = new Set(['importadas']);
+  const imp = getImportFolder();
+  try {
+    if (imp) {
+      const base = path.resolve(folder);
+      const alvo = path.resolve(imp);
+      if (alvo === base) return reservadas;
+      if (alvo.startsWith(base + path.sep)) {
+        // ignora o primeiro nivel que leva ate a pasta dos lotes (evita varrer
+        // o cartao inteiro a cada poll e criar sessao da pasta-mae dos lotes)
+        const first = path.relative(base, alvo).split(path.sep)[0];
+        if (first) reservadas.add(first);
+      }
+    }
+  } catch {}
+  return reservadas;
 }
 
 // ─── Importador de pasta de fotos (drop zone por sessão) ─────
@@ -358,10 +387,17 @@ if (pastaPendentes) console.log(`[natal-core] ${pastaPendentes} pasta(s) ja impo
 
 function ensurePhotosWatcher() {
   const folder = (machineConfig.photosFolder || '').trim();
+  const importFolder = machineConfig.importSessoes !== false ? getImportFolder() : '';
+  if (importFolder) {
+    try { fs.mkdirSync(importFolder, { recursive: true }); } catch {}
+  }
   if (photosWatcherTimer) { clearInterval(photosWatcherTimer); photosWatcherTimer = null; }
-  if (!folder) { dropState.clear(); return; }
+  if (!folder && !importFolder) { dropState.clear(); return; }
   photosWatcherTimer = setInterval(() => {
-    scanPhotosFolder(folder).catch((e) => console.error('[natal-core] scan photos:', e.message));
+    const tarefas = [];
+    if (folder) tarefas.push(scanPhotosFolder(folder));
+    if (importFolder) tarefas.push(scanImportFolder(importFolder));
+    Promise.all(tarefas).catch((e) => console.error('[natal-core] scan photos:', e.message));
   }, PHOTOS_POLL_MS);
 }
 
@@ -404,8 +440,11 @@ function sessionCriadaEm(subPath, photos) {
 async function scanPhotosFolder(folder) {
   if (importingLock) return;
   const now = Date.now();
+  const reservadas = pastasReservadas(folder);
   for (const sub of safeReadDir(folder)) {
-    if (sub === 'importadas') continue;
+    if (reservadas.has(sub)) continue;
+    // pastas ocultas/temporarias (.tmp_importando_*) nunca sao sessoes
+    if (sub.startsWith('.')) continue;
     const subPath = path.join(folder, sub);
     let st;
     try { st = fs.statSync(subPath); } catch { continue; }
@@ -460,6 +499,54 @@ async function scanPhotosFolder(folder) {
   }
 }
 
+// ─── Lotes do cartao (pasta do importador embutido) ─────────
+// Cada subpasta com o marcador `.natal_done` (gravado pelo importador DEPOIS
+// de copiar tudo) vira uma sessao PRONTA, sem esperar o programa externo.
+// Sem o marcador, o lote ainda esta sendo copiado -> espera.
+async function scanImportFolder(folder) {
+  if (importingLock) return;
+  const now = Date.now();
+  for (const sub of safeReadDir(folder)) {
+    if (sub.startsWith('.') || sub.startsWith('_')) continue;
+    const subPath = path.join(folder, sub);
+    let st;
+    try { st = fs.statSync(subPath); } catch { continue; }
+    if (!st.isDirectory()) continue;
+    if (!fs.existsSync(path.join(subPath, '.natal_done'))) continue; // cópia em andamento
+
+    const chave = path.resolve(subPath);
+    const snapAtual = snapshotOf(subPath);
+    const jaImportada = pastaImportadas[chave];
+    const mesmoConteudo = !!(jaImportada && typeof jaImportada === 'object' && jaImportada.snap === snapAtual);
+    if (mesmoConteudo) continue;
+
+    const stateKey = 'cartao:' + sub;
+    const photos = listImageEntries(subPath);
+    // Lote só com RAW/HEIC/vídeo: o sidecar não sabe servir — ignora (o
+    // fotógrafo precisa exportar JPEG; o importador pode converter no cartao).
+    if (photos.length === 0) continue;
+
+    const prev = dropState.get(stateKey);
+    if (!prev) {
+      dropState.set(stateKey, { first: now, lastChange: now, snap: snapAtual });
+      continue;
+    }
+    if (prev.snap !== snapAtual) {
+      dropState.set(stateKey, { ...prev, lastChange: now, snap: snapAtual });
+      continue;
+    }
+    if (now - prev.lastChange < PHOTOS_SETTLE_MS) continue;
+
+    importingLock = true;
+    try {
+      await importarSubpastaSessao(subPath, sub, photos, !!jaImportada);
+      if (pastaImportadas[chave]) dropState.delete(stateKey);
+    } finally {
+      importingLock = false;
+    }
+  }
+}
+
 async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
   // Re-settle que voltou ao conteúdo JÁ importado (mudança transitória):
   // não cria sessão duplicada.
@@ -468,6 +555,7 @@ async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
     const ant = pastaImportadas[chave];
     if (ant && typeof ant === 'object' && ant.snap === snapshotOf(subPath)) {
       dropState.delete(sub);
+      dropState.delete('cartao:' + sub);
       return;
     }
   }
@@ -1465,6 +1553,49 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
       setMachineConfig(body);
       return sendJson(res, 200, { success: true, config: configPublica() });
+    }
+    // ── Importador de fotos do cartao (Pegar_Fotos headless) ──
+    // Proxy do /api/status do importador (porta 8099) + sessoes ja criadas por
+    // lote. O PDV usa isso na aba "Cartao" e no chip da topbar.
+    if (method === 'GET' && p === '/api/import/status') {
+      const importFolder = getImportFolder();
+      let importer = null;
+      try {
+        const resp = await fetch('http://127.0.0.1:8099/api/status', {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(1500),
+        });
+        if (resp.ok) importer = await resp.json();
+      } catch {}
+      const sessoes = {};
+      for (const [abs, reg] of Object.entries(pastaImportadas)) {
+        if (reg && typeof reg === 'object' && reg.id) sessoes[path.basename(abs)] = reg.id;
+      }
+      return sendJson(res, 200, {
+        success: true,
+        online: !!(importer && importer.ok),
+        importFolder,
+        importSessoes: machineConfig.importSessoes !== false,
+        importer: importer || null,
+        sessoes,
+      });
+    }
+    // Botao "Procurar agora" da aba Cartao: forca o importador a buscar o cartao.
+    if (method === 'POST' && p === '/api/import/sincronizar') {
+      let ok = false;
+      let erro = null;
+      try {
+        const resp = await fetch('http://127.0.0.1:8099/api/sync-now', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(8000),
+        });
+        ok = resp.ok;
+        if (!resp.ok) erro = 'HTTP ' + resp.status;
+      } catch (e) {
+        erro = e.message || String(e);
+      }
+      return sendJson(res, ok ? 200 : 502, { success: ok, error: erro });
     }
 
     // ── Outbox do portal (fila durável de envio) ──────────────
