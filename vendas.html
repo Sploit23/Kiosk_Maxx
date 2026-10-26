@@ -161,6 +161,11 @@
   .op-chip.ribbon-critical .dot{background:var(--red-400);animation:blink 1s infinite;}
   .op-chip.ribbon-printing{border-color:var(--gold-500);color:var(--gold-300);box-shadow:0 0 0 2px rgba(212,162,76,.25);}
   .op-chip.ribbon-printing .dot{background:var(--gold-500);animation:blink 1s infinite;}
+  .op-chip.peer-lost{border-color:var(--red-400);color:var(--red-400);background:rgba(193,102,107,.12);box-shadow:0 0 0 2px rgba(193,102,107,.35);}
+  .op-chip.peer-lost:hover{border-color:var(--red-400);color:var(--red-400);}
+  .op-chip .peer-alert-dot{width:8px;height:8px;border-radius:50%;background:var(--red-400);box-shadow:0 0 8px rgba(193,102,107,.9);display:none;flex:0 0 auto;animation:blink 1s infinite;}
+  .op-chip.peer-lost .peer-alert-dot{display:inline-block;}
+  .op-chip.peer-lost .peer-alert-name{font-weight:800;animation:blink 1s infinite;}
   /* chip de sincronização PDV → portal (offline-first) */
   .sync-chip{cursor:default;font-size:11.5px;}
   .sync-chip.sync-ok{border-color:var(--green-500);color:var(--green-300);}
@@ -1107,6 +1112,21 @@
     border:1px solid rgba(60,90,140,.2);background:#f2f3f6;color:#45546a;user-select:none;
   }
   .np-ok{background:linear-gradient(135deg,#d4a24c,#e6bd6e);color:#1b2a41;border-color:transparent;}
+  /* ===== TECLADO DE LETRAS (nome do reforço na abertura de caixa) ===== */
+  .eq-kb{flex:0 0 430px;max-width:100%;background:var(--navy-900);border:1px solid var(--navy-line);border-radius:12px;padding:10px;box-sizing:border-box;}
+  .eq-kb-row{display:flex;gap:6px;margin-bottom:6px;}
+  .eq-kb-row:last-child{margin-bottom:0;}
+  .eq-kb-key{
+    flex:1;min-width:0;min-height:42px;border:1px solid rgba(60,90,140,.35);
+    background:#ffffff;color:#0a1626;font-family:Arial,sans-serif;font-size:15px;font-weight:700;
+    border-radius:9px;cursor:pointer;user-select:none;
+  }
+  .eq-kb-key:hover{background:#eaf2ff;border-color:rgba(212,162,76,.6);}
+  .eq-kb-key:active{transform:scale(.96);}
+  .eq-kb-key.space{flex:4;}
+  .eq-kb-key.del,.eq-kb-key.clr{flex:2;background:#f2f3f6;color:#45546a;font-size:13px;}
+  .eq-kb-key.add{flex:3;background:linear-gradient(135deg,#d4a24c,#e6bd6e);color:#1b2a41;border-color:transparent;font-size:13px;}
+  .eq-avulso-campo{flex:1 1 300px;min-width:0;}
 </style>
 <script>try{if(localStorage.getItem('natal-theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch{}</script>
 </head>
@@ -1184,7 +1204,7 @@
     <div class="op-chip sales-eye" id="sales-eye">
       <span id="sales-eye-icon">👁️</span> <span id="sales-eye-value">Vendas de hoje</span>
     </div>
-    <button class="op-chip op-chip-btn" id="import-chip" style="display:none;" title="Cartão de memória e conexão com o outro PC"><span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6l2-4z"/><path d="M9 2v5h7V2"/><path d="M9 12h6M9 16h6"/></svg></span><span id="import-chip-txt">Cartão</span></button>
+    <button class="op-chip op-chip-btn" id="import-chip" style="display:none;" title="Cartão de memória e conexão com o outro PC"><span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6l2-4z"/><path d="M9 2v5h7V2"/><path d="M9 12h6M9 16h6"/></svg></span><span class="peer-alert-dot" aria-hidden="true"></span><span id="import-chip-txt">Cartão</span></button>
     <div class="op-chip" id="ribbon-chip">🖨️ Ribbon: — un.</div>
     <button class="op-chip op-chip-btn" id="user-chip">👤 —</button>
     <button class="op-chip op-chip-btn" id="btn-config" title="Configurações">⚙</button>
@@ -2353,6 +2373,22 @@ function renderSyncChip(){
    Aqui só mostramos o estado (chip da topbar + aba "Cartão" do ⚙). */
 let _importStatus = null;
 
+let _peerLast = null;
+function peerLastGet(){
+  if(_peerLast) return _peerLast;
+  try{
+    const v = JSON.parse(localStorage.getItem('natal-peer-last') || 'null');
+    _peerLast = v && typeof v === 'object' ? v : null;
+  }catch{ _peerLast = null; }
+  return _peerLast;
+}
+function peerLastSave(peer){
+  const nome = String((peer && peer.name) || '').trim();
+  if(!nome) return;
+  _peerLast = { name: nome, ip: String((peer && peer.ip) || ''), at: Date.now() };
+  try{ localStorage.setItem('natal-peer-last', JSON.stringify(_peerLast)); }catch{}
+}
+
 function renderImportChip(){
   const el = document.getElementById('import-chip');
   if(!el) return;
@@ -2367,24 +2403,46 @@ function renderImportChip(){
   const batches = Array.isArray(imp.batches) ? imp.batches : [];
   const sessoes = r.sessoes || {};
   const pendentes = batches.filter(b => b.done && !sessoes[b.name]).length;
+  const alertPeer = !!r.online && !peer.found;
+  if(peer.found) peerLastSave(peer);
+  const last = alertPeer ? peerLastGet() : null;
+  const lastNome = String((last && last.name) || '').trim();
   let txt;
+  let peerTxt = false;
   if(!r.online) txt = 'Importador parado';
   else if(dl && dl.total) txt = `Baixando ${dl.count || 0}/${dl.total}`;
   else if(prog && prog.total) txt = `Copiando ${prog.count || 0}/${prog.total}`;
   else if(card.state === 'copying' || imp.copying) txt = 'Lendo cartão…';
   else if(card.state === 'detected') txt = `Cartão detectado${card.drive ? ' (' + card.drive + ')' : ''}`;
+  else if(alertPeer){ peerTxt = true; txt = lastNome ? `${lastNome} fora da rede` : 'Outro PC não encontrado'; }
   else if(pendentes > 0) txt = `${pendentes} lote${pendentes === 1 ? '' : 's'} aguardando`;
   else if(peer.found) txt = `Conectado: ${peer.name || 'outro PC'}`;
-  else txt = 'Procurando outro PC…';
+  else txt = 'Outro PC não encontrado';
   const txtEl = document.getElementById('import-chip-txt');
-  if(txtEl) txtEl.textContent = txt;
-  else el.textContent = txt;
-  el.style.color = peer.found || !r.online ? '' : 'var(--slate-400)';
+  if(txtEl){
+    if(peerTxt){
+      txtEl.textContent = '';
+      const alerta = document.createElement(lastNome ? 'b' : 'span');
+      alerta.className = 'peer-alert-name';
+      alerta.textContent = lastNome || 'Outro PC não encontrado';
+      txtEl.append(alerta);
+      if(lastNome) txtEl.append(document.createTextNode(' fora da rede'));
+    } else {
+      txtEl.textContent = txt;
+    }
+  } else {
+    el.textContent = txt;
+  }
+  el.classList.toggle('peer-lost', alertPeer);
+  const peerStatus = peer.status && peer.status !== 'Outro PC desconectado' ? peer.status : '';
+  const ultimo = last && lastNome
+    ? ` Último contato: ${lastNome}${last.ip ? ' (' + last.ip + ')' : ''}${last.at ? ' às ' + new Date(last.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}.`
+    : '';
   el.title = !r.online
     ? 'O importador de fotos do cartão não está respondendo nesta máquina.'
     : (peer.found
-        ? `Outro PC conectado: ${peer.name || 'sem nome'} (${peer.ip || '?'})${peer.status ? ' — ' + peer.status : ''}`
-        : (card.message || card.badge || 'Procurando outro PC na rede…'));
+        ? `Outro PC conectado: ${peer.name || 'sem nome'} (${peer.ip || '?'})${peerStatus ? ' — ' + peerStatus : ''}`
+        : `O outro PC não foi encontrado na rede.${ultimo}`);
   renderLoginPeer(r);
 }
 
@@ -3575,6 +3633,22 @@ async function imprimirThermal(conteudoHtml, rotulo){
     return false;
   }catch(e){
     toast('⚠ Falha ao imprimir: ' + e.message);
+    return false;
+  }
+}
+async function imprimirBematechTexto(texto, rotulo){
+  if(!window.natal || typeof window.natal.ipcInvoke !== 'function'){
+    toast('⚠ Impressora térmica só funciona dentro do app (Electron)');
+    return false;
+  }
+  if(rotulo) toast('🧾 ' + rotulo);
+  try{
+    const res = await window.natal.ipcInvoke('natal:printBematech', { texto });
+    if(res && res.success){ toast('🧾 Cupom enviado para a Bematech'); return true; }
+    toast('⚠ Falha ao imprimir cupom');
+    return false;
+  }catch(e){
+    toast('⚠ Falha ao imprimir cupom');
     return false;
   }
 }
@@ -4866,12 +4940,13 @@ document.getElementById('modal-overlay').addEventListener('click', e=>{
 /* ---------------- TECLADO NUMÉRICO NA TELA ---------------- */
 // Campos numéricos (PIN de 4 dígitos, busca de sessão e valores de caixa) abrem
 // um teclado só de números — o kiosk é touch, sem teclado físico obrigatório.
-const NUM_FIELDS = '#login-senha,#busca-sessao,#sm-senha,#ac-fundo,.fc-real,#fc-envelope,.pr-valor,#cfg-senha-input';
+const NUM_FIELDS = '#login-senha,#busca-sessao,#sm-senha,#ac-fundo,.fc-real,#fc-envelope,.pr-valor,#cfg-senha-input,#lm-senha,#st-senha';
 // Qualquer campo numérico abre o teclado, mesmo os criados depois (telas de
 // caixa, modais de valor etc.) — sem depender de manter uma lista de seletores.
 const NUM_AUTO = 'input[type="number"],input[inputmode="numeric"],input[inputmode="decimal"]';
 let numpadTarget = null;
 let numpadAllowDot = false;
+let numpadMoney = false;
 // O visor/valor digitado vive num buffer próprio: input[type=number] descarta
 // valores intermediários ("12." vira "") e não aceita maxLength (vale -1).
 let numpadBuf = '';
@@ -4889,10 +4964,20 @@ const _npTitles = {
   '#ac-fundo': 'Abertura de caixa — fundo de troco',
   '#fc-envelope': 'Envelope de depósito',
   '#cfg-senha-input': 'Senha do sistema',
+  '#lm-senha': 'Senha de manutenção',
+  '#st-senha': 'Senha de autorização',
   '#av-valor': 'Informe o valor',
 };
 function numpadLimite(el){
   return (el && el.maxLength && el.maxLength > 0) ? el.maxLength : Infinity;
+}
+// Todo campo decimal/número do PDV é dinheiro — nesses o teclado usa vírgula e
+// começa zerado para o operador digitar o valor inteiro (sem emendar no antigo).
+function numpadEhDinheiro(el){
+  return !!(el && (el.type === 'number'
+    || el.getAttribute('inputmode') === 'decimal'
+    || el.classList.contains('fc-real')
+    || el.classList.contains('pr-valor')));
 }
 function numpadGravar(){
   const el = numpadTarget;
@@ -4903,7 +4988,7 @@ function numpadGravar(){
     const limpo = buf.replace(/\.$/, '');
     el.value = (buf === '' || limpo === '') ? '' : (/^-?\d+(\.\d+)?$/.test(limpo) ? limpo : el.value);
   } else {
-    el.value = buf;
+    el.value = numpadMoney ? buf.replace(/\./g, ',') : buf;
   }
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -4912,13 +4997,22 @@ function numpadGravar(){
 function atualizarNumpad(){
   const disp = document.getElementById('numpad-display');
   if(!numpadTarget){ disp.innerHTML = '&nbsp;'; return; }
-  const v = numpadBuf || '';
+  let v = numpadBuf || '';
+  if(numpadMoney) v = v === '' ? '0' : v.replace(/\./g, ',');
   disp.innerHTML = v === '' ? '&nbsp;' : v.replace(/[^\d.,]+/g, '').replace(/</g, '&#60;');
 }
 function abrirNumpad(el){
   numpadTarget = el;
-  numpadAllowDot = (el.type === 'number') || el.inputMode === 'decimal';
-  numpadBuf = String(el.value || '');
+  numpadMoney = numpadEhDinheiro(el);
+  numpadAllowDot = numpadMoney || (el.type === 'number') || el.inputMode === 'decimal';
+  // Dinheiro abre sempre zerado: o primeiro dígito começa um valor novo, mesmo
+  // que o campo já viesse preenchido (ex.: valor esperado do fechamento).
+  numpadBuf = numpadMoney ? '' : String(el.value || '');
+  const dec = document.querySelector('#numpad-grid .np-dec');
+  if(dec){
+    dec.textContent = numpadMoney ? ',' : '.';
+    dec.style.visibility = numpadAllowDot ? 'visible' : 'hidden';
+  }
   const key = '#' + el.id;
   const titulo = _npTitles[key]
     || (el.classList.contains('fc-real') ? 'Valor real no caixa — ' + (el.dataset.forma || '') : 'Digite os números');
@@ -4935,6 +5029,7 @@ function fecharNumpad(blur){
   if(blur && numpadTarget) numpadTarget.blur();
   numpadTarget = null;
   numpadBuf = '';
+  numpadMoney = false;
 }
 // Enter: confirma a ação do campo em foco (mesmo comportamento do teclado físico)
 function numpadEnter(){
@@ -4971,7 +5066,9 @@ document.addEventListener('input', e=>{
   // só espelha digitação real (teclado físico); eventos sintéticos do próprio
   // numpad já estão refletidos no buffer
   if(e.isTrusted && numpadTarget && e.target === numpadTarget){
-    numpadBuf = String(numpadTarget.value || '');
+    let v = String(numpadTarget.value || '');
+    if(numpadMoney) v = v.replace(/,/g, '.');
+    numpadBuf = v;
     atualizarNumpad();
   }
 });
@@ -5106,7 +5203,7 @@ async function showConfigModal(tabInicial){
       </div>
     </div>
 
-    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+    <div data-cfg-sec="sync" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Fila de impressão</div>
       ${filaJobs.length===0
         ? `<div style="font-size:12px;color:var(--slate-500);">Nenhuma impressão pendente.</div>`
@@ -5128,6 +5225,12 @@ async function showConfigModal(tabInicial){
           </div>`
       }
       <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Impressões aguardando a impressora ficam nesta fila e retomam sozinhas. Limpar remove o pedido da fila (não cancela a venda).</div>
+    </div>
+
+    <div data-cfg-sec="sync" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Reiniciar impressão</div>
+      <div style="font-size:12px;color:var(--slate-400);margin-bottom:8px;">Se a ASK-400 travar ou a fila empacar, reinicie o motor de impressão. As configurações, a loja, o pareamento e a fila pendente são preservados.</div>
+      <button id="cfg-printer-restart" style="padding:8px 14px;border:1px solid var(--gold-500);border-radius:8px;background:transparent;color:var(--gold-300);font-size:12px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">🔄 Reiniciar impressão</button>
     </div>
 
     <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
@@ -5424,6 +5527,35 @@ const r = await natalApi.limparFila({ pedidoId });
     }catch(e){ toast('⚠ ' + (e && e.message ? e.message : 'Erro ao limpar')); cfgClearAllBtn.disabled = false; }
   };
 
+  const cfgPrinterRestartBtn = document.getElementById('cfg-printer-restart');
+  if(cfgPrinterRestartBtn) cfgPrinterRestartBtn.onclick = async ()=>{
+    const ok = window.confirm('Reiniciar o motor de impressão (ASK-400)?\n\nA fila pendente continua salva e retoma sozinha. Configurações, loja e pareamento não são alterados.');
+    if(!ok) return;
+    cfgPrinterRestartBtn.disabled = true;
+    const rotuloOriginal = cfgPrinterRestartBtn.textContent;
+    cfgPrinterRestartBtn.textContent = 'Reiniciando impressão...';
+    try{
+      const r = await window.natal.ipcInvoke('natal:restartPrinter');
+      printando = false;
+      _printProgress = null;
+      _printFilaUltimoAviso = 0;
+      renderRibbonChip();
+      await _sincronizarEstadoFila();
+      if(r && r.success){
+        toast(r.printerReady === false ? '🔄 Impressão reiniciada (ASK-400 ainda inicializando)' : '🔄 Impressão reiniciada');
+        await showConfigModal('sync');
+      } else {
+        toast('⚠ Não foi possível reiniciar a impressão');
+        cfgPrinterRestartBtn.disabled = false;
+        cfgPrinterRestartBtn.textContent = rotuloOriginal;
+      }
+    }catch(e){
+      toast('⚠ ' + (e && e.message ? e.message : 'Falha ao reiniciar a impressão'));
+      cfgPrinterRestartBtn.disabled = false;
+      cfgPrinterRestartBtn.textContent = rotuloOriginal;
+    }
+  };
+
   {
     const updInfo = document.getElementById('cfg-upd-info');
     const updBtn = document.getElementById('cfg-upd-btn');
@@ -5550,7 +5682,7 @@ async function abrirConfirmacaoLimparDados(){
 
     <div style="margin-top:14px;">
       <label class="modal-step-label" for="lm-senha" style="display:block;margin-bottom:6px;">Senha de manutenção</label>
-      <input id="lm-senha" type="password" autocomplete="off" placeholder="Senha"
+      <input id="lm-senha" type="password" inputmode="numeric" autocomplete="off" placeholder="Senha"
         style="width:100%;padding:11px 13px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:15px;font-family:Arial,sans-serif;outline:none;box-sizing:border-box;" />
       <div id="lm-erro" style="font-size:12px;color:var(--red-400);margin-top:6px;min-height:14px;"></div>
     </div>
@@ -5566,6 +5698,9 @@ async function abrirConfirmacaoLimparDados(){
   const forcarEl = document.getElementById('lm-forcar');
   document.getElementById('lm-cancelar').onclick = ()=> showConfigModal();
   senhaEl.focus();
+  senhaEl.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){ e.preventDefault(); document.getElementById('lm-confirmar').click(); }
+  });
 
   document.getElementById('lm-confirmar').onclick = async ()=>{
     const btn = document.getElementById('lm-confirmar');
@@ -5888,6 +6023,22 @@ function applyRoleVisibility(){
     : 'Dica: dê duplo clique em qualquer card de sessão à esquerda';
 }
 
+function sairParaLogin(irParaPainel){
+  currentUser = null;
+  closeModal();
+  document.getElementById('user-chip').textContent = '👤 —';
+  applyRoleVisibility();
+  if(irParaPainel){
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById('screen-painel').classList.add('active');
+    try{ renderPainel(); }catch(e){}
+  }
+  document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('login-senha').value='';
+  document.getElementById('login-pass-row').style.display='none';
+  document.querySelectorAll('.login-user-card').forEach(c=>c.classList.remove('selected'));
+}
+
 document.getElementById('user-chip').addEventListener('click', ()=>{
   if(!currentUser) return;
   openModal(`
@@ -5896,14 +6047,7 @@ document.getElementById('user-chip').addEventListener('click', ()=>{
     <button class="btn-primary" id="btn-confirmar-logout">Sair</button>
   `);
   document.getElementById('btn-confirmar-logout').addEventListener('click', ()=>{
-    currentUser = null;
-    closeModal();
-    document.getElementById('user-chip').textContent = '👤 —';
-    applyRoleVisibility();
-    document.getElementById('login-overlay').classList.remove('hidden');
-    document.getElementById('login-senha').value='';
-    document.getElementById('login-pass-row').style.display='none';
-    document.querySelectorAll('.login-user-card').forEach(c=>c.classList.remove('selected'));
+    sairParaLogin(false);
   });
 });
 
@@ -6151,7 +6295,7 @@ function askSenhaTexto(titulo, subtitulo, onConfirm){
     </div>
     <p class="modal-sub">${subtitulo}</p>
     <div class="pay-rows" style="margin-bottom:14px;">
-      <input type="password" id="st-senha" autocomplete="off" placeholder="Senha"
+      <input type="password" id="st-senha" inputmode="numeric" autocomplete="off" placeholder="Senha"
         style="background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:12px 14px;font-size:16px;text-align:center;width:100%;">
     </div>
     <button class="btn-primary" id="st-confirmar">Confirmar</button>
@@ -6580,6 +6724,26 @@ function askEquipeDoDia(numeroCaixa){
   renderEquipeModal(numeroCaixa, equipeJaSalva);
 }
 
+const EQ_KB_ROWS = [
+  ['Q','W','E','R','T','Y','U','I','O','P'],
+  ['A','S','D','F','G','H','J','K','L'],
+  ['Z','X','C','V','B','N','M','Ç'],
+  ['Á','É','Í','Ó','Ú','Ã','Õ','Â','Ê','Ô'],
+];
+function eqKbTecladoHtml(){
+  const linhas = EQ_KB_ROWS.map(linha=>`
+    <div class="eq-kb-row">
+      ${linha.map(ch=>`<button type="button" class="eq-kb-key" data-ch="${ch}">${ch}</button>`).join('')}
+    </div>`).join('');
+  return linhas + `
+    <div class="eq-kb-row">
+      <button type="button" class="eq-kb-key space" data-k="space">Espaço</button>
+      <button type="button" class="eq-kb-key del" data-k="back">Apagar</button>
+      <button type="button" class="eq-kb-key clr" data-k="clear">Limpar</button>
+      <button type="button" class="eq-kb-key add" data-k="add">Adicionar</button>
+    </div>`;
+}
+
 function renderEquipeModal(numeroCaixa, equipeJaSalva){
   const opcoesHtml = USERS.filter(u=>!u.isAdmin).map(u=>{
     const marcado = equipeJaSalva.includes(u.nome) || (equipeJaSalva.length===0 && currentUser && u.id===currentUser.id);
@@ -6600,23 +6764,55 @@ function renderEquipeModal(numeroCaixa, equipeJaSalva){
     <div class="modal-head"><div><div class="modal-step-label">Conferência de equipe</div><h3>Quem está trabalhando hoje?</h3></div></div>
     <p class="modal-sub">Selecione todas as pessoas presentes no quiosque agora — facilita a conferência depois.</p>
     ${opcoesHtml}
-    <div style="margin:12px 0 8px;font-size:11px;color:var(--slate-400);">Reforço de última hora (não cadastrado como usuário)</div>
-    <div style="display:flex;flex-wrap:wrap;">${tagsAvulsosHtml}</div>
-    <div style="display:flex;gap:8px;margin-bottom:16px;">
-      <input type="text" id="eq-avulso-nome" placeholder="Nome da pessoa"
-        style="flex:1;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:9px 12px;font-size:13px;">
-      <button class="fc-btn" id="eq-avulso-add" style="white-space:nowrap;">+ Adicionar</button>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin:12px 0 16px;">
+      <div class="eq-avulso-campo">
+        <div style="margin-bottom:6px;font-size:11px;color:var(--slate-400);">Reforço de última hora (não cadastrado como usuário)</div>
+        <div style="display:flex;flex-wrap:wrap;margin-bottom:6px;">${tagsAvulsosHtml}</div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="eq-avulso-nome" autocomplete="off" placeholder="Nome da pessoa"
+            style="flex:1;min-width:0;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:9px 12px;font-size:13px;">
+          <button type="button" class="fc-btn" id="eq-avulso-add" style="white-space:nowrap;">+ Adicionar</button>
+        </div>
+        <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Clique no campo e use o teclado ao lado para escrever o nome.</div>
+      </div>
+      <div class="eq-kb" id="eq-teclado">${eqKbTecladoHtml()}</div>
     </div>
     <button class="btn-primary" id="eq-confirmar">Confirmar equipe</button>
   `);
+  document.getElementById('modal-box').classList.add('wide');
   modalBloqueado = true;
 
-  document.getElementById('eq-avulso-add').addEventListener('click', ()=>{
-    const input = document.getElementById('eq-avulso-nome');
-    const nome = input.value.trim();
-    if(!nome){ toast('Digite o nome antes de adicionar'); return; }
+  const nomeInput = document.getElementById('eq-avulso-nome');
+  const tecladoEq = document.getElementById('eq-teclado');
+
+  const inserirNome = (ch)=>{
+    const atual = nomeInput.value;
+    const inicioPalavra = atual.length === 0 || /\s$/.test(atual);
+    let c = ch;
+    if(ch !== ' ' && ch !== '-' && ch !== "'") c = inicioPalavra ? ch.toUpperCase() : ch.toLowerCase();
+    nomeInput.value = atual + c;
+    nomeInput.focus();
+    try{ nomeInput.setSelectionRange(nomeInput.value.length, nomeInput.value.length); }catch{}
+  };
+  function adicionarAvulso(){
+    const nome = nomeInput.value.trim();
+    if(!nome){ toast('Digite o nome antes de adicionar'); nomeInput.focus(); return; }
     equipeAvulsosTemp.push(nome);
     renderEquipeModal(numeroCaixa, coletarSelecaoAtual());
+  }
+  document.getElementById('eq-avulso-add').addEventListener('click', adicionarAvulso);
+  nomeInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); adicionarAvulso(); } });
+  tecladoEq.querySelectorAll('[data-ch]').forEach(b=>{
+    b.addEventListener('click', ()=> inserirNome(b.getAttribute('data-ch')));
+  });
+  tecladoEq.querySelectorAll('[data-k]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const k = b.getAttribute('data-k');
+      if(k === 'space') inserirNome(' ');
+      else if(k === 'back'){ nomeInput.value = nomeInput.value.slice(0,-1); nomeInput.focus(); }
+      else if(k === 'clear'){ nomeInput.value = ''; nomeInput.focus(); }
+      else if(k === 'add') adicionarAvulso();
+    });
   });
   document.querySelectorAll('.eq-remover-avulso').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -6799,24 +6995,38 @@ function mostrarListaConciliacoes(){
     btn.addEventListener('click', e=>{
       e.stopPropagation();
       const f = conciliacoesCaixa[+btn.dataset.print];
-      if(f) imprimirThermal('<div class="receipt">' + conciliacaoReceiptHtml(f) + '</div>', 'Conciliação ' + (f.numero ? 'nº ' + f.numero + ' ' : '') + 'enviada');
+      if(f) imprimirBematechTexto(conciliacaoReceiptTexto(f), 'Conciliação ' + (f.numero ? 'nº ' + f.numero + ' ' : '') + 'enviada');
     });
   });
 }
 
-function conciliacaoReceiptHtml(f){
-  const linhas = (f.porForma || []).map(r=>`
-    <div class="rc-line"><span>${r.forma} — sistema ${fmt(r.sistema)} / real ${fmt(r.real)}</span><span>${r.diferenca===0?'—':(r.diferenca>0?'+':'')+fmt(r.diferenca)}</span></div>
-  `).join('');
-  return `
-    <h4>Maxx Foto — Conciliação de caixa${f.numero?' nº '+f.numero:''}</h4>
-    <div class="rc-sub">${f.data ? new Date(f.data).toLocaleString('pt-BR') : ''}</div>
-    ${linhas}
-    <div class="rc-total"><span>Diferença total</span><span>${f.diferencaTotal===0?'nenhuma':fmt(f.diferencaTotal)}</span></div>
-    ${f.valorEnvelope!==undefined ? `
-    <div class="rc-line"><span>Envelope de depósito (sangria)</span><span>${fmt(f.valorEnvelope)}</span></div>
-    <div class="rc-line"><span>Ficou no caixa (fundo do próximo)</span><span>${fmt(f.saldoRestante)}</span></div>` : ''}
-    <div class="rc-sub">Fechado por ${f.fechadoPor||'—'}</div>`;
+function conciliacaoReceiptTexto(f){
+  const W = 32;
+  const centro = (t) => { t = String(t); const pad = Math.max(0, Math.floor((W - t.length) / 2)); return ' '.repeat(pad) + t; };
+  const linha = (esq, dir) => { esq = String(esq); dir = String(dir); const esp = Math.max(1, W - esq.length - dir.length); return esq + ' '.repeat(esp) + dir; };
+  const sep = '-'.repeat(W);
+  const out = [];
+  out.push(centro('MAX FOTO VENDAS'));
+  out.push(centro('CONCILIACAO DE CAIXA'));
+  if(f.numero) out.push(centro('Caixa no ' + f.numero));
+  if(f.data) out.push(centro(new Date(f.data).toLocaleString('pt-BR')));
+  out.push(sep);
+  (f.porForma || []).forEach(r=>{
+    out.push(String(r.forma));
+    out.push(linha('  Sistema', fmt(r.sistema)));
+    out.push(linha('  Real', fmt(r.real)));
+    out.push(linha('  Diferenca', r.diferenca===0 ? '-' : (r.diferenca>0?'+':'') + fmt(r.diferenca)));
+  });
+  out.push(sep);
+  out.push(linha('DIFERENCA TOTAL', f.diferencaTotal===0 ? 'nenhuma' : fmt(f.diferencaTotal)));
+  if(f.valorEnvelope!==undefined){
+    out.push(linha('Envelope (sangria)', fmt(f.valorEnvelope)));
+    out.push(linha('Ficou no caixa', fmt(f.saldoRestante)));
+  }
+  out.push(sep);
+  out.push(centro('Fechado por ' + (f.fechadoPor||'—')));
+  out.push('');
+  return out.join('\n');
 }
 
 function abrirTelaFechamento(){
@@ -6929,11 +7139,11 @@ function abrirTelaFechamento(){
     saldoEsperadoProximoCaixa = saldoRestante; // trava o valor de abertura do próximo caixa
     caixaAberto = false;
     renderCaixaChip();
-    mostrarResultadoFechamento(ultimoFechamentoCaixa);
+    mostrarResultadoFechamento(ultimoFechamentoCaixa, !abrirNovoAposFechar);
   });
 }
 
-function mostrarResultadoFechamento(fechamento){
+function mostrarResultadoFechamento(fechamento, sairAposFechar = false){
   const linhasResultado = fechamento.porForma.map(r=>`
     <div class="rc-line">
       <span>${r.forma} — sistema ${fmt(r.sistema)} / real ${fmt(r.real)}</span>
@@ -6945,7 +7155,7 @@ function mostrarResultadoFechamento(fechamento){
   abrirNovoAposFechar = false; // consome a intenção — não vaza pra próximas visualizações desse mesmo resultado
 
   openModal(`
-    <div class="modal-head"><div><div class="modal-step-label">Caixa ${fechamento.numero?'nº '+fechamento.numero+' ':''}fechado</div><h3>Conciliação do dia</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-head"><div><div class="modal-step-label">Caixa ${fechamento.numero?'nº '+fechamento.numero+' ':''}fechado</div><h3>Conciliação do dia</h3></div><button class="modal-close" id="fc-resultado-fechar">×</button></div>
     <div class="receipt" style="margin-bottom:6px;">
       ${linhasResultado}
       <div class="rc-total"><span>Diferença total</span><span style="color:${fechamento.diferencaTotal===0?'var(--green-500)':'var(--red-400)'}">${fechamento.diferencaTotal===0?'nenhuma':fmt(fechamento.diferencaTotal)}</span></div>
@@ -6957,12 +7167,21 @@ function mostrarResultadoFechamento(fechamento){
     <p class="modal-sub">Fechado por ${fechamento.fechadoPor||'—'} · registrado pra consulta posterior.</p>
     ${mostrarBotaoAbrirNovo ? `<button class="btn-primary" id="fc-abrir-novo-agora" style="background:linear-gradient(135deg,var(--gold-500),#c78f38);">➕ Abrir novo caixa agora</button>` : ''}
     <button class="btn-secondary" id="fc-imprimir" style="margin-top:${mostrarBotaoAbrirNovo?'10px':'0'};">🖨 Imprimir conciliação</button>
-    <button class="btn-primary" id="fc-voltar-lista">Voltar para conciliações</button>
+    ${sairAposFechar
+      ? `<button class="btn-primary" id="fc-ir-login">Ir para o login</button>`
+      : `<button class="btn-primary" id="fc-voltar-lista">Voltar para conciliações</button>`}
   `);
-  document.getElementById('fc-imprimir').addEventListener('click', ()=>{
-    imprimirThermal('<div class="receipt">' + conciliacaoReceiptHtml(fechamento) + '</div>', 'Conciliação ' + (fechamento.numero ? 'nº ' + fechamento.numero + ' ' : '') + 'enviada');
+  document.getElementById('fc-resultado-fechar').addEventListener('click', ()=>{
+    if(sairAposFechar) sairParaLogin(true); else closeModal();
   });
-  document.getElementById('fc-voltar-lista').addEventListener('click', mostrarListaConciliacoes);
+  document.getElementById('fc-imprimir').addEventListener('click', ()=>{
+    imprimirBematechTexto(conciliacaoReceiptTexto(fechamento), 'Conciliação ' + (fechamento.numero ? 'nº ' + fechamento.numero + ' ' : '') + 'enviada');
+  });
+  if(sairAposFechar){
+    document.getElementById('fc-ir-login').addEventListener('click', ()=> sairParaLogin(true));
+  } else {
+    document.getElementById('fc-voltar-lista').addEventListener('click', mostrarListaConciliacoes);
+  }
   if(mostrarBotaoAbrirNovo){
     document.getElementById('fc-abrir-novo-agora').addEventListener('click', ()=>{
       askAbrirCaixa();
@@ -7150,7 +7369,7 @@ async function INIT(){
   renderSyncChip(); // estado de sync com o portal (fila de envio)
   setInterval(carregarRibbon, 15000); // ribbon real do sidecar (igual ao React)
   atualizarStatusImport(); // chip do cartão (importador embutido)
-  setInterval(atualizarStatusImport, 20000);
+  setInterval(atualizarStatusImport, 10000);
   setInterval(enviarSnapshotVendas, 300000); // sync de vendas → portal a cada 5 min (e nos eventos abaixo)
   setInterval(async ()=>{
     try{
@@ -7374,7 +7593,7 @@ function checarAlertaHorario(){
       <button class="np-k" data-k="3">3</button>
       <button class="np-k np-bc" data-k="bc">⌫</button>
       <button class="np-k" data-k="0">0</button>
-      <button class="np-k np-dec" data-k=".">.</button>
+      <button class="np-k np-dec" data-k=".">,</button>
     </div>
     <div class="numpad-actions">
       <button class="np-btn" data-k="clear">Limpar</button>

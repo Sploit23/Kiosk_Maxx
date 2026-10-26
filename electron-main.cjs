@@ -261,6 +261,56 @@ function startJavaSidecar() {
   javaProcess.on('close', (code) => { console.log(`[Java] Finalizado (${code})`); javaProcess = null; });
 }
 
+function stopJavaSidecar() {
+  const proc = javaProcess;
+  javaProcess = null;
+  if (!proc) return;
+  try {
+    if (process.platform === 'win32' && proc.pid) {
+      spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true });
+    } else {
+      try { proc.kill(); } catch {}
+    }
+  } catch { try { proc.kill(); } catch {} }
+}
+
+function javaHealthOk() {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port: 8080, path: '/health', timeout: 1500 }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(false));
+  });
+}
+
+async function restartJavaSidecar() {
+  const subir = async () => {
+    startJavaSidecar();
+    for (let i = 0; i < 20; i++) {
+      if (await javaHealthOk()) return true;
+      await sleep(500);
+    }
+    return false;
+  };
+  stopJavaSidecar();
+  // Espera a porta 8080 liberar antes de subir de novo (kill no Windows nao e
+  // instantaneo; subir cedo demais faz o Java novo morrer no bind).
+  for (let i = 0; i < 12; i++) {
+    if (!(await isPortInUse(8080))) break;
+    await sleep(500);
+  }
+  if (await subir()) return true;
+  // Uma segunda tentativa: as vezes o driver/JVM demora a soltar a porta.
+  stopJavaSidecar();
+  for (let i = 0; i < 8; i++) {
+    if (!(await isPortInUse(8080))) break;
+    await sleep(500);
+  }
+  return await subir();
+}
+
 // ─── 2b. Importador de fotos do cartao (Pegar_Fotos headless) ─
 // Sobe junto do PDV, sem janela. O importador vigia/baixa os lotes do cartao
 // (porta 8099 + descoberta UDP 50000) e grava em <photosFolder>\_cartao; o
@@ -637,6 +687,19 @@ ipcMain.handle('natal:saveConfig', async (_event, partial) => {
 ipcMain.handle('natal:restartImporter', async () => {
   restartImporter();
   return { success: true };
+});
+// Reinicia o motor de impressao (sidecar Java da ASK-400) sem tocar em config,
+// loja, pareamento ou fila. Usado pelo botao "Reiniciar impressao" do Config >
+// Sincronizar quando a impressora trava ou a fila empaca.
+ipcMain.handle('natal:restartPrinter', async () => {
+  try {
+    const printerReady = await restartJavaSidecar();
+    try { logMain('[Impressao] sidecar ASK-400 reiniciado (ok=' + printerReady + ')'); } catch {}
+    return { success: true, printerReady };
+  } catch (e) {
+    try { logMain('[Impressao] falha ao reiniciar sidecar ASK-400: ' + e.message); } catch {}
+    return { success: false, error: e.message };
+  }
 });
 // Diagnostico do importador para a aba "Cartao" (o app empacotado nao tem
 // console; sem isso o operador so ve "nao esta rodando" sem o motivo).
