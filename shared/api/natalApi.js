@@ -88,8 +88,10 @@ const natalApi = {
   // ─── Impressão ASK-400 (produção) ────────────────────────  // Envia o JPEG final de cada foto composta no PDV para a fila do pedido.
   uploadImpressao: (pedidoId, filename, blob) =>
     api('POST', `/api/pedidos/${encodeURIComponent(pedidoId)}/impressao/${encodeURIComponent(filename)}`, blob, true),
-  // Inicia a fila de impressão de um pedido PAGO. fotos: [{ key, filename, qty }]
-  imprimirPedido: (pedidoId, fotos) => api('POST', `/api/pedidos/${encodeURIComponent(pedidoId)}/imprimir`, { fotos }),
+  // Inicia a fila de impressão de um pedido PAGO/IMPRESSO. fotos: [{ key, filename, qty }]
+  imprimirPedido: (pedidoId, fotos, reimpressao) =>
+    api('POST', `/api/pedidos/${encodeURIComponent(pedidoId)}/imprimir`,
+      reimpressao ? { fotos, reimpressao: true } : { fotos }),
 
   // ─── Saúde / config ──────────────────────────────────────
   health: () => api('GET', '/api/health'),

@@ -924,6 +924,27 @@
     padding:26px 26px 22px;
   }
   .modal-box.wide{width:960px;max-width:95vw;}
+  /* teclado numérico aberto: o conteúdo (pedido/tela) vai pra esquerda e o
+     teclado fica do lado direito, sem cobrir o que a pessoa está conferindo */
+  body.numpad-open .modal-overlay{padding:20px 450px 20px 20px;}
+  body.numpad-open .modal-box{max-width:min(520px,calc(100vw - 490px));}
+  body.numpad-open .modal-box.wide{max-width:min(960px,calc(100vw - 490px));}
+  @media (max-width:980px){
+    body.numpad-open .modal-overlay{padding:20px;}
+    body.numpad-open .modal-box,
+    body.numpad-open .modal-box.wide{max-width:92vw;}
+  }
+
+  #printer-alert-overlay{padding:20px;z-index:310;}
+  .printer-alert-box{
+    width:430px;text-align:center;border-color:var(--red-400);
+    box-shadow:0 0 0 3px rgba(193,102,107,.20),var(--shadow-lift);
+  }
+  .printer-alert-icon{font-size:44px;line-height:1;margin-bottom:10px;}
+  .printer-alert-box h3{margin:0 0 10px;font-size:20px;color:var(--red-400);}
+  .printer-alert-box p{margin:0;color:var(--slate-300);font-size:13.5px;line-height:1.5;}
+  .printer-alert-box .printer-alert-detail{margin-top:10px;font-size:11.5px;color:var(--slate-500);word-break:break-word;}
+  .printer-alert-box .btn-primary{width:100%;margin-top:18px;}
   .modal-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;}
   .modal-head h3{margin:0;font-size:18px;color:var(--gold-050);}
   .modal-step-label{font-size:11px;color:var(--gold-500);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:4px;}
@@ -975,9 +996,43 @@
   }
   .reopen-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;}
   .reopen-actions button{padding:11px;border-radius:8px;font-size:12.5px;}
+  /* ---- reimpressão: lista de fotos compradas ---- */
+  .reprint-list{display:flex;flex-direction:column;gap:8px;max-height:42vh;overflow-y:auto;margin-bottom:12px;padding:2px;}
+  .reprint-row{display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--navy-line);border-radius:10px;background:rgba(255,255,255,.02);cursor:pointer;}
+  .reprint-row.checked{border-color:var(--gold-500);background:rgba(212,162,76,.08);}
+  .reprint-row img{width:46px;height:58px;object-fit:cover;border-radius:6px;background:var(--navy-800);flex:none;}
+  .reprint-row input[type=checkbox]{width:18px;height:18px;accent-color:var(--gold-500);flex:none;}
+  .reprint-row .rp-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+  .reprint-row .rp-info strong{font-size:12.5px;color:var(--cream-100);}
+  .reprint-row .rp-info span{font-size:11px;color:var(--slate-400);}
+  .reprint-row .rp-qty{width:64px;padding:6px;border-radius:6px;border:1px solid var(--navy-line);background:var(--navy-900);color:var(--cream-100);font-size:12px;flex:none;}
+  .reprint-row .rp-qty:disabled{opacity:.35;}
+  .reprint-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--slate-300);margin-bottom:4px;}
   .modal-close{background:none;border:none;color:var(--slate-500);font-size:20px;line-height:1;}
   .modal-close:hover{color:var(--cream-100);}
   .modal-sub{font-size:12px;color:var(--slate-400);margin:0 0 18px;}
+
+  .cnc-list{display:flex;flex-direction:column;gap:8px;max-height:42vh;overflow-y:auto;margin-bottom:12px;padding:2px;}
+  .cnc-row{display:flex;align-items:center;gap:10px;padding:9px 10px;background:var(--navy-850);border:1px solid var(--navy-line);border-radius:8px;margin:0;}
+  label.cnc-row{cursor:pointer;}
+  .cnc-row img{width:38px;height:48px;object-fit:cover;border-radius:5px;flex:none;background:var(--navy-800);}
+  .cnc-row .cnc-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+  .cnc-row .cnc-name{font-size:12.5px;color:var(--cream-100);}
+  .cnc-row .cnc-meta{font-size:11px;color:var(--slate-400);}
+  .cnc-row input[type=checkbox]{width:17px;height:17px;accent-color:var(--gold-500);flex:none;}
+  .cnc-decisao{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none;}
+  .cnc-decisao .cnc-label{font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate-500);}
+  .cnc-seg{display:flex;border:1px solid var(--navy-line);border-radius:7px;overflow:hidden;}
+  .cnc-seg-btn{background:var(--navy-900);border:none;color:var(--slate-400);font-size:11px;font-weight:700;padding:6px 10px;cursor:pointer;}
+  .cnc-seg-btn + .cnc-seg-btn{border-left:1px solid var(--navy-line);}
+  .cnc-seg-btn.on{background:rgba(212,162,76,.16);color:var(--gold-300);}
+  .cnc-seg-btn[data-v="sim"].on{background:rgba(193,102,107,.22);color:var(--red-400);}
+  .cnc-seg-btn[data-v="nao"].on{background:rgba(79,174,127,.18);color:var(--green-300);}
+  .cnc-summary{display:flex;justify-content:space-between;gap:10px;background:rgba(255,255,255,.03);border:1px solid var(--navy-line);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;}
+  .cnc-summary div{display:flex;flex-direction:column;gap:2px;}
+  .cnc-summary span{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--slate-500);}
+  .cnc-summary strong{font-size:15px;color:var(--gold-300);}
+  .cnc-warn{background:rgba(193,102,107,.10);border:1px solid rgba(193,102,107,.35);color:var(--red-400);border-radius:8px;padding:9px 11px;font-size:11.5px;line-height:1.45;margin-bottom:10px;}
 
   .pay-total-banner{
     display:flex;justify-content:space-between;align-items:center;
@@ -1080,8 +1135,8 @@
   /* ===== TECLADO NUMÉRICO NA TELA (kiosk sem teclado físico) ===== */
   .numpad-overlay{
     position:fixed;inset:0;z-index:300;
-    background:rgba(10,22,38,.45);
-    display:flex;align-items:center;justify-content:center;padding:20px;
+    background:rgba(10,22,38,.28);
+    display:flex;align-items:center;justify-content:flex-end;padding:20px;
   }
   .numpad{
     background:#ffffff;border:2px solid rgba(212,162,76,.45);border-radius:16px;
@@ -1112,6 +1167,9 @@
     border:1px solid rgba(60,90,140,.2);background:#f2f3f6;color:#45546a;user-select:none;
   }
   .np-ok{background:linear-gradient(135deg,#d4a24c,#e6bd6e);color:#1b2a41;border-color:transparent;}
+  @media (max-width:980px){
+    .numpad-overlay{justify-content:center;}
+  }
   /* ===== TECLADO DE LETRAS (nome do reforço na abertura de caixa) ===== */
   .eq-kb{flex:0 0 430px;max-width:100%;background:var(--navy-900);border:1px solid var(--navy-line);border-radius:12px;padding:10px;box-sizing:border-box;}
   .eq-kb-row{display:flex;gap:6px;margin-bottom:6px;}
@@ -1168,6 +1226,16 @@
     <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--slate-500);font-weight:700;margin:4px 0 6px;">Sessões recentes</div>
     <div id="receive-list" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;"></div>
     <div style="font-size:10.5px;color:var(--slate-500);margin-top:10px;">Atualiza sozinho a cada 2,5s — pode deixar esta tela aberta.</div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="printer-alert-overlay" role="alertdialog" aria-modal="true" aria-labelledby="printer-alert-title">
+  <div class="modal-box printer-alert-box">
+    <div class="printer-alert-icon" aria-hidden="true">🖨️</div>
+    <h3 id="printer-alert-title">Impressora desconectada</h3>
+    <p>A ASK-400 não está respondendo. Verifique se ela está ligada, conectada ao computador e com papel.</p>
+    <p class="printer-alert-detail" id="printer-alert-detail" style="display:none;"></p>
+    <button type="button" class="btn-primary" id="printer-alert-close">Fechar</button>
   </div>
 </div>
 
@@ -1812,16 +1880,21 @@ function mapearPedido(p){
     ? p.sessoes.map(s => ({ id: s.id, senha: numeroSessao(s.id) }))
     : (sessaoId ? [{ id: sessaoId, senha: senhaSessao }] : []);
   const itens = [
-    ...(p.itens || []).map(it => ({
-      cartId: 'ped-f-' + p.id + '-' + (it.filename || '') + '-' + it.key,
-      sessionId: sessaoId, sessionSenha: senhaSessao,
-      fotoSeed: it.filename ? (sessaoId ? sessaoId + '/' + it.filename : it.filename) : (it.key || null),
-      tipo: 'tamanho', produtoId: it.key, label: labelProduto(it.key, 'tamanho'),
-      qtd: it.qty || 1, precoUnit: it.unitPrice || 0, preco: it.subtotal || 0,
-      zoom: it.scale || 100, offX: it.diffx || 0, offY: it.diffy || 0,
-      orientation: it.orientation || 'retrato',
-      logo: config.allowsLogo(modeloProduto(it.key)), pdv: true,
-    })),
+    ...(p.itens || []).map(it => {
+      // Multi-sessão: cada foto guarda a própria sessão; pedidos antigos caem na 1ª.
+      const itemSessao = it.sessaoId || sessaoId;
+      const itemSenha = itemSessao ? numeroSessao(itemSessao) : senhaSessao;
+      return {
+        cartId: 'ped-f-' + p.id + '-' + (it.filename || '') + '-' + it.key,
+        sessionId: itemSessao, sessionSenha: itemSenha,
+        fotoSeed: it.filename ? (itemSessao ? itemSessao + '/' + it.filename : it.filename) : (it.key || null),
+        tipo: 'tamanho', produtoId: it.key, label: labelProduto(it.key, 'tamanho'),
+        qtd: it.qty || 1, precoUnit: it.unitPrice || 0, preco: it.subtotal || 0,
+        zoom: it.scale || 100, offX: it.diffx || 0, offY: it.diffy || 0,
+        orientation: it.orientation || 'retrato',
+        logo: config.allowsLogo(modeloProduto(it.key)), pdv: true,
+      };
+    }),
     ...(p.produtos || []).map(it => ({
       cartId: 'ped-p-' + p.id + '-' + it.key,
       sessionId: sessaoId, sessionSenha: senhaSessao,
@@ -1833,6 +1906,8 @@ function mapearPedido(p){
     id: String(p.numero ?? p.id),
     _realId: p.id, numero: p.numero, horario,
     pagoEm: p.pagoEm ? new Date(p.pagoEm) : null,
+    impresso: p.status === 'IMPRESSO' || !!p.impressoEm,
+    impressoEm: p.impressoEm ? new Date(p.impressoEm) : null,
     desconto: (p.desconto && Number(p.desconto.valor) > 0)
       ? { nome: p.desconto.nome || 'Desconto', valor: Number(p.desconto.valor), tipo: p.desconto.tipo || 'manual' }
       : null,
@@ -3118,6 +3193,7 @@ async function tentarLogin(getSelecionado){
   document.getElementById('user-chip').textContent = '👤 ' + u.nome;
   document.getElementById('login-overlay').classList.add('hidden');
   applyRoleVisibility();
+  carregarRibbon();
   if(!caixaAberto && u.funcao !== 'Fotógrafo') askAbrirCaixa();
 }
 
@@ -3134,6 +3210,7 @@ async function criarPedidoReal(itens, total, origemPedidoId){
     itens: fotos.map(c => ({
       // filename pro backend é o nome simples (o seed tem sessaoId/nome para exibição)
       key: c.produtoId, qty: c.qtd || 1, filename: (c.fotoSeed || '').includes('/') ? String(c.fotoSeed).split('/').pop() : (c.fotoSeed || null),
+      sessaoId: c.sessionId || null,
       scale: c.zoom || 100, diffx: c.offX || 0, diffy: c.offY || 0, angle: 0,
       orientation: c.orientation || 'paisagem', unitPrice: c.precoUnit || 0, subtotal: c.preco || 0, pdv: true,
     })),
@@ -3164,16 +3241,30 @@ async function criarPedidoReal(itens, total, origemPedidoId){
    Após pagamento confirmado, compõe cada foto (canvas 300 DPI + molde),
    envia para o sidecar (upload) e dispara a impressão via Java (ASK-400).
    Fluxo idêntico ao do React (CheckoutScreen.jsx → iniciarProducao). */
-async function iniciarImpressaoFotos(pedidoId, itens){
+// Pedidos antigos gravaram todas as fotos na 1ª sessão. Se o arquivo não existe
+// nela, procura a sessão que realmente contém a foto (fallback multi-sessão).
+function sessaoDaFoto(sessId, fileName){
+  if(!fileName || !sessId) return sessId;
+  const atual = sessions.find(s => s.id === sessId);
+  if(!atual) return sessId;
+  const fotos = atual.fotos || [];
+  if(!fotos.length || fotos.some(f => f.filename === fileName)) return sessId;
+  const outra = sessions.find(s => (s.fotos || []).some(f => f.filename === fileName));
+  return outra ? outra.id : sessId;
+}
+
+async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
+  const reimpressao = opts.reimpressao === true;
   const fotos = itens.filter(c => c.tipo === 'tamanho' && c.fotoSeed);
   if(!fotos.length){ _printPendente = null; return; }
   // Agrupar por arquivo+filtro pra não imprimir a mesma foto duas vezes se vier duplicada no carrinho
   const agrupado = new Map();
   for(const f of fotos){
-    const [sessId, fileName] = String(f.fotoSeed).split('/');
+    const [sessSeed, fileName] = String(f.fotoSeed).split('/');
+    const sessId = sessaoDaFoto(sessSeed, fileName);
     const base = (fileName || '').replace(/\.[^.]+$/, '');
-    const uploadName = base + '__' + f.produtoId + '.jpg';
-    const id = f.fotoSeed + '__' + f.produtoId;
+    const uploadName = sessId + '__' + base + '__' + f.produtoId + '.jpg';
+    const id = sessId + '/' + (fileName || '') + '__' + f.produtoId;
     const existente = agrupado.get(id);
     if(existente) existente.qty += (f.qtd || 1);
     else {
@@ -3192,11 +3283,11 @@ async function iniciarImpressaoFotos(pedidoId, itens){
   }
   const lista = [...agrupado.values()];
   if(!lista.length) return;
-  _printPendente = { pedidoId, itens, total: lista.length };
+  _printPendente = { pedidoId, itens, total: lista.length, reimpressao };
   _printProgress = { current: 0, total: lista.length };
   printando = true;
   renderRibbonChip();
-  toast('🖨️ Preparando ' + lista.length + ' foto(s) para impressão...');
+  toast('🖨️ Preparando ' + lista.length + ' foto(s)' + (reimpressao ? ' para reimpressão...' : ' para impressão...'));
   let etapa = 'preparação';
   try{
     for(let i = 0; i < lista.length; i++){
@@ -3210,13 +3301,13 @@ async function iniciarImpressaoFotos(pedidoId, itens){
       renderRibbonChip();
     }
     etapa = 'início da impressão';
-    const res = await natalApi.imprimirPedido(pedidoId, lista.map(f => ({ key: f.key, filename: f.filename, qty: f.qty })));
+    const res = await natalApi.imprimirPedido(pedidoId, lista.map(f => ({ key: f.key, filename: f.filename, qty: f.qty })), reimpressao);
     if(!res.success) throw new Error(res.error || 'Falha ao iniciar impressão');
     /* enfileirou: o estado real chega por SSE (print-start se a impressora estiver
        ligada, print-waiting se estiver desligada). Não trava o chip em "Imprimindo". */
     printando = false;
     _printProgress = null;
-    toast('🖨️ Impressão iniciada — aguardando terminar...');
+    toast(reimpressao ? '🖨️ Reimpressão iniciada — aguardando terminar...' : '🖨️ Impressão iniciada — aguardando terminar...');
     renderRibbonChip();
   }catch(e){
     const detalheEtapa = (typeof etapa === 'string' && etapa) ? etapa : 'desconhecida';
@@ -3597,9 +3688,9 @@ function mostrarFalhaImpressao(titulo, detalhe){
 async function imprimirFotosPendentes(fechaModal = false){
   if(!_printPendente) return;
   if(printando){ toast('🖨️ Já existe uma impressão em andamento...'); return; }
-  const { pedidoId, itens } = _printPendente;
+  const { pedidoId, itens, reimpressao } = _printPendente;
   if(fechaModal) closeModal();
-  await iniciarImpressaoFotos(pedidoId, itens);
+  await iniciarImpressaoFotos(pedidoId, itens, { reimpressao });
 }
 window.imprimirFotosPendentes = imprimirFotosPendentes;
 
@@ -4392,6 +4483,7 @@ function saldoRibbonProjetado(){ return ribbonBalanceBase === null ? null : ribb
 
 let printerReal = null; // { connected, paper10x15, paper15x20, lastError } vindo do Java ASK-400 (via proxy do sidecar)
 let printando = false; // true entre print-start e print-complete (feedback no chip de papel)
+let _printPedidoId = null;
 let _printProgress = null; // { current, total } — progresso exibido no chip ("Imprimindo X/Y")
 let _printFila = 0; // trabalhos aguardando a impressora voltar (worker do sidecar)
 let _printFilaUltimoAviso = 0; // evita repetir o mesmo toast de "na fila" a cada tick
@@ -4404,7 +4496,10 @@ async function carregarRibbon(){
     /* 1) status REAL da impressora (papel físico da gaveta) */
     try{
       const p = await natalApi.printerStatus();
-      if(p && p.success) printerReal = p;
+      if(p && p.success){
+        printerReal = p;
+        renderPrinterAlert(p);
+      }
     }catch{ printerReal = null; }
     /* 2) fallback: contador de ribbon do sidecar (quando a impressora não responde) */
     try{
@@ -4466,6 +4561,70 @@ function renderRibbonChip(){
   /* impressora sem resposta ou desconectada → estado crítico em vermelho */
   chip.innerHTML = `<span class="dot"></span>🖨️ <b style="color:var(--red-400);">Impressora não conectada!</b>`;
   chip.classList.add('ribbon-critical');
+}
+
+const PRINTER_ALERT_REAPARECE_MS = 120000;
+const _printerAlert = { visivel:false, desconectada:false, dispensadoEm:0, detalhe:'', timer:null };
+
+function _printerAlertaDetalhe(msg){
+  const s = String(msg || '').trim();
+  if(!s) return '';
+  if(/fetch failed|ECONNREFUSED|ECONNRESET|Failed to fetch/i.test(s)){
+    return 'Serviço da impressora fora do ar — abra ⚙ Config → Sincronizar → Reiniciar impressão.';
+  }
+  return s;
+}
+
+function mostrarPrinterAlert(detalhe){
+  const el = document.getElementById('printer-alert-overlay');
+  if(!el) return;
+  if(_printerAlert.timer){ clearTimeout(_printerAlert.timer); _printerAlert.timer = null; }
+  const det = document.getElementById('printer-alert-detail');
+  if(det){
+    const txt = _printerAlertaDetalhe(detalhe);
+    det.textContent = txt ? 'Detalhe: ' + txt : '';
+    det.style.display = txt ? '' : 'none';
+  }
+  el.classList.add('active');
+  _printerAlert.visivel = true;
+  _printerAlert.dispensadoEm = 0;
+}
+function ocultarPrinterAlert(){
+  const el = document.getElementById('printer-alert-overlay');
+  if(el) el.classList.remove('active');
+  _printerAlert.visivel = false;
+  if(_printerAlert.timer){ clearTimeout(_printerAlert.timer); _printerAlert.timer = null; }
+}
+function resetPrinterAlert(){
+  _printerAlert.dispensadoEm = 0;
+  ocultarPrinterAlert();
+}
+function fecharPrinterAlert(){
+  ocultarPrinterAlert();
+  if(!_printerAlert.desconectada) return;
+  _printerAlert.dispensadoEm = Date.now();
+  _printerAlert.timer = setTimeout(()=>{
+    _printerAlert.timer = null;
+    if(_printerAlert.desconectada && currentUser) mostrarPrinterAlert(_printerAlert.detalhe);
+  }, PRINTER_ALERT_REAPARECE_MS);
+}
+function renderPrinterAlert(status){
+  if(!status || !status.success) return;
+  const desconectada = status.connected === false;
+  _printerAlert.desconectada = desconectada;
+  _printerAlert.detalhe = status.lastError || '';
+  if(!desconectada){
+    _printerAlert.dispensadoEm = 0;
+    if(_printerAlert.visivel) ocultarPrinterAlert();
+    else if(_printerAlert.timer){ clearTimeout(_printerAlert.timer); _printerAlert.timer = null; }
+    return;
+  }
+  if(!currentUser){
+    if(_printerAlert.visivel) ocultarPrinterAlert();
+    return;
+  }
+  if(_printerAlert.visivel || _printerAlert.dispensadoEm) return;
+  mostrarPrinterAlert(_printerAlert.detalhe);
 }
 
 // Sincroniza o estado do chip a partir da fila REAL do sidecar (usado após
@@ -5017,6 +5176,7 @@ function abrirNumpad(el){
   const titulo = _npTitles[key]
     || (el.classList.contains('fc-real') ? 'Valor real no caixa — ' + (el.dataset.forma || '') : 'Digite os números');
   document.getElementById('numpad-title').textContent = titulo;
+  document.body.classList.add('numpad-open');
   document.getElementById('numpad-overlay').style.display = 'flex';
   atualizarNumpad();
 }
@@ -5026,6 +5186,7 @@ function fecharNumpad(blur){
     numpadGravar();
   }
   document.getElementById('numpad-overlay').style.display = 'none';
+  document.body.classList.remove('numpad-open');
   if(blur && numpadTarget) numpadTarget.blur();
   numpadTarget = null;
   numpadBuf = '';
@@ -5999,6 +6160,7 @@ function _tentarLoginLegado(getSelecionado){
   document.getElementById('user-chip').textContent = `👤 ${u.nome}`;
   document.getElementById('login-overlay').classList.add('hidden');
   applyRoleVisibility();
+  carregarRibbon();
 
   if(!caixaAberto && u.funcao!=='Fotógrafo'){
     askAbrirCaixa(); // primeiro login do dia — abertura de caixa "explode" na tela, bloqueante (fotógrafo nunca vê isso)
@@ -6026,6 +6188,7 @@ function applyRoleVisibility(){
 function sairParaLogin(irParaPainel){
   currentUser = null;
   closeModal();
+  resetPrinterAlert();
   document.getElementById('user-chip').textContent = '👤 —';
   applyRoleVisibility();
   if(irParaPainel){
@@ -6313,7 +6476,7 @@ function askSenhaTexto(titulo, subtitulo, onConfirm){
   input.addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); confirmar(); } });
 }
 
-function askSenhaMotivo(titulo, subtitulo, onConfirm){
+function askSenhaMotivo(titulo, subtitulo, onConfirm, pedidoContexto){
   openModal(`
     <div class="modal-head">
       <div><div class="modal-step-label">Autorização necessária</div><h3>${titulo}</h3></div>
@@ -6341,7 +6504,7 @@ function askSenhaMotivo(titulo, subtitulo, onConfirm){
       titulo, senha, motivo,
       operador: currentUser ? currentUser.nome : '—',
       data: new Date(),
-      pedidoContexto: editingPedidoId || null, // pedido que estava sendo editado quando a senha foi usada
+      pedidoContexto: pedidoContexto || editingPedidoId || null, // pedido que estava sendo editado quando a senha foi usada
       pedidoGeradoId: null, // preenchido depois, se a edição virar um pedido novo (registrarUsoSenhaContexto)
     };
     usosSenhaLog.push(uso);
@@ -6390,6 +6553,7 @@ function mostrarAuditoriaSenha(){
 function showReopenOrder(pedidoId){
   const p = pedidosRealizados.find(x=>x.id===pedidoId);
   if(!p) return;
+  const temFotoReprint = p.itens.some(it => it.tipo === 'tamanho' && it.fotoSeed);
 
   // todas as fotos de todas as sessões envolvidas (não só as compradas) — dá à vendedora o argumento completo
   const fotosCompradasSeeds = new Set(p.itens.filter(it=>it.tipo!=='combo-desconto').map(it=>it.fotoSeed));
@@ -6431,6 +6595,7 @@ function showReopenOrder(pedidoId){
       <div style="grid-column:1/-1;font-size:12px;color:var(--slate-500);text-align:center;padding:8px;border:1px dashed var(--navy-line);border-radius:8px;">
         Este pedido já está cancelado — use "Editar fotos e itens" para aproveitar os itens dele num pedido novo.
       </div>` : `
+      ${temFotoReprint ? `<button class="fc-btn" id="ro-reimprimir" style="grid-column:1/-1;background:rgba(79,174,127,.12);border-color:var(--green-300);color:var(--green-300);">🖨️ Reimprimir fotos</button>` : ''}
       <button class="fc-btn" id="ro-diferenca">➕ Cobrar diferença (ex: upgrade de tamanho)</button>
       <button class="fc-btn" id="ro-forma">💳 Corrigir forma de pagamento</button>
       <button class="fc-btn" id="ro-cancelar" style="grid-column:1/-1;color:var(--red-400);border-color:var(--red-400);">🗑 Cancelar pedido</button>
@@ -6445,6 +6610,9 @@ function showReopenOrder(pedidoId){
   });
 
   if(p.status!=='cancelado'){
+    const btnReprint = document.getElementById('ro-reimprimir');
+    if(btnReprint) btnReprint.addEventListener('click', ()=>showReprintModal(p));
+
     document.getElementById('ro-diferenca').addEventListener('click', ()=>{
       if(!caixaAberto){
         toast('⚠ Caixa fechado — não é possível cobrar diferença agora. Abra um novo caixa primeiro.');
@@ -6509,42 +6677,226 @@ function showReopenOrder(pedidoId){
   }
 }
 
+/* ---------------- REIMPRESSÃO SELETIVA ----------------
+   Lista só as fotos compradas no pedido; a operadora marca o que faltou
+   imprimir (ex.: atolamento) e escolhe quantas cópias. Não altera o pedido. */
+function showReprintModal(p){
+  const mapa = new Map();
+  for(const it of p.itens){
+    if(it.tipo !== 'tamanho' || !it.fotoSeed) continue;
+    const chave = it.fotoSeed + '|' + it.produtoId;
+    const atual = mapa.get(chave);
+    if(atual) atual.qtd += (it.qtd || 1);
+    else mapa.set(chave, { ...it, qtd: it.qtd || 1 });
+  }
+  const itensFoto = [...mapa.values()];
+  if(!itensFoto.length){ toast('Este pedido não tem fotos para reimprimir'); return; }
+
+  const rows = itensFoto.map((it, idx) => {
+    const unid = modeloProduto(it.produtoId) === '15x20' ? 2 : 1;
+    const opcoes = Array.from({ length: Math.max(1, it.qtd) }, (_, n) => `<option value="${n+1}">${n+1}</option>`).join('');
+    return `<div class="reprint-row" data-idx="${idx}" data-unid="${unid}">
+      <input type="checkbox" class="rp-check">
+      <img src="${img(it.fotoSeed)}" loading="lazy" alt="">
+      <div class="rp-info">
+        <strong>${it.label || labelProduto(it.produtoId, 'tamanho')}</strong>
+        <span>#${it.sessionSenha || '—'} · compradas: ${it.qtd}</span>
+      </div>
+      <select class="rp-qty" disabled>${opcoes}</select>
+    </div>`;
+  }).join('');
+
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">Reimpressão</div><h3>${p.id} — escolha as fotos</h3></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <p class="modal-sub">Marque só o que precisa reimprimir. A reimpressão consome ribbon e não altera total, pagamento ou status do pedido.</p>
+    <div class="reprint-list" id="rp-lista">${rows}</div>
+    <div class="reprint-summary">
+      <span id="rp-resumo">Nenhuma foto selecionada</span>
+      <button class="fc-btn" id="rp-todas" style="padding:8px 12px;border-radius:8px;font-size:12px;">Marcar todas</button>
+    </div>
+    <div class="reopen-actions">
+      <button class="btn-primary" id="rp-confirmar" disabled>🖨️ Reimprimir selecionadas</button>
+      <button class="btn-secondary" onclick="closeModal()">Cancelar</button>
+    </div>
+  `);
+  document.getElementById('modal-box').classList.add('wide');
+
+  const linhas = [...document.querySelectorAll('#rp-lista .reprint-row')];
+  const btnConfirmar = document.getElementById('rp-confirmar');
+  const resumo = document.getElementById('rp-resumo');
+
+  const selecionadas = () => linhas.map((row, idx) => {
+    const check = row.querySelector('.rp-check');
+    if(!check.checked) return null;
+    const qtd = Math.max(1, parseInt(row.querySelector('.rp-qty').value, 10) || 1);
+    return { ...itensFoto[idx], qtd };
+  }).filter(Boolean);
+
+  const atualizar = () => {
+    let copias = 0, unidades = 0;
+    for(const row of linhas){
+      const check = row.querySelector('.rp-check');
+      const sel = row.querySelector('.rp-qty');
+      sel.disabled = !check.checked;
+      row.classList.toggle('checked', check.checked);
+      if(check.checked){
+        const qtd = Math.max(1, parseInt(sel.value, 10) || 1);
+        copias += qtd;
+        unidades += (parseInt(row.dataset.unid, 10) || 1) * qtd;
+      }
+    }
+    resumo.textContent = copias
+      ? `${copias} cópia(s) — ~${unidades} unidade(s) de ribbon`
+      : 'Nenhuma foto selecionada';
+    btnConfirmar.disabled = copias === 0;
+  };
+
+  linhas.forEach(row => {
+    row.querySelector('.rp-check').addEventListener('change', atualizar);
+    row.querySelector('.rp-qty').addEventListener('change', atualizar);
+  });
+
+  document.getElementById('rp-todas').addEventListener('click', () => {
+    linhas.forEach((row, idx) => {
+      row.querySelector('.rp-check').checked = true;
+      row.querySelector('.rp-qty').value = String(itensFoto[idx].qtd);
+    });
+    atualizar();
+  });
+
+  btnConfirmar.addEventListener('click', () => {
+    const itens = selecionadas();
+    if(!itens.length) return;
+    closeModal();
+    iniciarImpressaoFotos(p._realId || p.id, itens, { reimpressao: true });
+  });
+
+  atualizar();
+}
+
 /* ---------------- CANCELAMENTO COM SELEÇÃO DE ITENS QUE VOLTAM AO ESTOQUE ---------------- */
 function askCancelarPedido(p){
   const itensReais = p.itens.filter(it=>!['combo-desconto','ajuste','desconto-catalogo','desconto-senha-master','desconto-falha-operacional','desconto-comercial'].includes(it.tipo) && it.preco>=0);
   if(itensReais.length===0){
     // pedido só com linhas de ajuste/desconto — cancela direto, sem nada pra devolver
     askSenhaMotivo('Cancelar pedido', `Isso vai cancelar o ${p.id} por completo (${fmt(p.total)}).`, (senha,motivo)=>{
-      efetivarCancelamento(p, [], [], senha, motivo);
-    });
+      efetivarCancelamento(p, [], [], senha, motivo, new Map());
+    }, p.id);
     return;
   }
+  const impressoPadrao = p.impresso === true;
+  const decisaoFoto = new Map();
+  itensReais.forEach(it=>{ if(it.tipo==='tamanho') decisaoFoto.set(it, impressoPadrao ? 'sim' : 'nao'); });
+  const pedidoEmImpressao = printando && _printPedidoId && String(_printPedidoId) === String(p._realId || p.id);
+
   const linhasHtml = itensReais.map((it,i)=>{
-    const ehFoto = it.tipo==='tamanho';
-    const marcadoPadrao = !ehFoto; // itens físicos vêm marcados por padrão; fotos vêm desmarcadas (normalmente já foram impressas)
+    const qtdTxt = it.qtd>1 ? it.qtd+'x ' : '';
+    const sessTxt = it.tipo==='tamanho' && it.sessionSenha ? ` · Sessão #${it.sessionSenha}` : '';
+    if(it.tipo==='tamanho'){
+      const v = decisaoFoto.get(it);
+      return `
+      <div class="cnc-row" data-i="${i}">
+        <img src="${img(it.fotoSeed,60,75)}" alt="">
+        <div class="cnc-info">
+          <div class="cnc-name">${qtdTxt}${it.label}</div>
+          <div class="cnc-meta">${fmt(it.preco)}${sessTxt}</div>
+        </div>
+        <div class="cnc-decisao">
+          <span class="cnc-label">Foi impresso?</span>
+          <div class="cnc-seg">
+            <button type="button" class="cnc-seg-btn ${v==='sim'?'on':''}" data-i="${i}" data-v="sim" aria-pressed="${v==='sim'}">Sim</button>
+            <button type="button" class="cnc-seg-btn ${v==='nao'?'on':''}" data-i="${i}" data-v="nao" aria-pressed="${v==='nao'}">Não</button>
+          </div>
+        </div>
+      </div>`;
+    }
     return `
-    <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--navy-850);border:1px solid var(--navy-line);border-radius:8px;margin-bottom:8px;cursor:pointer;">
-      <input type="checkbox" class="cnc-check" data-i="${i}" ${marcadoPadrao?'checked':''} style="accent-color:var(--gold-500);width:16px;height:16px;flex-shrink:0;">
-      <img src="${img(it.fotoSeed,60,75)}" style="width:34px;height:42px;object-fit:cover;border-radius:4px;flex-shrink:0;">
-      <span style="flex:1;font-size:13px;">${it.qtd>1?it.qtd+'x ':''}${it.label}</span>
-      <span style="font-size:11px;color:var(--slate-400);">${ehFoto?'foto — confira se foi mesmo impressa':'item físico'}</span>
+    <label class="cnc-row" data-i="${i}">
+      <input type="checkbox" class="cnc-check" data-i="${i}" checked>
+      <img src="${img(it.fotoSeed,60,75)}" alt="">
+      <div class="cnc-info">
+        <div class="cnc-name">${qtdTxt}${it.label}</div>
+        <div class="cnc-meta">${fmt(it.preco)} · <span class="cnc-fisico-estado">volta ao estoque</span></div>
+      </div>
     </label>`;
   }).join('');
+
   openModal(`
-    <div class="modal-head"><div><div class="modal-step-label">Cancelar pedido ${p.id}</div><h3>O que volta pro estoque?</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
-    <p class="modal-sub">Marque só o que realmente <strong>não foi entregue/consumido</strong> — ex: ímã que já foi colado não volta; foto que não chegou a imprimir por queda de energia, sim. O que ficar desmarcado é registrado como perda, com relatório impresso pra anexar ao material perdido.</p>
-    ${linhasHtml}
+    <div class="modal-head"><div><div class="modal-step-label">Cancelar pedido ${p.id}</div><h3>O que foi impresso e o que volta?</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
+    <p class="modal-sub">Nas fotos, marque <strong>Sim</strong> só no que já saiu da impressora — isso vira perda. <strong>Não</strong> devolve o papel/ribbon. Nos itens físicos, desmarque só o que foi entregue/colado; o resto volta ao estoque.</p>
+    ${pedidoEmImpressao ? '<div class="cnc-warn">Esta venda está imprimindo agora. As fotos que já saíram devem ser marcadas como <strong>Sim</strong>; o restante será interrompido.</div>' : ''}
+    <div class="cnc-list">${linhasHtml}</div>
+    <div class="cnc-summary">
+      <div><span>Volta ao estoque</span><strong id="cnc-volta">0</strong></div>
+      <div><span>Perda estimada</span><strong id="cnc-perda">—</strong></div>
+    </div>
     <button class="btn-primary" id="cnc-continuar" style="margin-top:8px;">Continuar</button>
   `);
-  document.getElementById('cnc-continuar').addEventListener('click', ()=>{
-    const marcados = [...document.querySelectorAll('.cnc-check:checked')].map(el=>itensReais[+el.dataset.i]);
-    askSenhaMotivo('Cancelar pedido', `Isso vai cancelar o ${p.id} por completo (${fmt(p.total)}). ${marcados.length} iten${marcados.length===1?'':'s'} volta${marcados.length===1?'':'m'} pro estoque.`, (senha,motivo)=>{
-      efetivarCancelamento(p, itensReais, marcados, senha, motivo);
+
+  const calcular = ()=>{
+    const voltam = [], perdaInfo = new Map();
+    let valorPerda = 0;
+    itensReais.forEach((it,i)=>{
+      if(it.tipo==='tamanho'){
+        if(decisaoFoto.get(it)==='sim'){
+          perdaInfo.set(it, 'impresso');
+          valorPerda += Number(it.preco) || 0;
+        } else {
+          voltam.push(it);
+        }
+      } else {
+        const el = document.querySelector(`.cnc-check[data-i="${i}"]`);
+        if(el && el.checked){
+          voltam.push(it);
+        } else {
+          perdaInfo.set(it, 'fisico');
+          valorPerda += Number(it.preco) || 0;
+        }
+      }
+    });
+    return { voltam, perdaInfo, valorPerda };
+  };
+  const atualizarResumo = ()=>{
+    const { voltam, valorPerda } = calcular();
+    document.getElementById('cnc-volta').textContent = voltam.length;
+    document.getElementById('cnc-perda').textContent = valorPerda > 0 ? fmt(valorPerda) : 'nenhuma';
+  };
+  document.querySelectorAll('.cnc-seg-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const i = +btn.dataset.i;
+      const it = itensReais[i];
+      decisaoFoto.set(it, btn.dataset.v);
+      btn.parentElement.querySelectorAll('.cnc-seg-btn').forEach(b=>{
+        const on = b === btn;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      atualizarResumo();
     });
   });
+  document.querySelectorAll('.cnc-check').forEach(chk=>chk.addEventListener('change', ()=>{
+    const estado = chk.closest('.cnc-row')?.querySelector('.cnc-fisico-estado');
+    if(estado) estado.textContent = chk.checked ? 'volta ao estoque' : 'não volta — perda';
+    atualizarResumo();
+  }));
+  document.getElementById('cnc-continuar').addEventListener('click', ()=>{
+    const { voltam, perdaInfo, valorPerda } = calcular();
+    const perdidos = itensReais.length - voltam.length;
+    const subtitulo = `Isso vai cancelar o ${p.id} por completo (${fmt(p.total)}). `
+      + (perdidos > 0
+        ? `${voltam.length} iten${voltam.length===1?'':'s'} volta${voltam.length===1?'':'m'} ao estoque e ${perdidos} ser${perdidos===1?'á':'ão'} registrado${perdidos===1?'':'s'} como perda (${fmt(valorPerda)}).`
+        : 'Nenhum item será registrado como perda.');
+    askSenhaMotivo('Cancelar pedido', subtitulo, (senha,motivo)=>{
+      efetivarCancelamento(p, itensReais, voltam, senha, motivo, perdaInfo);
+    }, p.id);
+  });
+  atualizarResumo();
 }
 
-function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo){
+function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perdaInfo){
   itensQueVoltam.forEach(it=>{
     if(it.tipo==='tamanho'){
       const t = TAMANHOS.find(x=>x.id===it.produtoId);
@@ -6563,23 +6915,31 @@ function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo){
   try{
     // persiste o cancelamento no sidecar (sobrevive a restart — sem isso o pedido
     // volta a 'pago' no reboot e o portal "des-cancela" o registro)
-    natalApi.atualizarPedido(p._realId || p.id, { status: 'cancelado' });
+    natalApi.atualizarPedido(p._realId || p.id, { status: 'cancelado' })
+      .catch(e=> console.warn('[pdv] falha ao persistir cancelamento:', e))
+      .then(()=> natalApi.limparFila({ pedidoId: p._realId || p.id }))
+      .catch(()=>{});
   }catch(e){ console.warn('[pdv] falha ao persistir cancelamento:', e); }
   agendarPedidosPortal(500);
   renderRibbonChip();
   renderCombos();
-  toast(`Pedido ${p.id} cancelado — ${itensQueVoltam.length} iten${itensQueVoltam.length===1?'':'s'} devolvido${itensQueVoltam.length===1?'':'s'} ao estoque, motivo registrado`);
+  const perdidos = itensPerdidos.length;
+  toast(`Pedido ${p.id} cancelado — ${itensQueVoltam.length} devolvido${itensQueVoltam.length===1?'':'s'} ao estoque${perdidos>0?`, ${perdidos} perda${perdidos===1?'':'s'}`:''}`);
   renderPedidosScreen();
   closeModal();
 
   if(itensPerdidos.length>0){
-    mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, senha, motivo);
+    mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, senha, motivo, perdaInfo || new Map());
   }
 }
 
 /* relatório de perda — impresso pra anexar fisicamente ao material/fotos perdidas, com a senha usada pra auditoria */
-function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, senha, motivo){
-  const linhasPerdidos = itensPerdidos.map(it=>`<div class="rc-line"><span>${it.qtd>1?it.qtd+'x ':''}${it.label} · #${it.sessionSenha}</span><span>${fmt(it.preco)}</span></div>`).join('');
+function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, senha, motivo, perdaInfo){
+  const linhasPerdidos = itensPerdidos.map(it=>{
+    const motivoPerda = (perdaInfo && perdaInfo.get(it)) === 'impresso' ? 'impresso — perdido' : 'não devolvido — perdido';
+    const sessTxt = it.tipo==='tamanho' && it.sessionSenha ? ` · #${it.sessionSenha}` : '';
+    return `<div class="rc-line"><span>${it.qtd>1?it.qtd+'x ':''}${it.label}${sessTxt} · ${motivoPerda}</span><span>${fmt(it.preco)}</span></div>`;
+  }).join('');
   const linhasDevolvidos = itensQueVoltam.length
     ? itensQueVoltam.map(it=>`<div class="rc-line"><span>${it.qtd>1?it.qtd+'x ':''}${it.label}</span><span style="color:var(--green-500);">voltou ao estoque</span></div>`).join('')
     : '<div class="rc-line"><span style="color:var(--slate-500);">nenhum</span><span></span></div>';
@@ -7317,6 +7677,7 @@ async function INIT(){
   document.getElementById('import-chip').addEventListener('click', ()=> showConfigModal('card'));
   document.getElementById('login-peer').addEventListener('click', abrirRecebimento);
   document.getElementById('receive-close').addEventListener('click', fecharRecebimento);
+  document.getElementById('printer-alert-close').addEventListener('click', fecharPrinterAlert);
   const receiveRestart = document.getElementById('receive-restart');
   if(receiveRestart) receiveRestart.addEventListener('click', async ()=>{
     receiveRestart.disabled = true;
@@ -7386,12 +7747,12 @@ async function INIT(){
   /* eventos em tempo real: mudança em sessão/pedido/caixa re-renderiza a tela ativa */
   connectSSE((key, data) => {
     carregarSessoes().then(()=> renderDateSelect()); // mantém o seletor por dia sincronizado
-    if(key==='print-start'){ printando = true; _printFila = 0; _printFilaUltimoAviso = 0; if(data && data.total) _printProgress = { current: 0, total: data.total }; toast('🖨️ Impressão iniciada — aguardando terminar...'); }
+    if(key==='print-start'){ printando = true; _printPedidoId = data && data.pedidoId ? String(data.pedidoId) : null; _printFila = 0; _printFilaUltimoAviso = 0; if(data && data.total) _printProgress = { current: 0, total: data.total }; toast(data && data.reimpressao ? '🖨️ Reimpressão iniciada — aguardando terminar...' : '🖨️ Impressão iniciada — aguardando terminar...'); }
     if(key==='print-waiting'){
       /* impressora desligada: trabalho fica na fila persistente do sidecar e
          volta a imprimir sozinha quando a impressora voltar. Sem modal. */
       const q = (data && data.qtd) || 0;
-      printando = false; _printProgress = null; _printFila = q;
+      printando = false; _printPedidoId = null; _printProgress = null; _printFila = q;
       if(q > 0 && q !== _printFilaUltimoAviso){
         _printFilaUltimoAviso = q;
         toast(`🖨️ ${q} trabalho(s) na fila — serão impressos quando a impressora voltar`);
@@ -7402,9 +7763,10 @@ async function INIT(){
     if(key==='print-fila:atualizada'){ _sincronizarEstadoFila(); }
     if(key==='galeria:enviado' && data && data.codigo){ atualizarStatusDigitalRemoto(data.codigo); renderDigitalConfigPanel(); }
     if(key==='print-complete'){
-      printando = false; _printProgress = null; _printFila = 0; _printFilaUltimoAviso = 0;
-      if(data && data.success === false){ mostrarFalhaImpressao('Falha na impressão', data.error || 'Falha na impressão ASK-400'); }
-      else if(data && data.success){ toast('✅ Impressão concluída!'); }
+      printando = false; _printPedidoId = null; _printProgress = null; _printFila = 0; _printFilaUltimoAviso = 0;
+      if(data && data.success === false && !data.canceled){ mostrarFalhaImpressao('Falha na impressão', data.error || 'Falha na impressão ASK-400'); }
+      else if(data && data.canceled){ toast('🛑 Impressão interrompida — pedido cancelado'); }
+      else if(data && data.success){ toast(data.reimpressao ? '✅ Reimpressão concluída!' : '✅ Impressão concluída!'); }
       renderRibbonChip();
     }
     if(['pedido:criado','pedido:pago','pedido:impresso','caixa:aberto','caixa:fechado','print-complete'].includes(key)) carregarPedidos();
