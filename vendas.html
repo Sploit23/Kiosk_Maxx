@@ -3365,9 +3365,12 @@ async function finalizarVenda(){
   // O snapshot diário (vendas.push) também sai aqui, sem esperar o SSE de
   // pedido:pago: se o stream cair, a venda aparecia no portal só 5 min depois.
   agendarSnapshotVendas(2500);
+
   recalcularVendasHoje();
   renderRibbonChip();
-  iniciarImpressaoFotos(pedidoId, itensResumo); // ASK-400: composição + upload + impressão (em background)
+  // Fotos vão para a ASK-400 apenas pelo botão manual do resumo.
+  const _fotosAsk = itensResumo.filter(c => c.tipo === 'tamanho' && c.fotoSeed);
+  _printPendente = _fotosAsk.length ? { pedidoId, itens: itensResumo, total: _fotosAsk.reduce((s, c) => s + (c.qtd || 1), 0) } : null;
 
   /* ---- MODO EDIÇÃO: pedido novo vinculado ao original ---- */
   if(editingPedidoId){
@@ -3399,7 +3402,6 @@ async function finalizarVenda(){
     return;
   }
 
-  /* ---- MODO NORMAL: venda nova ---- */
   cart = [];
   const linhasResumo = itensResumo.map(c => `
     <div class="rc-line"><span>${c.qtd > 1 ? c.qtd + 'x ' : ''}${c.label} · #${c.sessionSenha}</span><span>${fmt(c.preco)}</span></div>
@@ -3411,6 +3413,7 @@ async function finalizarVenda(){
       <div><div class="modal-step-label">Resumo da venda</div><h3>Pedido ${pedidoId}</h3></div>
       <button class="modal-close" id="btn-close-summary">×</button>
     </div>
+    <button id="btn-print-summary" style="width:100%;margin:0 0 12px;padding:7px 12px;border-radius:8px;border:1px solid var(--gold-400);background:transparent;color:var(--gold-300);font-weight:700;font-size:12px;cursor:pointer;">🧾 Imprimir cupom</button>
     <div class="success-box" style="padding-top:0;">
       <div class="success-check">✓</div>
       <p style="margin-bottom:14px;">${fmt(total)} confirmados · sessão(ões) #${senhasResumo.join(', #')} atualizada(s) para "Vendida"</p>
@@ -3425,18 +3428,50 @@ async function finalizarVenda(){
     </div>
     ${codigoDigital ? `<div class="digital-box" style="margin-top:14px;">${htmlQrDigital(codigoDigital, '📲 Foto digital — mostre este QR para o cliente')}</div>
       <button class="btn-secondary" id="btn-sync-digital" style="width:100%;margin-top:8px;">Sincronizar envio digital</button>` : ''}
-    <button class="btn-primary resumo-action" id="btn-print-summary">🖨 Imprimir resumo</button>
     ${temFoto ? `<button id="btn-print-fotos" style="width:100%;margin-top:10px;padding:13px;border-radius:10px;border:1px solid var(--gold-400);background:linear-gradient(135deg,var(--gold-300),var(--gold-050));color:var(--navy-950);font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 3px 12px rgba(212,162,76,.35);">🖨️ Imprimir fotos na ASK-400</button>` : ''}
     <button class="btn-primary resumo-action" id="btn-nova-venda">Continuar vendendo nesta sessão</button>
     <button class="btn-primary resumo-action" id="btn-ir-painel">Voltar para o painel de sessões</button>
   `);
 
-  const continuarVendendo = () => { closeModal(); renderCart(); renderThumbs(); renderRibbonChip(); };
   document.getElementById('btn-print-summary').addEventListener('click', async ()=>{
-    const r = receiptHtmlAtivo();
-    if(r && await imprimirThermal('<div class="receipt">' + r.innerHTML + '</div>', 'Resumo do pedido ' + pedidoId + ' enviado')){
-      marcarGuiaImpressa(pedidoId);
-    }
+    try {
+      const loja = (_identidade && _identidade.lojaNome) || (typeof config!=='undefined'?config.lojaNome:'') || '';
+      const pdv = (_identidade && _identidade.pdvNome) || (typeof config!=='undefined'?config.pdvNome:'') || '';
+      const op = (typeof currentUser!=='undefined' && currentUser && currentUser.nome) || '';
+      const dt = new Date().toLocaleString('pt-BR');
+      const W = 32;
+      const centro = (t) => { t = String(t); const pad = Math.max(0, Math.floor((W - t.length) / 2)); return ' '.repeat(pad) + t; };
+      const linha = (esq, dir) => { esq = String(esq); dir = String(dir); const esp = Math.max(1, W - esq.length - dir.length); return esq + ' '.repeat(esp) + dir; };
+      const sep = '-'.repeat(W);
+      const out = [];
+      out.push(centro('MAX FOTO VENDAS'));
+      if(loja) out.push(centro(loja));
+      if(pdv || op) out.push(centro([pdv, op].filter(Boolean).join(' - ')));
+      out.push(centro(dt));
+      out.push(sep);
+      out.push('Pedido: ' + pedidoId);
+      out.push(sep);
+      itensResumo.forEach(c => {
+        const nome = String(c.label || '');
+        const q = c.qtd > 1 ? c.qtd + 'x ' : '';
+        out.push(q + nome + ' #' + c.sessionSenha);
+        out.push(linha('', fmt(c.preco)));
+      });
+      out.push(sep);
+      out.push(linha('TOTAL', fmt(total)));
+      out.push('Pago: ' + pagamentos);
+      out.push(sep);
+      out.push(centro('Obrigado pela preferencia!'));
+      out.push('');
+      const texto = out.join('\n');
+      if(window.natal && typeof window.natal.ipcInvoke === 'function'){
+        const res = await window.natal.ipcInvoke('natal:printBematech', { texto });
+        if(res && res.success) toast('🧾 Cupom enviado para a Bematech');
+        else toast('⚠ Falha ao imprimir cupom');
+      } else {
+        toast('⚠ Impressão Bematech indisponível');
+      }
+    }catch(e){ toast('⚠ Falha ao imprimir cupom'); }
   });
   if(temFoto) document.getElementById('btn-print-fotos').addEventListener('click', ()=>{
     if(printando){ toast('🖨️ Impressão já em andamento — aguarde...'); return; }
@@ -3449,6 +3484,7 @@ async function finalizarVenda(){
     document.getElementById('screen-painel').classList.add('active');
     renderPainel(); renderRibbonChip(); renderGlobalCart();
   };
+  const continuarVendendo = () => { closeModal(); renderCart(); renderThumbs(); renderRibbonChip(); };
   document.getElementById('btn-nova-venda').addEventListener('click', continuarVendendo);
   document.getElementById('btn-ir-painel').addEventListener('click', voltarPainel);
   document.getElementById('btn-close-summary').addEventListener('click', continuarVendendo);
@@ -5433,9 +5469,9 @@ const r = await natalApi.limparFila({ pedidoId });
     const lojaNomeVal = (lojaNomeEl ? lojaNomeEl.value.trim() : '');
     const impFolderEl = document.getElementById('cfg-import-folder');
     const impFolderVal = (impFolderEl ? impFolderEl.value.trim() : '');
-    const impSessoesEl = document.getElementById('cfg-import-sessoes');
-    const impSessoesVal = impSessoesEl ? !!impSessoesEl.checked : true;
-    try{
+  const impSessoesEl = document.getElementById('cfg-import-sessoes');
+  const impSessoesVal = impSessoesEl ? !!impSessoesEl.checked : true;
+  try{
       const partial = { photosFolder: val, logoTexto: logoVal };
       if(lojaIdEl) partial.lojaId = lojaIdVal;
       if(lojaNomeEl) partial.lojaNome = lojaNomeVal;
@@ -5675,10 +5711,7 @@ function renderCheckoutStep(total){
       toast('⚠ Nenhum caixa aberto no momento — não é possível confirmar a venda');
       return;
     }
-    // sem segunda tela de confirmação: impressão, baixa de saldo e caixa acontecem aqui, direto
-    const qtdTrabalhos = cart.filter(c=>c.tipo==='tamanho').reduce((s,c)=>s+(c.qtd||1),0);
-    toast('🖨️ Enviando resumo para a Bematech (impressora fiscal)...');
-    setTimeout(()=>toast(`🖨️ Enviando ${qtdTrabalhos} trabalho(s) de impressão para a Fuji ASK-400...`), 700);
+    // Nada é impresso automaticamente. Cupom só no botão do resumo; fotos só na ASK-400.
     efetivoRows = pretendidoRows.map(r=>({...r}));
     finalizarVenda();
   });

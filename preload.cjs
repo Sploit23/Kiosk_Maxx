@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('natal', {
   }),
   selectFolder: () => ipcRenderer.invoke('natal:selectFolder'),
   saveConfig: (partial) => ipcRenderer.invoke('natal:saveConfig', partial),
+  printBematech: (texto) => ipcRenderer.invoke('natal:printBematech', { texto }),
   restartImporter: () => ipcRenderer.invoke('natal:restartImporter'),
   importerInfo: () => ipcRenderer.invoke('natal:importerInfo'),
   openImporterLog: () => ipcRenderer.invoke('natal:openImporterLog'),

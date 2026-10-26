@@ -795,6 +795,42 @@ app.whenReady().then(() => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
+
+
+ipcMain.handle('natal:printBematech', async (_event, { texto } = {}) => {
+  try {
+    const txt = typeof texto === 'string' ? texto : '';
+    if (!txt || txt.trim().length === 0) {
+      try { logMain('[ImpressaoBematech] texto vazio'); } catch(e){}
+      return { success: false, error: 'texto vazio' };
+    }
+    const printer = 'MP-4200 TH';
+    const safe = txt.replace(/\r/g, '').replace(/\n/g, '\r\n');
+    const b64 = Buffer.from(safe + '\r\n\r\n\r\n', 'utf8').toString('base64');
+    const ps = "Add-Type -AssemblyName System.Drawing; Add-Type -AssemblyName System.Windows.Forms; $pd = New-Object System.Drawing.Printing.PrintDocument; $pd.PrinterSettings.PrinterName = '" + printer.replace(/'/g, "''") + "'; $pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins -ArgumentList 0,0,0,0; $txt = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + b64 + "')); $pd.Add_PrintPage({ param($s,$ev); $ev.Graphics.PageUnit = [System.Drawing.GraphicsUnit]::Pixel; $base = 12.0; $f0 = New-Object System.Drawing.Font('Courier New', $base, [System.Drawing.FontStyle]::Bold); $widest = (($txt -split ([Environment]::NewLine)) | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum; $sample = ('0' * [int]$widest); $sz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $sample, $f0); $target = $ev.Graphics.VisibleClipBounds.Width * 0.98; if ($target -le 0) { $target = 576 }; $scale = 1.0; if ($sz.Width -gt 0) { $scale = $target / $sz.Width }; $newSize = [float]([Math]::Max(8.0, [Math]::Min(30.0, $base * $scale))); $f = New-Object System.Drawing.Font('Courier New', $newSize, [System.Drawing.FontStyle]::Bold); [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $txt, $f, (New-Object System.Drawing.Point 4,4), [System.Drawing.Color]::Black); [Console]::WriteLine('PRINT widest=' + $widest + ' measured=' + $sz.Width + ' target=' + [Math]::Round($target,1) + ' scale=' + [Math]::Round($scale,3) + ' size=' + [Math]::Round($newSize,2) + ' visW=' + [Math]::Round($ev.Graphics.VisibleClipBounds.Width,1) + ' dpiY=' + $ev.Graphics.DpiY) }); $pd.Print();";
+    const { spawn } = require('child_process');
+    return await new Promise((resolve) => {
+      try {
+        try { logMain('[ImpressaoBematech] enviando para ' + printer + ' (' + txt.length + ' chars)'); } catch(e){}
+        const psp = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], { windowsHide: true });
+        psp.stdout.on('data', (d) => { try { logMain('[ImpressaoBematech] out: ' + String(d).trim()); } catch(e){} });
+        psp.stderr.on('data', (d) => { try { logMain('[ImpressaoBematech] err: ' + String(d).trim()); } catch(e){} });
+        let done = false;
+        const fim = (r) => { if (!done) { done = true; resolve(r); } };
+        const t = setTimeout(() => { try { psp.kill(); } catch(e){} fim({ success: false, error: 'timeout', printer }); }, 15000);
+        psp.on('error', (e) => { clearTimeout(t); try { logMain('[ImpressaoBematech] erro: ' + e.message); } catch(e2){} fim({ success: false, error: e.message, printer }); });
+        psp.on('close', (code) => { clearTimeout(t); if (code === 0) { try { logMain('[ImpressaoBematech] ok'); } catch(e){} fim({ success: true, printer }); } else { try { logMain('[ImpressaoBematech] ps_exit_' + code); } catch(e){} fim({ success: false, error: 'ps_exit_' + code, printer }); } });
+      } catch (e) {
+        try { logMain('[ImpressaoBematech] exc: ' + e.message); } catch(e2){}
+        resolve({ success: false, error: e.message, printer });
+      }
+    });
+  } catch (e) {
+    try { logMain('[ImpressaoBematech] exc2: ' + e.message); } catch(e2){}
+    return { success: false, error: e.message };
+  }
+});
+
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
 app.on('will-quit', () => {
