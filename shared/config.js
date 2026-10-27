@@ -122,8 +122,12 @@ const FOTO_FORMATS = {
     // área própria reservada pela arte do molde e a escrito entraria em cima da
     // foto. A bolinha segue a mesma regra (também é um recorte com moldura).
     overlay: {
-      image: './overlays/polaroide.png',
+      image: './overlays/polaroide-overlay1.png',
       grid: { rows: 1, cols: 2 },
+      variants: [
+        { id: '1', label: 'Overlay 1', image: './overlays/polaroide-overlay1.png' },
+        { id: '2', label: 'Overlay 2', image: './overlays/polaroide-overlay2.png' },
+      ],
     },
   },
 };
@@ -312,16 +316,17 @@ const config = {
   // As coordenadas são em px da CÉLULA (= px do PNG do molde, 300 DPI), que é
   // a MESMA unidade que a composição de impressão usa. Quem trabalha em px de
   // tela (o editor do PDV) converte pelo box — ver `windowInBox`.
-  getOverlayWindow(key) {
+  getOverlayWindow(key, variantId) {
     const ef = this.getEditorFrame(key);
-    const w = OVERLAY_WINDOW[key];
+    const variant = this.getOverlayVariants(key).find(v => v.id === String(variantId));
+    const w = variant?.window || OVERLAY_WINDOW[key];
     if (!w) return { x: 0, y: 0, w: ef.width, h: ef.height };
     return { x: w.x, y: w.y, w: w.w, h: w.h };
   },
 
   // A mesma janela, convertida para px do box de tela (o editor do PDV).
-  windowInBox(key) {
-    const win = this.getOverlayWindow(key);
+  windowInBox(key, variantId) {
+    const win = this.getOverlayWindow(key, variantId);
     const ef = this.getEditorFrame(key);
     const box = this.getEditorBox(key);
     const kx = box.W / ef.width;
@@ -329,9 +334,15 @@ const config = {
     return { x: win.x * kx, y: win.y * ky, w: win.w * kx, h: win.h * ky };
   },
 
-  getOverlay(key) {
-    const f = FOTO_FORMATS[key];
-    return f?.overlay || null;
+  getOverlayVariants(key) {
+    return FOTO_FORMATS[key]?.overlay?.variants || [];
+  },
+
+  getOverlay(key, variantId) {
+    const base = FOTO_FORMATS[key]?.overlay;
+    if (!base) return null;
+    const variant = this.getOverlayVariants(key).find(v => v.id === String(variantId));
+    return variant ? { ...base, ...variant } : base;
   },
 
   // Box de enquadramento na tela, em px de CSS. Ver EDITOR_BOX_H acima.

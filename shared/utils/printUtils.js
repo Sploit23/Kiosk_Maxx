@@ -72,7 +72,7 @@ function drawLogoBadge(ctx, W, H, texto) {
 export async function composePrintImage(photo) {
   const printRes = config.getPrintRes(photo.key);
   const editorFrame = config.getEditorFrame(photo.key);
-  const overlayInfo = config.getOverlay(photo.key);
+  const overlayInfo = config.getOverlay(photo.key, photo.overlayVariant);
   let printW = printRes.width;
   let printH = printRes.height;
   let editorW = editorFrame.width;
@@ -129,7 +129,7 @@ export async function composePrintImage(photo) {
     // com zoom diferente do que a vendedora ajustou. `getOverlayWindow` cai na
     // célula inteira quando não há janela medida (10x15/15x20), o que preserva
     // o comportamento antigo sem nenhum desvio.
-    const win = config.getOverlayWindow(photo.key);
+    const win = config.getOverlayWindow(photo.key, photo.overlayVariant);
     // Giro de 90°/270° troca a largura/altura que a foto ocupa — o cover tem
     // de usar as dimensões efetivas (trocadas), igual ao setupCover da tela.
     const angPdv = ((photo.angle ?? 0) % 360 + 360) % 360;

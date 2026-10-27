@@ -784,6 +784,10 @@
     font-size:12px;color:var(--slate-300);
   }
   .fc-logo input{accent-color:var(--gold-500);}
+  .fc-extra-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;}
+  .fc-extra-row .fc-logo{margin-top:0;}
+  .fc-overlay-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .fc-overlay-btns{display:flex;gap:6px;}
   /* filhos da barra: fundo claro, texto escuro (não afeta os fc-btn dos modais) */
   .frame-controls .fc-label{color:#45546a;}
   .frame-controls .fc-val{color:#8a5e12;font-weight:700;}
@@ -886,13 +890,6 @@
   .combo-card .oc-add-btn{font-size:10.5px;padding:6px 9px;white-space:nowrap;}
   .combo-card .oc-add-btn:disabled{opacity:.4;}
 
-  .qty-stepper{
-    display:flex;align-items:center;justify-content:space-between;
-    background:var(--navy-900);border:1px solid var(--navy-line);border-radius:10px;
-    padding:10px 14px;
-  }
-  .qty-stepper.disabled{opacity:.4;pointer-events:none;}
-  .qty-label{font-size:12px;color:var(--slate-300);}
   .qty-controls{display:flex;align-items:center;gap:12px;}
   .qty-controls button{
     width:26px;height:26px;border-radius:6px;
@@ -1388,10 +1385,19 @@
             <button class="fc-btn" id="btn-overlay">Ocultar guia</button>
             <button class="fc-btn fc-btn-undo" id="btn-undo">↺ Desfazer ajuste</button>
           </div>
-          <label class="fc-logo">
-            <input type="checkbox" id="chk-logo" checked>
-            Incluir logo do shopping nesta foto
-          </label>
+          <div class="fc-extra-row">
+            <label class="fc-logo">
+              <input type="checkbox" id="chk-logo" checked>
+              Incluir logo do shopping nesta foto
+            </label>
+            <div class="fc-overlay-group" id="overlay-variant-group" style="display:none;">
+              <span class="fc-label">Molde</span>
+              <div class="fc-overlay-btns">
+                <button class="fc-btn active" type="button" data-overlay-variant="1">Overlay 1</button>
+                <button class="fc-btn" type="button" data-overlay-variant="2">Overlay 2</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="ribbon-banner" id="ribbon-banner" style="display:none;"></div>
       </div>
@@ -1412,14 +1418,6 @@
           <div class="option-cards" id="combos-list"></div>
         </div>
 
-        <div class="qty-stepper" id="qty-stepper">
-          <span class="qty-label">Quantidade desta cópia</span>
-          <div class="qty-controls">
-            <button id="qty-minus">−</button>
-            <span id="qty-value">1</span>
-            <button id="qty-plus">+</button>
-          </div>
-        </div>
         <button class="btn-add-cart" id="btn-add-cart" disabled>Adicionar ao carrinho</button>
       </div>
     </div>
@@ -1667,9 +1665,9 @@ let currentSession = null;
 let currentFoto = null;
 let currentTamanho = null;
 let currentOrientation = 'paisagem'; // 'paisagem' | 'retrato' — default paisagem
-let addQty = 1;
 let showOverlay = true;
 let includeLogo = true;
+let overlayVariant = '1';
 let logoTexto = 'SHOPPING PALLADIUM'; // texto da logo do shopping (configurável nas Configurações ⚙)
 let zoom = 100, offX = 0, offY = 0;
 let dragging=false, dragStart={x:0,y:0}, offStart={x:0,y:0};
@@ -1884,15 +1882,18 @@ function mapearPedido(p){
       // Multi-sessão: cada foto guarda a própria sessão; pedidos antigos caem na 1ª.
       const itemSessao = it.sessaoId || sessaoId;
       const itemSenha = itemSessao ? numeroSessao(itemSessao) : senhaSessao;
+      const modelo = modeloProduto(it.key);
+      const variant = config.getOverlayVariants(modelo).length ? (it.overlayVariant || '1') : null;
       return {
-        cartId: 'ped-f-' + p.id + '-' + (it.filename || '') + '-' + it.key,
+        cartId: 'ped-f-' + p.id + '-' + (it.filename || '') + '-' + it.key + (variant ? '-ov' + variant : ''),
         sessionId: itemSessao, sessionSenha: itemSenha,
         fotoSeed: it.filename ? (itemSessao ? itemSessao + '/' + it.filename : it.filename) : (it.key || null),
         tipo: 'tamanho', produtoId: it.key, label: labelProduto(it.key, 'tamanho'),
         qtd: it.qty || 1, precoUnit: it.unitPrice || 0, preco: it.subtotal || 0,
         zoom: it.scale || 100, offX: it.diffx || 0, offY: it.diffy || 0,
         orientation: it.orientation || 'retrato',
-        logo: config.allowsLogo(modeloProduto(it.key)), pdv: true,
+        overlayVariant: variant || undefined,
+        logo: config.allowsLogo(modelo), pdv: true,
       };
     }),
     ...(p.produtos || []).map(it => ({
@@ -3212,6 +3213,7 @@ async function criarPedidoReal(itens, total, origemPedidoId){
       key: c.produtoId, qty: c.qtd || 1, filename: (c.fotoSeed || '').includes('/') ? String(c.fotoSeed).split('/').pop() : (c.fotoSeed || null),
       sessaoId: c.sessionId || null,
       scale: c.zoom || 100, diffx: c.offX || 0, diffy: c.offY || 0, angle: 0,
+      overlayVariant: c.overlayVariant || null,
       orientation: c.orientation || 'paisagem', unitPrice: c.precoUnit || 0, subtotal: c.preco || 0, pdv: true,
     })),
     produtos: produtos.map(c => ({ key: c.produtoId, qty: c.qtd || 1, unitPrice: c.precoUnit || 0, subtotal: c.preco || 0 })),
@@ -3263,20 +3265,24 @@ async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
     const [sessSeed, fileName] = String(f.fotoSeed).split('/');
     const sessId = sessaoDaFoto(sessSeed, fileName);
     const base = (fileName || '').replace(/\.[^.]+$/, '');
-    const uploadName = sessId + '__' + base + '__' + f.produtoId + '.jpg';
-    const id = sessId + '/' + (fileName || '') + '__' + f.produtoId;
+    const tProd = TAMANHOS.find(x => x.id === f.produtoId);
+    const modelo = tProd ? modeloDe(tProd) : f.produtoId;
+    const variant = config.getOverlayVariants(modelo).length ? (f.overlayVariant || '1') : null;
+    const variantSuffix = variant ? '__ov' + variant : '';
+    const uploadName = sessId + '__' + base + '__' + f.produtoId + variantSuffix + '.jpg';
+    const id = sessId + '/' + (fileName || '') + '__' + f.produtoId + variantSuffix;
     const existente = agrupado.get(id);
     if(existente) existente.qty += (f.qtd || 1);
     else {
       // `key` é o MODELO físico (10x15/15x20/bolinha/polaroide): é ele que
       // escolhe a resolução/molde no compose e o media (6x4/6x8) no sidecar.
       // Um tamanho criado no portal pode ter id próprio, mas imprime no modelo.
-      const tProd = TAMANHOS.find(x => x.id === f.produtoId);
       agrupado.set(id, {
-        sessionId: sessId, filename: uploadName, key: tProd ? modeloDe(tProd) : f.produtoId,
+        sessionId: sessId, filename: uploadName, key: modelo,
         qty: f.qtd || 1, url: natalApi.fotoUrl(sessId, 'originais', fileName || ''),
         scale: f.zoom || 100, diffx: f.offX || 0, diffy: f.offY || 0, angle: 0,
         orientation: f.orientation || 'paisagem', pdv: true,
+        overlayVariant: variant,
         logo: !!f.logo, logoTexto,
       });
     }
@@ -3588,6 +3594,11 @@ async function finalizarVenda(){
       const pdv = (_identidade && _identidade.pdvNome) || (typeof config!=='undefined'?config.pdvNome:'') || '';
       const op = (typeof currentUser!=='undefined' && currentUser && currentUser.nome) || '';
       const dt = new Date().toLocaleString('pt-BR');
+      if(codigoDigital){
+        const html = cupomDigitalHtml({ loja, pdv, operador: op, data: dt, pedidoId, itens: itensResumo, total, pagamentos, codigoDigital });
+        await imprimirThermal(html, 'Cupom digital enviado', thermalPrinterName() || 'MP-4200 TH');
+        return;
+      }
       const W = 32;
       const centro = (t) => { t = String(t); const pad = Math.max(0, Math.floor((W - t.length) / 2)); return ' '.repeat(pad) + t; };
       const linha = (esq, dir) => { esq = String(esq); dir = String(dir); const esp = Math.max(1, W - esq.length - dir.length); return esq + ' '.repeat(esp) + dir; };
@@ -3700,7 +3711,38 @@ window.imprimirFotosPendentes = imprimirFotosPendentes;
 function thermalPrinterName(){
   try{ return (window.natal && window.natal.getConfig && window.natal.getConfig().thermalPrinterName) || ''; }catch{ return ''; }
 }
-async function imprimirThermal(conteudoHtml, rotulo){
+function escHtml(v){
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+function cupomDigitalHtml({ loja, pdv, operador, data, pedidoId, itens, total, pagamentos, codigoDigital }){
+  const itensHtml = itens.map(c => `
+    <div class="rc-line"><span>${c.qtd > 1 ? c.qtd + 'x ' : ''}${escHtml(c.label)} · #${escHtml(c.sessionSenha)}</span><span>${escHtml(fmt(c.preco))}</span></div>
+  `).join('');
+  const operacao = [pdv, operador].filter(Boolean).join(' - ');
+  const site = urlNatal('').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return `
+    <div class="cupom-center cupom-title">MAX FOTO VENDAS</div>
+    ${loja ? `<div class="cupom-center cupom-sub">${escHtml(loja)}</div>` : ''}
+    ${operacao ? `<div class="cupom-center cupom-sub">${escHtml(operacao)}</div>` : ''}
+    <div class="cupom-center cupom-sub">${escHtml(data)}</div>
+    <div class="cupom-sep"></div>
+    <div class="cupom-sub">Pedido: ${escHtml(pedidoId)}</div>
+    <div class="cupom-sep"></div>
+    ${itensHtml}
+    <div class="cupom-sep"></div>
+    <div class="rc-total"><span>TOTAL</span><span>${escHtml(fmt(total))}</span></div>
+    <div class="rc-pay">Pago: ${escHtml(pagamentos)}</div>
+    <div class="cupom-sep"></div>
+    <div class="cupom-center cupom-sub">Obrigado pela preferencia!</div>
+    <div class="cupom-digital">
+      <div class="cupom-digital-title">FOTO DIGITAL</div>
+      <div class="cupom-qr">${qrSvgTag(urlNatal(codigoDigital), { cellSize: 6, margin: 4 })}</div>
+      <div class="cupom-code">${escHtml(codigoDigital)}</div>
+      <div class="cupom-hint">Acesse ${escHtml(site)}</div>
+      <div class="cupom-hint">e digite o codigo acima</div>
+    </div>`;
+}
+async function imprimirThermal(conteudoHtml, rotulo, printerName){
   if(!window.natal || typeof window.natal.ipcInvoke !== 'function'){
     toast('⚠ Impressora térmica só funciona dentro do app (Electron)');
     return false;
@@ -3715,10 +3757,20 @@ async function imprimirThermal(conteudoHtml, rotulo){
   .rc-total, .rc-pay { font-weight:bold; margin-top:4px; }
   .rc-sub { margin:2px 0; }
   .rc-total { font-size:13px; }
+  .cupom-center { text-align:center; }
+  .cupom-title { font-weight:bold; font-size:14px; }
+  .cupom-sub { margin:1px 0; }
+  .cupom-sep { border-top:1px dashed #000; margin:6px 0; }
+  .cupom-digital { text-align:center; padding:2mm 0 12mm; }
+  .cupom-digital-title { font-weight:bold; font-size:13px; margin-bottom:4px; letter-spacing:1px; }
+  .cupom-qr { line-height:0; margin:2px auto 3px; }
+  .cupom-qr svg { width:46mm; height:46mm; display:block; margin:0 auto; }
+  .cupom-code { font-size:18px; font-weight:bold; letter-spacing:3px; margin:3px 0 4px; }
+  .cupom-hint { font-size:11px; }
 </style></head><body>${conteudoHtml}</body></html>`;
   if(rotulo) toast('🖨️ ' + rotulo);
   try{
-    const res = await window.natal.ipcInvoke('natal:printGuia', { html, printerName: thermalPrinterName() || undefined });
+    const res = await window.natal.ipcInvoke('natal:printGuia', { html, printerName: printerName || thermalPrinterName() || undefined });
     if(res && res.success){ toast('🖨️ Impresso com sucesso'); return true; }
     toast('⚠ Falha ao imprimir: ' + ((res && res.error) || 'erro desconhecido'));
     return false;
@@ -3922,6 +3974,7 @@ function openVenda(sessionId){
   lastOpenedSessionId = sessionId;
   currentFoto = currentSession.fotos[0];
   currentTamanho = null;
+  overlayVariant = '1';
   resetCrop();
   closeCartDrawer();
   document.getElementById('screen-painel').classList.remove('active');
@@ -3979,7 +4032,7 @@ function renderThumbs(){
     }
     photoInto(im, 'thumb', f);
     div.addEventListener('click', ()=>{
-      currentFoto=f; currentTamanho=null; resetCrop();
+      currentFoto=f; currentTamanho=null; overlayVariant='1'; resetCrop();
       renderThumbs(); renderOptions(); renderFrame();
     });
     strip.appendChild(div);
@@ -4019,7 +4072,7 @@ function renderOptions(){
       </button>
     `;
     card.querySelector('.oc-main').addEventListener('click', ()=>{
-      currentTamanho = t.id; resetCrop();
+      currentTamanho = t.id; overlayVariant='1'; resetCrop();
       renderOptions(); renderFrame();
     });
     if(selecionado){
@@ -4208,24 +4261,7 @@ function addCombo(comboId){
 function resetCrop(){
   zoom=100; offX=0; offY=0;
   currentOrientation='paisagem';
-  addQty=1;
-  renderQtyStepper();
 }
-
-function renderQtyStepper(){
-  const el = document.getElementById('qty-value');
-  if(el) el.textContent = addQty;
-  const stepper = document.getElementById('qty-stepper');
-  if(stepper) stepper.classList.toggle('disabled', !currentTamanho);
-}
-document.getElementById('qty-minus').addEventListener('click', ()=>{
-  addQty = Math.max(1, addQty-1);
-  renderQtyStepper();
-});
-document.getElementById('qty-plus').addEventListener('click', ()=>{
-  addQty = Math.min(20, addQty+1);
-  renderQtyStepper();
-});
 
 let baseScale = 1; // escala exata que cobre a moldura por completo (equivalente ao "cover"), calculada a partir do pixel real da foto
 
@@ -4294,6 +4330,7 @@ function renderFrame(){
 
   if(!currentTamanho){
     document.getElementById('size-badge').style.display='none';
+    document.getElementById('overlay-variant-group').style.display='none';
     hint.textContent='Selecione um tamanho para ajustar o enquadramento';
     hint.style.display='block';
     box.className='frame-box no-frame';
@@ -4331,7 +4368,16 @@ function renderFrame(){
 
   // formato com molde de CÉLULA (mais de uma por folha): bolinha e polaroide.
   // São os que mostram o PNG real por cima da foto e usam guias de terços.
-  const moldCelula = config.getOverlay(modeloDe(t));
+  const overlayVariants = config.getOverlayVariants(modeloDe(t));
+  if(overlayVariants.length && !overlayVariants.some(v=>v.id===overlayVariant)){
+    overlayVariant = overlayVariants[0].id;
+  }
+  const overlayGroup = document.getElementById('overlay-variant-group');
+  overlayGroup.style.display = overlayVariants.length ? 'flex' : 'none';
+  overlayGroup.querySelectorAll('[data-overlay-variant]').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.overlayVariant === overlayVariant);
+  });
+  const moldCelula = config.getOverlay(modeloDe(t), overlayVariant);
   const temMoldeCelula = !!(moldCelula && (moldCelula.grid.rows * moldCelula.grid.cols) > 1);
 
   box.className='frame-box';
@@ -4359,15 +4405,16 @@ function renderFrame(){
   box.appendChild(im);
   photoInto(im, 'medium', currentFoto);
   // com molde de célula, o alvo do cover é a JANELA da foto (não o cartão todo)
-  setupCover(im, W, H, temMoldeCelula ? config.windowInBox(modeloDe(t)) : null);
+  setupCover(im, W, H, temMoldeCelula ? config.windowInBox(modeloDe(t), overlayVariant) : null);
   cropContainer = box;
 
   if(temMoldeCelula){
-    // guias de composição (terços) sobre o cartão inteiro
-    const grid = document.createElement('div');
-    grid.className = 'polaroid-grid'+(showOverlay?'':' hidden');
-    grid.innerHTML = '<i class="gl gv1"></i><i class="gl gv2"></i><i class="gl gh1"></i><i class="gl gh2"></i>';
-    box.appendChild(grid);
+    if(modeloDe(t) !== 'bolinha'){
+      const grid = document.createElement('div');
+      grid.className = 'polaroid-grid'+(showOverlay?'':' hidden');
+      grid.innerHTML = '<i class="gl gv1"></i><i class="gl gv2"></i><i class="gl gh1"></i><i class="gl gh2"></i>';
+      box.appendChild(grid);
+    }
   } else {
     const vf=document.createElement('div');
     vf.className='viewfinder'+(showOverlay?'':' hidden');
@@ -4448,6 +4495,7 @@ function renderFrame(){
   document.getElementById('btn-orientacao').textContent = currentOrientation==='paisagem' ? 'Retrato' : 'Paisagem';
   document.getElementById('btn-overlay').textContent = showOverlay ? 'Ocultar guia' : 'Mostrar guia';
   document.getElementById('btn-overlay').classList.toggle('active', !showOverlay);
+  document.getElementById('btn-overlay').style.display = (temMoldeCelula && modeloDe(t)==='bolinha') ? 'none' : 'inline-flex';
   document.getElementById('chk-logo').checked = includeLogo;
 }
 
@@ -4470,6 +4518,12 @@ document.getElementById('btn-overlay').addEventListener('click', ()=>{
 });
 document.getElementById('chk-logo').addEventListener('change', e=>{
   includeLogo = e.target.checked;
+  renderFrame();
+});
+document.getElementById('overlay-variant-group').addEventListener('click', e=>{
+  const btn = e.target.closest?.('[data-overlay-variant]');
+  if(!btn) return;
+  overlayVariant = btn.dataset.overlayVariant;
   renderFrame();
 });
 
@@ -4673,6 +4727,7 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1){
     // allowLogo do formato decide: a polaroide/bolinha nunca entram com logo,
     // mesmo com o checkbox marcado (o printUtils também checa, por segurança)
     logo: tipo==='tamanho' ? (includeLogo && config.allowsLogo(modeloCart)) : false,
+    overlayVariant: tipo==='tamanho' && config.getOverlayVariants(modeloCart).length ? overlayVariant : undefined,
     digital: digital || undefined,
     pdv: true,
   });
@@ -4685,7 +4740,7 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1){
 document.getElementById('btn-add-cart').addEventListener('click', ()=>{
   if(!currentTamanho) return;
   const t = TAMANHOS.find(x=>x.id===currentTamanho);
-  addToCart('tamanho', t.id, t.label, t.preco, addQty);
+  abrirQtdModal(t);
 });
 
 function updateRibbonBanner(){
@@ -4798,6 +4853,7 @@ function showItemReviewModal(cartId){
     if(c.tipo==='tamanho'){
       currentTamanho = c.produtoId;
       currentOrientation = c.orientation || 'paisagem';
+      overlayVariant = c.overlayVariant || '1';
       zoom = c.zoom; offX = c.offX; offY = c.offY;
     }
     renderThumbs(); renderOptions(); renderFrame();
@@ -4815,7 +4871,8 @@ function renderEnquadramentoEstatico(wrap, c){
   }
 
   const ed = frameBoxDims(t);
-  const moldCelula = config.getOverlay(modeloDe(t));
+  const variant = c.overlayVariant || '1';
+  const moldCelula = config.getOverlay(modeloDe(t), variant);
   const temMoldeCelula = !!(moldCelula && (moldCelula.grid.rows * moldCelula.grid.cols) > 1);
   const H = temMoldeCelula ? 340 : ((c.orientation==='paisagem') ? 320 : 420);
   const W = Math.round(H * ed.W / ed.H);
@@ -4845,7 +4902,7 @@ function renderEnquadramentoEstatico(wrap, c){
   // bolinha o card é 1.66x mais "aberto" que a janela). Sem janela
   // (10x15/15x20) cai no cover do card inteiro, como antes.
   const k = H / ed.H;
-  const wbox = config.windowInBox(modeloDe(t));
+  const wbox = config.windowInBox(modeloDe(t), variant);
   const tw = wbox.w * k, th = wbox.h * k;
 
   const applyFixedCover = ()=>{
@@ -4859,7 +4916,7 @@ function renderEnquadramentoEstatico(wrap, c){
   if(im.complete && im.naturalWidth) applyFixedCover();
   else im.addEventListener('load', applyFixedCover);
 
-  const mold = config.getOverlay(modeloDe(t));
+  const mold = config.getOverlay(modeloDe(t), variant);
   if(mold && (mold.grid.rows * mold.grid.cols) > 1){
     const moldImg = document.createElement('img');
     moldImg.src = mold.image;
@@ -4889,13 +4946,15 @@ function renderCart(){
       const isComboDesconto = c.tipo==='combo-desconto' || c.tipo==='desconto-catalogo' || c.tipo==='desconto-senha-master';
       const isZeradoPorCombo = !!c.zeradoPorCombo;
       const semStepper = isComboDesconto || isZeradoPorCombo || c.produtoId==='foto-digital';
+      const variantLabel = c.tipo==='tamanho' && config.getOverlayVariants(modeloProduto(c.produtoId)).length
+        ? ` · Overlay ${c.overlayVariant || '1'}` : '';
       const div=document.createElement('div');
       div.className='cart-item';
       div.innerHTML = `
         <div class="ci-top">
           <img loading="lazy" decoding="async">
           <div class="ci-info">
-            <div class="ci-label">${c.label} · #${c.sessionSenha}</div>
+            <div class="ci-label">${c.label}${variantLabel} · #${c.sessionSenha}</div>
             <div class="ci-price">${isZeradoPorCombo
               ? `<span style="text-decoration:line-through;color:var(--slate-500);">${fmt(c.precoOriginal)}</span> incluída no encarte`
               : (c.qtd>1 ? c.qtd+' × '+fmt(c.precoUnit)+' = ' : '')+fmt(c.preco)}</div>
@@ -5138,6 +5197,43 @@ function numpadEhDinheiro(el){
     || el.classList.contains('fc-real')
     || el.classList.contains('pr-valor')));
 }
+function numpadDinheiroNumero(raw){
+  let s = String(raw ?? '').trim();
+  if(!s) return NaN;
+  if(s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  return Number(s);
+}
+function numpadDinheiroTexto(buf){
+  const s = String(buf ?? '');
+  if(!s) return '0,00';
+  const partes = s.split('.');
+  const inteiro = (partes[0] || '0').replace(/^0+(?=\d)/, '');
+  if(partes.length === 1) return inteiro + ',00';
+  return inteiro + ',' + (partes[1] || '').slice(0, 2);
+}
+function numpadDinheiroFinal(buf){
+  const n = numpadDinheiroNumero(buf);
+  return Number.isFinite(n) && n >= 0 ? n.toFixed(2) : '';
+}
+function numpadFinalizarDinheiro(){
+  const el = numpadTarget;
+  if(!el || !numpadMoney || !numpadBuf) return;
+  const final = numpadDinheiroFinal(numpadBuf);
+  if(!final) return;
+  el.value = el.type === 'number' ? final : final.replace('.', ',');
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function normalizarCampoDinheiro(el){
+  if(!el || !campoTemNumpad(el) || !numpadEhDinheiro(el)) return;
+  const final = numpadDinheiroFinal(el.value);
+  if(!final) return;
+  const novo = el.type === 'number' ? final : final.replace('.', ',');
+  if(String(el.value) === novo) return;
+  el.value = novo;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
 function numpadGravar(){
   const el = numpadTarget;
   if(!el) return;
@@ -5156,8 +5252,7 @@ function numpadGravar(){
 function atualizarNumpad(){
   const disp = document.getElementById('numpad-display');
   if(!numpadTarget){ disp.innerHTML = '&nbsp;'; return; }
-  let v = numpadBuf || '';
-  if(numpadMoney) v = v === '' ? '0' : v.replace(/\./g, ',');
+  let v = numpadMoney ? numpadDinheiroTexto(numpadBuf) : (numpadBuf || '');
   disp.innerHTML = v === '' ? '&nbsp;' : v.replace(/[^\d.,]+/g, '').replace(/</g, '&#60;');
 }
 function abrirNumpad(el){
@@ -5181,7 +5276,9 @@ function abrirNumpad(el){
   atualizarNumpad();
 }
 function fecharNumpad(blur){
-  if(numpadTarget && numpadBuf.endsWith('.')){
+  if(numpadTarget && numpadMoney){
+    numpadFinalizarDinheiro();
+  } else if(numpadTarget && numpadBuf.endsWith('.')){
     numpadBuf = numpadBuf.replace(/\.$/, '');
     numpadGravar();
   }
@@ -5233,6 +5330,12 @@ document.addEventListener('input', e=>{
     atualizarNumpad();
   }
 });
+document.addEventListener('focusout', e=>{
+  normalizarCampoDinheiro(e.target);
+}, true);
+document.addEventListener('keydown', e=>{
+  if(e.key === 'Enter') normalizarCampoDinheiro(e.target);
+}, true);
 /* pointerdown (com preventDefault) pra o clique nas teclas NÃO roubar o foco
    do campo — o valor é gravado direto e o campo segue "focado" por baixo */
 document.getElementById('numpad-overlay').addEventListener('pointerdown', e=>{
@@ -6684,22 +6787,25 @@ function showReprintModal(p){
   const mapa = new Map();
   for(const it of p.itens){
     if(it.tipo !== 'tamanho' || !it.fotoSeed) continue;
-    const chave = it.fotoSeed + '|' + it.produtoId;
+    const variant = it.overlayVariant || '1';
+    const chave = it.fotoSeed + '|' + it.produtoId + '|ov' + variant;
     const atual = mapa.get(chave);
     if(atual) atual.qtd += (it.qtd || 1);
-    else mapa.set(chave, { ...it, qtd: it.qtd || 1 });
+    else mapa.set(chave, { ...it, overlayVariant: variant, qtd: it.qtd || 1 });
   }
   const itensFoto = [...mapa.values()];
   if(!itensFoto.length){ toast('Este pedido não tem fotos para reimprimir'); return; }
 
   const rows = itensFoto.map((it, idx) => {
-    const unid = modeloProduto(it.produtoId) === '15x20' ? 2 : 1;
+    const modelo = modeloProduto(it.produtoId);
+    const unid = modelo === '15x20' ? 2 : 1;
+    const variantLabel = config.getOverlayVariants(modelo).length ? ` · Overlay ${it.overlayVariant || '1'}` : '';
     const opcoes = Array.from({ length: Math.max(1, it.qtd) }, (_, n) => `<option value="${n+1}">${n+1}</option>`).join('');
     return `<div class="reprint-row" data-idx="${idx}" data-unid="${unid}">
       <input type="checkbox" class="rp-check">
       <img src="${img(it.fotoSeed)}" loading="lazy" alt="">
       <div class="rp-info">
-        <strong>${it.label || labelProduto(it.produtoId, 'tamanho')}</strong>
+        <strong>${it.label || labelProduto(it.produtoId, 'tamanho')}${variantLabel}</strong>
         <span>#${it.sessionSenha || '—'} · compradas: ${it.qtd}</span>
       </div>
       <select class="rp-qty" disabled>${opcoes}</select>
@@ -6993,6 +7099,7 @@ function reabrirParaEdicao(pedidoId){
   lastOpenedSessionId = currentSession.id;
   currentFoto = fotosCombinadas[0];
   currentTamanho = null;
+  overlayVariant = '1';
   resetCrop();
 
   // pré-popula o carrinho com os itens já existentes do pedido — a vendedora ajusta a partir daqui
