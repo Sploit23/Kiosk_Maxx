@@ -93,13 +93,15 @@ const FOTO_FORMATS = {
     // 2 bolinhas por folha 10x15, igual à polaroide: o PNG do molde é UMA
     // CÉLULA (o cartão redondo com a arte) repetida 2x na folha.
     // O editorFrame é o tamanho da célula e o PNG tem exatamente essa
-    // medida (932x1228) — assim o px do editor É o px da impressão (S2 = 1),
+    // medida (932x1228) - assim o px do editor é o px da impressão (S2 = 1),
     // então o que aparece na tela sai igual no papel.
     editorFrame: { width: 932, height: 1228 },
     printRes: { width: 1864, height: 1228 },
     paper: '10x15',
     pricing: 'bolinha',
     unidades: 1,
+    // Sempre vinculada a uma foto 10x15 (combo bolinha-1/bolinha-2).
+    requiresSize: '10x15',
     // Sem `allowLogo`: não entra logo do shopping (mesma regra da polaroide).
     overlay: {
       image: './overlays/bolinha-celula.png',
@@ -149,16 +151,19 @@ const PRODUTOS = {
 // (catálogo do PDV) — as 15 chaves canônicas do portal.
 const PRICING = {
   // formatos (tamanhos de foto)
-  '10x15': { base: 15.0, bulk: null, bulkThreshold: null },
-  '15x20': { base: 25.0, bulk: null, bulkThreshold: null },
-  bolinha: { base: 12.0, bulk: null, bulkThreshold: null },
-  polaroide: { base: 20.0, bulk: null, bulkThreshold: null },
+  '10x15': { base: 23.0, bulk: null, bulkThreshold: null },
+  '15x20': { base: 28.0, bulk: null, bulkThreshold: null },
+  bolinha: { base: 30.0, bulk: null, bulkThreshold: null },
+  polaroide: { base: 28.0, bulk: null, bulkThreshold: null },
   // extras (produtos físicos)
-  'porta-retrato-10x15': { base: 35.0, bulk: null, bulkThreshold: null },
-  'porta-retrato-15x20': { base: 50.0, bulk: null, bulkThreshold: null },
-  ima: { base: 10.0, bulk: null, bulkThreshold: null },
-    'item-encarte': { base: 15.0, bulk: null, bulkThreshold: null },
-    'porta-cartao-postal': { base: 12.0, bulk: null, bulkThreshold: null },
+  'porta-retrato-10x15': { base: 7.0, bulk: null, bulkThreshold: null },
+  'porta-retrato-15x20': { base: 7.0, bulk: null, bulkThreshold: null },
+  'porta-retrato-madeira-10x15': { base: 15.0, bulk: null, bulkThreshold: null },
+  'porta-retrato-madeira-15x20': { base: 20.0, bulk: null, bulkThreshold: null },
+  ima: { base: 7.0, bulk: null, bulkThreshold: null },
+  'item-encarte': { base: 15.0, bulk: null, bulkThreshold: null },
+  'porta-cartao-postal': { base: 10.0, bulk: null, bulkThreshold: null },
+  'foto-digital': { base: 25.0, bulk: null, bulkThreshold: null },
     // envio digital (produto): a foto escolhida vai para a galeria /natal por código
     'foto-digital': { base: 10.0, bulk: null, bulkThreshold: null },
   // combos
@@ -174,18 +179,73 @@ const PRICING = {
 // valores do portal/vendas.html. O React ainda não renderiza combos no PDV,
 // mas o catálogo vive aqui para o preço vir do portal (aplicarPrecos).
 const COMBOS = [
-  { id: 'combo1', nome: 'Foto + Porta-retrato 10x15', valorCombo: 45,
+  { id: 'combo-kit-10x15', nome: 'Foto 10x15 + Porta-foto', valorCombo: 30,
     itens: [{ produtoId: '10x15', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-retrato-10x15', tipoProduto: 'extra', qtd: 1 }] },
-  { id: 'combo2', nome: 'Foto + Porta-retrato 15x20', valorCombo: 65,
+  { id: 'combo-kit-15x20', nome: 'Foto 15x20 + Porta-foto', valorCombo: 35,
     itens: [{ produtoId: '15x20', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-retrato-15x20', tipoProduto: 'extra', qtd: 1 }] },
-  { id: 'combo3', nome: 'Encarte (2 fotos 15x20)', valorCombo: 80,
-    itens: [{ produtoId: '15x20', tipoProduto: 'tamanho', qtd: 2 }, { produtoId: 'item-encarte', tipoProduto: 'extra', qtd: 1 }] },
-  { id: 'combo4', nome: 'Foto 10x15 + Porta-retrato + Bolinha', valorCombo: 52,
-    itens: [{ produtoId: '10x15', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-retrato-10x15', tipoProduto: 'extra', qtd: 1 }, { produtoId: 'bolinha', tipoProduto: 'tamanho', qtd: 1 }] },
-  { id: 'combo5', nome: 'Cartão de Natal — Layout 1', valorCombo: 38,
-    itens: [{ produtoId: '10x15', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-cartao-postal', tipoProduto: 'extra', qtd: 1 }] },
-  { id: 'combo6', nome: 'Cartão de Natal — Layout 2', valorCombo: 38,
-    itens: [{ produtoId: '10x15', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-cartao-postal', tipoProduto: 'extra', qtd: 1 }] },
+  { id: 'combo-polaroide-cartao', nome: 'Foto Polaroide + Cartão', valorCombo: 38,
+    itens: [{ produtoId: 'polaroide', tipoProduto: 'tamanho', qtd: 1 }, { produtoId: 'porta-cartao-postal', tipoProduto: 'extra', qtd: 1 }] },
+  { id: 'combo-encarte-2x15x20', nome: 'Encarte + 2 fotos 15x20', valorCombo: 65, modo: 'slots',
+    regras: { slots: [
+      { role: 'foto1', tipo: 'tamanho', modelos: ['15x20'], obrigatorio: true },
+      { role: 'foto2', tipo: 'tamanho', modelos: ['15x20'], obrigatorio: true },
+    ], obrigatorios: [{ tipo: 'extra', produtoId: 'item-encarte', qtd: 1 }] } },
+  { id: 'combo-encarte-2x15x20-digital', nome: 'Encarte + 2 fotos 15x20 + 2 fotos digitais', valorCombo: 85, modo: 'slots',
+    regras: { slots: [
+      { role: 'foto1', tipo: 'tamanho', modelos: ['15x20'], obrigatorio: true },
+      { role: 'foto2', tipo: 'tamanho', modelos: ['15x20'], obrigatorio: true },
+    ], obrigatorios: [
+      { tipo: 'extra', produtoId: 'item-encarte', qtd: 1 },
+      { tipo: 'extra', produtoId: 'foto-digital', qtd: 2 },
+    ] } },
+  { id: 'combo-digital-10x15', nome: 'Foto + Digital 10x15', valorCombo: 40, modo: 'slots',
+    regras: { slots: [
+      { role: 'foto', tipo: 'tamanho', modelos: ['10x15'], obrigatorio: true },
+    ], obrigatorios: [{ tipo: 'extra', produtoId: 'foto-digital', qtd: 1 }] } },
+  { id: 'combo-digital-15x20', nome: 'Foto + Digital 15x20', valorCombo: 45, modo: 'slots',
+    regras: { slots: [
+      { role: 'foto', tipo: 'tamanho', modelos: ['15x20'], obrigatorio: true },
+    ], obrigatorios: [{ tipo: 'extra', produtoId: 'foto-digital', qtd: 1 }] } },
+  { id: 'combo-10x15-ima-digital', nome: 'Foto 10x15 + Ímã + Digital', valorCombo: 45, modo: 'slots',
+    regras: { slots: [
+      { role: 'foto', tipo: 'tamanho', modelos: ['10x15'], obrigatorio: true },
+    ], obrigatorios: [
+      { tipo: 'extra', produtoId: 'ima', qtd: 1 },
+      { tipo: 'extra', produtoId: 'foto-digital', qtd: 1 },
+    ] } },
+  { id: 'combo-10x15-porta-digital', nome: 'Foto 10x15 + Porta-foto + Digital', valorCombo: 45, modo: 'slots',
+    regras: { slots: [
+      { role: 'foto', tipo: 'tamanho', modelos: ['10x15'], obrigatorio: true },
+    ], obrigatorios: [
+      { tipo: 'extra', produtoId: 'porta-retrato-10x15', qtd: 1 },
+      { tipo: 'extra', produtoId: 'foto-digital', qtd: 1 },
+    ] } },
+  { id: 'combo-15x20-porta-digital', nome: 'Foto 15x20 + Porta-foto + Digital', valorCombo: 50, modo: 'slots',
+    regras: { slots: [
+      { role: 'foto', tipo: 'tamanho', modelos: ['15x20'], obrigatorio: true },
+    ], obrigatorios: [
+      { tipo: 'extra', produtoId: 'porta-retrato-15x20', qtd: 1 },
+      { tipo: 'extra', produtoId: 'foto-digital', qtd: 1 },
+    ] } },
+  { id: 'combo-polaroide-cartao-digital', nome: 'Foto Polaroide + Cartão + Digital', valorCombo: 50, modo: 'slots',
+    regras: { slots: [
+      { role: 'foto', tipo: 'tamanho', modelos: ['polaroide'], obrigatorio: true },
+    ], obrigatorios: [
+      { tipo: 'extra', produtoId: 'porta-cartao-postal', qtd: 1 },
+      { tipo: 'extra', produtoId: 'foto-digital', qtd: 1 },
+    ] } },
+  { id: 'combo-bolinha-1', nome: 'Bolinha + 1 foto 10x15', valorCombo: 30, modo: 'slots',
+    regras: { slots: [
+      { role: 'foto', tipo: 'tamanho', modelos: ['10x15'], obrigatorio: true },
+    ], obrigatorios: [
+      { tipo: 'extra', produtoId: 'bolinha', qtd: 1 },
+    ] } },
+  { id: 'combo-bolinha-2', nome: '2 Bolinhas + 1 foto 10x15', valorCombo: 50, modo: 'slots',
+    regras: { slots: [
+      { role: 'foto', tipo: 'tamanho', modelos: ['10x15'], obrigatorio: true },
+    ], obrigatorios: [
+      { tipo: 'extra', produtoId: 'bolinha', qtd: 2 },
+    ] } },
 ];
 
 // ─── Overlays ──────────────────────────────────────────────

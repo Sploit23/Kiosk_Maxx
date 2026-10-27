@@ -269,6 +269,26 @@ function findLoja(array $data, string $id): ?array
     return null;
 }
 
+// Conjunto de IDs de lojas cadastradas. Relatórios ignoram registros órfãos:
+// quando uma loja é excluída, o histórico dela não some sozinho dos JSONs
+// (vendas/pedidos/auditoria/despesas) e não pode continuar aparecendo.
+function lojaIdsExistentes(array $db): array
+{
+    $ids = [];
+    foreach (($db['lojas'] ?? []) as $l) {
+        $id = (string) ($l['id'] ?? '');
+        if ($id !== '') $ids[$id] = true;
+    }
+    return $ids;
+}
+
+function registroDeLojaExistente(array $ids, array $r, bool $manterSemLoja = false): bool
+{
+    $id = (string) ($r['lojaId'] ?? '');
+    if ($id === '') return $manterSemLoja;
+    return isset($ids[$id]);
+}
+
 // Slug do nome da loja → id estável e legível (Royal Plaza → royal-plaza).
 // Usado pelo wizard de 1º uso (lojas.save com só o código).
 function slugLoja(string $nome): string
@@ -281,13 +301,56 @@ function slugLoja(string $nome): string
     return substr($s, 0, 48);
 }
 
+function normalizarKioskCode($v): string
+{
+    return preg_replace('/[^A-Z0-9]/', '', strtoupper(trim((string) $v)));
+}
+
+// Códigos de kiosk autorizados numa loja. Uma loja pode ter vários PDVs
+// (1 PDV = 1 código): `kioskCodes` guarda a lista; `kioskCode` e os
+// `pareamentos[]` entram por compatibilidade com dados antigos.
+function lojaKioskCodes(array $loja): array
+{
+    $codes = [];
+    $add = function ($v) use (&$codes) {
+        $c = normalizarKioskCode($v);
+        if ($c !== '' && !in_array($c, $codes, true)) $codes[] = $c;
+    };
+    if (isset($loja['kioskCodes']) && is_array($loja['kioskCodes'])) {
+        foreach ($loja['kioskCodes'] as $c) $add($c);
+    }
+    $add($loja['kioskCode'] ?? '');
+    foreach ((array) ($loja['pareamentos'] ?? []) as $pm) {
+        if (is_array($pm)) $add($pm['kioskCode'] ?? '');
+    }
+    $add($loja['pareamento']['kioskCode'] ?? '');
+    return $codes;
+}
+
+// Máquinas pareadas na loja (array novo + legado `pareamento`), sem duplicar.
+function lojaPareamentos(array $loja): array
+{
+    $out = [];
+    $ids = [];
+    $add = function ($pm) use (&$out, &$ids) {
+        if (!is_array($pm)) return;
+        $mid = trim((string) ($pm['machineId'] ?? ''));
+        if ($mid === '' || isset($ids[$mid])) return;
+        $ids[$mid] = true;
+        $out[] = $pm;
+    };
+    foreach ((array) ($loja['pareamentos'] ?? []) as $pm) $add($pm);
+    $add($loja['pareamento'] ?? null);
+    return $out;
+}
+
 // Valida que o kiosk que está chamando é a máquina pareada com a loja
 // (pedido.push / auditoria.push / vendas.push). Protege contra push de dados
-// de fora: só a máquina física daquela loja consegue mandar.
+// de fora: só as máquinas físicas daquela loja conseguem mandar.
 // Offline-first: a loja é definida NO APP e o portal só AUTORIZA a máquina,
 // então a autorização é resolvida pelo machineId — se ele casa com alguma
 // loja pareada, essa é a loja canônica do envio (o lojaId do kiosk pode até
-// divergir, ex.: loja recriada no portal).
+// divergir, ex.: loja recriada no portal). Uma loja pode ter vários PDVs.
 function validarLojaPareada(array $p): array
 {
     $lojaId = trim((string) ($p['lojaId'] ?? ''));
@@ -299,7 +362,9 @@ function validarLojaPareada(array $p): array
     $loja = null;
     foreach ((array) ($db['lojas'] ?? []) as $l) {
         if (!is_array($l)) continue;
-        if ((string) ($l['pareamento']['machineId'] ?? '') === $machineId) { $loja = $l; break; }
+        foreach (lojaPareamentos($l) as $pm) {
+            if ((string) ($pm['machineId'] ?? '') === $machineId) { $loja = $l; break 2; }
+        }
     }
     if (!$loja) {
         // compat: mesma mensagem de sempre quando a máquina não está autorizada
@@ -385,18 +450,25 @@ const PRECOS_DEFAULT = [
     'combo4' => 52.0, 'combo5' => 38.0, 'combo6' => 38.0,
 ];
 
-// Preços efetivos da loja: defaults oficiais + overlay salvo no portal.
+// Preços efetivos da loja: defaults oficiais + padrão global (__global) +
+// ajuste da loja. O catálogo/preços são fixos para todos os PDVs; a loja só
+// sobrescreve se quiser mudar algo localmente.
 function precosEfetivos(string $lojaId): array
 {
-    $overlay = [];
     $saved = loadJson('precos.json', []);
+    $camadas = [];
+    if ($lojaId !== '__global' && is_array($saved) && isset($saved['__global']) && is_array($saved['__global'])) {
+        $camadas[] = $saved['__global'];
+    }
     if (is_array($saved) && isset($saved[$lojaId]) && is_array($saved[$lojaId])) {
-        $overlay = $saved[$lojaId];
+        $camadas[] = $saved[$lojaId];
     }
     $out = PRECOS_DEFAULT;
-    foreach ($overlay as $k => $v) {
-        if (array_key_exists($k, $out) && is_numeric($v) && (float) $v >= 0) {
-            $out[$k] = round((float) $v, 2);
+    foreach ($camadas as $overlay) {
+        foreach ($overlay as $k => $v) {
+            if (array_key_exists($k, $out) && is_numeric($v) && (float) $v >= 0) {
+                $out[$k] = round((float) $v, 2);
+            }
         }
     }
     return $out;
@@ -413,35 +485,92 @@ function precosEfetivos(string $lojaId): array
 // cartão postal) que só aparecem dentro de combos.
 const CATALOGO_DEFAULT = [
     'tamanhos' => [
-        ['id' => '10x15', 'label' => '10x15', 'preco' => 15.0, 'modelo' => '10x15', 'unidades' => 1],
-        ['id' => '15x20', 'label' => '15x20', 'preco' => 25.0, 'modelo' => '15x20', 'unidades' => 2],
-        ['id' => 'bolinha', 'label' => 'Bolinha 7,5x7,5', 'preco' => 12.0, 'modelo' => 'bolinha', 'unidades' => 1,
-            'nota' => '2 bolinhas iguais por folha 10x15, lado a lado'],
-        ['id' => 'polaroide', 'label' => 'Polaroide 2 poses', 'preco' => 20.0, 'modelo' => 'polaroide', 'unidades' => 1,
+        ['id' => '10x15', 'label' => '10x15', 'preco' => 23.0, 'modelo' => '10x15', 'unidades' => 1],
+        ['id' => '15x20', 'label' => '15x20', 'preco' => 28.0, 'modelo' => '15x20', 'unidades' => 2],
+        ['id' => 'bolinha', 'label' => 'Bolinha 7,5x7,5', 'preco' => 30.0, 'modelo' => 'bolinha', 'unidades' => 1,
+            'nota' => '2 bolinhas iguais por folha 10x15, lado a lado. Sempre vinculada a uma foto 10x15'],
+        ['id' => 'polaroide', 'label' => 'Polaroide 2 poses', 'preco' => 28.0, 'modelo' => 'polaroide', 'unidades' => 1,
             'nota' => '2 poses iguais por folha 10x15, lado a lado'],
     ],
     'extras' => [
-        ['id' => 'porta-retrato-10x15', 'label' => 'Porta-retrato 10x15', 'preco' => 35.0],
-        ['id' => 'porta-retrato-15x20', 'label' => 'Porta-retrato 15x20', 'preco' => 50.0],
-        ['id' => 'ima', 'label' => 'Ímã de geladeira', 'preco' => 10.0, 'nota' => 'adicional a uma foto 10x15'],
-        ['id' => 'foto-digital', 'label' => '📲 Envio digital (foto)', 'preco' => 10.0, 'digital' => true,
+        ['id' => 'porta-retrato-10x15', 'label' => 'Porta-foto 10x15', 'preco' => 7.0],
+        ['id' => 'porta-retrato-15x20', 'label' => 'Porta-foto 15x20', 'preco' => 7.0],
+        ['id' => 'porta-retrato-madeira-10x15', 'label' => 'Porta-retrato de madeira preto 10x15', 'preco' => 15.0],
+        ['id' => 'porta-retrato-madeira-15x20', 'label' => 'Porta-retrato de madeira preto 15x20', 'preco' => 20.0],
+        ['id' => 'ima', 'label' => 'Ímã avulso', 'preco' => 7.0, 'nota' => 'adicional a uma foto 10x15'],
+        ['id' => 'foto-digital', 'label' => 'Envio digital (foto)', 'preco' => 25.0, 'digital' => true,
             'nota' => 'a foto escolhida vai para o celular por código'],
         ['id' => 'item-encarte', 'label' => 'Item Encarte', 'preco' => 15.0, 'oculto' => true],
-        ['id' => 'porta-cartao-postal', 'label' => 'Porta-cartão postal', 'preco' => 12.0, 'oculto' => true],
+        ['id' => 'porta-cartao-postal', 'label' => 'Cartão Polaroide', 'preco' => 10.0, 'oculto' => true],
     ],
     'combos' => [
-        ['id' => 'combo1', 'nome' => 'Foto + Porta-retrato 10x15', 'valorCombo' => 45.0, 'inline' => true,
+        ['id' => 'combo-kit-10x15', 'nome' => 'Foto 10x15 + Porta-foto', 'valorCombo' => 30.0,
             'itens' => [['produtoId' => '10x15', 'qtd' => 1], ['produtoId' => 'porta-retrato-10x15', 'qtd' => 1]]],
-        ['id' => 'combo2', 'nome' => 'Foto + Porta-retrato 15x20', 'valorCombo' => 65.0, 'inline' => true,
+        ['id' => 'combo-kit-15x20', 'nome' => 'Foto 15x20 + Porta-foto', 'valorCombo' => 35.0,
             'itens' => [['produtoId' => '15x20', 'qtd' => 1], ['produtoId' => 'porta-retrato-15x20', 'qtd' => 1]]],
-        ['id' => 'combo3', 'nome' => 'Encarte (2 fotos 15x20)', 'valorCombo' => 80.0, 'encarte' => true,
-            'itens' => [['produtoId' => '15x20', 'qtd' => 2], ['produtoId' => 'item-encarte', 'qtd' => 1]]],
-        ['id' => 'combo4', 'nome' => 'Foto 10x15 + Porta-retrato + Bolinha', 'valorCombo' => 52.0,
-            'itens' => [['produtoId' => '10x15', 'qtd' => 1], ['produtoId' => 'porta-retrato-10x15', 'qtd' => 1], ['produtoId' => 'bolinha', 'qtd' => 1]]],
-        ['id' => 'combo5', 'nome' => 'Cartão de Natal — Layout 1', 'valorCombo' => 38.0,
-            'itens' => [['produtoId' => '10x15', 'qtd' => 1], ['produtoId' => 'porta-cartao-postal', 'qtd' => 1]]],
-        ['id' => 'combo6', 'nome' => 'Cartão de Natal — Layout 2', 'valorCombo' => 38.0,
-            'itens' => [['produtoId' => '10x15', 'qtd' => 1], ['produtoId' => 'porta-cartao-postal', 'qtd' => 1]]],
+        ['id' => 'combo-polaroide-cartao', 'nome' => 'Foto Polaroide + Cartão', 'valorCombo' => 38.0,
+            'itens' => [['produtoId' => 'polaroide', 'qtd' => 1], ['produtoId' => 'porta-cartao-postal', 'qtd' => 1]]],
+        ['id' => 'combo-encarte-2x15x20', 'nome' => 'Encarte + 2 fotos 15x20', 'valorCombo' => 65.0, 'modo' => 'slots',
+            'regras' => ['slots' => [
+                ['role' => 'foto1', 'tipo' => 'tamanho', 'modelos' => ['15x20'], 'obrigatorio' => true],
+                ['role' => 'foto2', 'tipo' => 'tamanho', 'modelos' => ['15x20'], 'obrigatorio' => true],
+            ], 'obrigatorios' => [['tipo' => 'extra', 'produtoId' => 'item-encarte', 'qtd' => 1]]]],
+        ['id' => 'combo-encarte-2x15x20-digital', 'nome' => 'Encarte + 2 fotos 15x20 + 2 fotos digitais', 'valorCombo' => 85.0, 'modo' => 'slots',
+            'regras' => ['slots' => [
+                ['role' => 'foto1', 'tipo' => 'tamanho', 'modelos' => ['15x20'], 'obrigatorio' => true],
+                ['role' => 'foto2', 'tipo' => 'tamanho', 'modelos' => ['15x20'], 'obrigatorio' => true],
+            ], 'obrigatorios' => [
+                ['tipo' => 'extra', 'produtoId' => 'item-encarte', 'qtd' => 1],
+                ['tipo' => 'extra', 'produtoId' => 'foto-digital', 'qtd' => 2],
+            ]]],
+        ['id' => 'combo-digital-10x15', 'nome' => 'Foto + Digital 10x15', 'valorCombo' => 40.0, 'modo' => 'slots',
+            'regras' => ['slots' => [
+                ['role' => 'foto', 'tipo' => 'tamanho', 'modelos' => ['10x15'], 'obrigatorio' => true],
+            ], 'obrigatorios' => [['tipo' => 'extra', 'produtoId' => 'foto-digital', 'qtd' => 1]]]],
+        ['id' => 'combo-digital-15x20', 'nome' => 'Foto + Digital 15x20', 'valorCombo' => 45.0, 'modo' => 'slots',
+            'regras' => ['slots' => [
+                ['role' => 'foto', 'tipo' => 'tamanho', 'modelos' => ['15x20'], 'obrigatorio' => true],
+            ], 'obrigatorios' => [['tipo' => 'extra', 'produtoId' => 'foto-digital', 'qtd' => 1]]]],
+        ['id' => 'combo-10x15-ima-digital', 'nome' => 'Foto 10x15 + Ímã + Digital', 'valorCombo' => 45.0, 'modo' => 'slots',
+            'regras' => ['slots' => [
+                ['role' => 'foto', 'tipo' => 'tamanho', 'modelos' => ['10x15'], 'obrigatorio' => true],
+            ], 'obrigatorios' => [
+                ['tipo' => 'extra', 'produtoId' => 'ima', 'qtd' => 1],
+                ['tipo' => 'extra', 'produtoId' => 'foto-digital', 'qtd' => 1],
+            ]]],
+        ['id' => 'combo-10x15-porta-digital', 'nome' => 'Foto 10x15 + Porta-foto + Digital', 'valorCombo' => 45.0, 'modo' => 'slots',
+            'regras' => ['slots' => [
+                ['role' => 'foto', 'tipo' => 'tamanho', 'modelos' => ['10x15'], 'obrigatorio' => true],
+            ], 'obrigatorios' => [
+                ['tipo' => 'extra', 'produtoId' => 'porta-retrato-10x15', 'qtd' => 1],
+                ['tipo' => 'extra', 'produtoId' => 'foto-digital', 'qtd' => 1],
+            ]]],
+        ['id' => 'combo-15x20-porta-digital', 'nome' => 'Foto 15x20 + Porta-foto + Digital', 'valorCombo' => 50.0, 'modo' => 'slots',
+            'regras' => ['slots' => [
+                ['role' => 'foto', 'tipo' => 'tamanho', 'modelos' => ['15x20'], 'obrigatorio' => true],
+            ], 'obrigatorios' => [
+                ['tipo' => 'extra', 'produtoId' => 'porta-retrato-15x20', 'qtd' => 1],
+                ['tipo' => 'extra', 'produtoId' => 'foto-digital', 'qtd' => 1],
+            ]]],
+        ['id' => 'combo-polaroide-cartao-digital', 'nome' => 'Foto Polaroide + Cartão + Digital', 'valorCombo' => 50.0, 'modo' => 'slots',
+            'regras' => ['slots' => [
+                ['role' => 'foto', 'tipo' => 'tamanho', 'modelos' => ['polaroide'], 'obrigatorio' => true],
+            ], 'obrigatorios' => [
+                ['tipo' => 'extra', 'produtoId' => 'porta-cartao-postal', 'qtd' => 1],
+                ['tipo' => 'extra', 'produtoId' => 'foto-digital', 'qtd' => 1],
+            ]]],
+        ['id' => 'combo-bolinha-1', 'nome' => 'Bolinha + 1 foto 10x15', 'valorCombo' => 30.0, 'modo' => 'slots',
+            'regras' => ['slots' => [
+                ['role' => 'foto', 'tipo' => 'tamanho', 'modelos' => ['10x15'], 'obrigatorio' => true],
+            ], 'obrigatorios' => [
+                ['tipo' => 'extra', 'produtoId' => 'bolinha', 'qtd' => 1],
+            ]]],
+        ['id' => 'combo-bolinha-2', 'nome' => '2 Bolinhas + 1 foto 10x15', 'valorCombo' => 50.0, 'modo' => 'slots',
+            'regras' => ['slots' => [
+                ['role' => 'foto', 'tipo' => 'tamanho', 'modelos' => ['10x15'], 'obrigatorio' => true],
+            ], 'obrigatorios' => [
+                ['tipo' => 'extra', 'produtoId' => 'bolinha', 'qtd' => 2],
+            ]]],
     ],
 ];
 
@@ -517,23 +646,69 @@ function sanitizarCatalogo($cat): ?array
         if (!is_array($it)) continue;
         $id = catId($it['id'] ?? '');
         if ($id === '' || isset($tipos[$id])) continue;
-        $itens = [];
-        foreach ((array) ($it['itens'] ?? []) as $ci) {
-            if (!is_array($ci)) continue;
-            $pid = catId($ci['produtoId'] ?? '');
-            if ($pid === '' || !isset($tipos[$pid])) continue;
-            $qtd = (int) ($ci['qtd'] ?? 1);
-            if ($qtd < 1) $qtd = 1;
-            if ($qtd > 99) $qtd = 99;
-            $itens[] = ['produtoId' => $pid, 'tipoProduto' => $tipos[$pid], 'qtd' => $qtd];
+        $modo = $it['modo'] === 'slots' ? 'slots' : null;
+        $regras = null;
+        if ($modo === 'slots' && is_array($it['regras'])) {
+            $slotsIn = (array) ($it['regras']['slots'] ?? []);
+            $slots = [];
+            foreach ($slotsIn as $s) {
+                if (!is_array($s)) continue;
+                $role = catId($s['role'] ?? '');
+                if ($role === '') $role = 'foto';
+                $tiposSlot = $s['tipo'] === 'extra' ? 'extra' : 'tamanho';
+                $modelos = [];
+                foreach ((array) ($s['modelos'] ?? []) as $m) {
+                    $mm = catId($m);
+                    if (in_array($mm, ['10x15','15x20','bolinha','polaroide'], true)) $modelos[] = $mm;
+                }
+                if (!$modelos && $tiposSlot === 'tamanho') $modelos = ['10x15'];
+                $slots[] = [
+                    'role' => $role,
+                    'tipo' => $tiposSlot,
+                    'modelos' => $modelos,
+                    'obrigatorio' => !empty($s['obrigatorio']),
+                    'vinculado' => !empty($s['vinculado']),
+                ];
+            }
+            $obrig = [];
+            foreach ((array) ($it['regras']['obrigatorios'] ?? []) as $o) {
+                if (!is_array($o)) continue;
+                $pid = catId($o['produtoId'] ?? '');
+                if ($pid === '' || !isset($tipos[$pid])) continue;
+                $q = (int) ($o['qtd'] ?? 1);
+                if ($q < 1) $q = 1;
+                if ($q > 99) $q = 99;
+                $obrig[] = ['tipo' => $tipos[$pid], 'produtoId' => $pid, 'qtd' => $q];
+            }
+            if ($slots) {
+                $regras = ['slots' => $slots];
+                if ($obrig) $regras['obrigatorios'] = $obrig;
+            }
         }
-        if (!$itens) continue;
+        $itens = [];
+        if (!$regras) {
+            foreach ((array) ($it['itens'] ?? []) as $ci) {
+                if (!is_array($ci)) continue;
+                $pid = catId($ci['produtoId'] ?? '');
+                if ($pid === '' || !isset($tipos[$pid])) continue;
+                $qtd = (int) ($ci['qtd'] ?? 1);
+                if ($qtd < 1) $qtd = 1;
+                if ($qtd > 99) $qtd = 99;
+                $itens[] = ['produtoId' => $pid, 'tipoProduto' => $tipos[$pid], 'qtd' => $qtd];
+            }
+            if (!$itens) continue;
+        }
         $row = [
             'id' => $id,
             'nome' => catTexto($it['nome'] ?? $id) ?: $id,
             'valorCombo' => catPreco($it['valorCombo'] ?? 0),
-            'itens' => $itens,
         ];
+        if ($regras) {
+            $row['modo'] = 'slots';
+            $row['regras'] = $regras;
+        } elseif ($itens) {
+            $row['itens'] = $itens;
+        }
         if (!empty($it['inline'])) $row['inline'] = true;
         if (!empty($it['encarte'])) $row['encarte'] = true;
         $alvo = catId($it['tamanhoAlvo'] ?? '');
@@ -551,25 +726,27 @@ function sanitizarCatalogo($cat): ?array
 function catalogoEfetivo(string $lojaId): array
 {
     $saved = loadJson('precos.json', []);
-    $overlay = (is_array($saved) && isset($saved[$lojaId]) && is_array($saved[$lojaId])) ? $saved[$lojaId] : [];
+    $global = (is_array($saved) && isset($saved['__global']) && is_array($saved['__global'])) ? $saved['__global'] : [];
+    $overlay = (is_array($saved) && $lojaId !== '__global' && isset($saved[$lojaId]) && is_array($saved[$lojaId])) ? $saved[$lojaId] : [];
+
+    // Catálogo da loja > catálogo padrão global > default do código.
     if (isset($overlay['__catalogo'])) {
         $cat = sanitizarCatalogo($overlay['__catalogo']);
         if ($cat !== null) return $cat;
     }
+    if (isset($global['__catalogo'])) {
+        $cat = sanitizarCatalogo($global['__catalogo']);
+        if ($cat !== null) return $cat;
+    }
     $cat = CATALOGO_DEFAULT;
-    foreach ($cat['tamanhos'] as $i => $it) {
-        if (isset($overlay[$it['id']]) && is_numeric($overlay[$it['id']]) && (float) $overlay[$it['id']] >= 0) {
-            $cat['tamanhos'][$i]['preco'] = round((float) $overlay[$it['id']], 2);
-        }
-    }
-    foreach ($cat['extras'] as $i => $it) {
-        if (isset($overlay[$it['id']]) && is_numeric($overlay[$it['id']]) && (float) $overlay[$it['id']] >= 0) {
-            $cat['extras'][$i]['preco'] = round((float) $overlay[$it['id']], 2);
-        }
-    }
-    foreach ($cat['combos'] as $i => $it) {
-        if (isset($overlay[$it['id']]) && is_numeric($overlay[$it['id']]) && (float) $overlay[$it['id']] >= 0) {
-            $cat['combos'][$i]['valorCombo'] = round((float) $overlay[$it['id']], 2);
+    $camadas = ($lojaId === '__global') ? [$global] : [$global, $overlay];
+    foreach ($camadas as $ov) {
+        foreach (['tamanhos' => 'preco', 'extras' => 'preco', 'combos' => 'valorCombo'] as $grupo => $campo) {
+            foreach ($cat[$grupo] as $i => $it) {
+                if (isset($ov[$it['id']]) && is_numeric($ov[$it['id']]) && (float) $ov[$it['id']] >= 0) {
+                    $cat[$grupo][$i][$campo] = round((float) $ov[$it['id']], 2);
+                }
+            }
         }
     }
     return $cat;
@@ -784,14 +961,15 @@ try {
             $lojaId = trim((string) ($p['lojaId'] ?? ''));
             $pdvNome = trim((string) ($p['pdvNome'] ?? ''));
             $machineId = trim((string) ($p['machineId'] ?? ''));
+            if ($machineId === '') fail('DADOS_INCOMPLETOS: machineId é obrigatório', 400);
 
             // Fluxo principal: o kiosk envia o CÓDIGO que aparece na tela dele.
-            // O admin digitou esse código na loja (campo "código do kiosk") —
-            // nada de editar arquivo de config no kiosk.
+            // A loja pode ter VÁRIOS códigos (um por PDV); o admin digita cada
+            // um na loja e cada máquina se autoriza sozinha.
             $loja = null;
             if ($kioskCode !== '') {
                 foreach ($db['lojas'] as $l) {
-                    if ((string) ($l['kioskCode'] ?? '') === $kioskCode) { $loja = $l; break; }
+                    if (in_array($kioskCode, lojaKioskCodes($l), true)) { $loja = $l; break; }
                 }
                 if (!$loja) fail('KIOSK_NAO_EMPARELELHADO', 404); // admin ainda não digitou este código numa loja
             } elseif ($lojaId !== '' && $pairingCode !== '') {
@@ -808,25 +986,44 @@ try {
 
             if (empty($loja['ativo'])) fail('LOJA_INVALIDA', 404);
 
-            // Bloqueia a mesmas máquina já emparelhada noutra loja (imagem clonada).
+            // Bloqueia a mesma máquina já emparelhada noutra loja (imagem clonada).
             foreach ($db['lojas'] as $l) {
                 if (($l['id'] ?? '') === $loja['id']) continue;
-                if ($machineId !== '' && !empty($l['pareamento']['machineId'])
-                    && hash_equals((string) $l['pareamento']['machineId'], $machineId)) {
-                    fail('MAQUINA_JA_EMPARELHADA', 409);
+                foreach (lojaPareamentos($l) as $pm) {
+                    if ($machineId !== '' && hash_equals((string) ($pm['machineId'] ?? ''), $machineId)) {
+                        fail('MAQUINA_JA_EMPARELHADA', 409);
+                    }
                 }
             }
 
             $pareamento = [
                 'pdvNome' => resolverPdvNome($pdvNome, $loja),
                 'machineId' => $machineId,
+                'kioskCode' => $kioskCode !== '' ? $kioskCode : normalizarKioskCode($loja['kioskCode'] ?? ''),
                 'emparelhadoEm' => gmdate('c'),
             ];
             foreach ($db['lojas'] as $i => $x) {
-                if (($x['id'] ?? '') === $loja['id']) {
-                    $db['lojas'][$i]['pareamento'] = $pareamento;
-                    break;
+                if (($x['id'] ?? '') !== $loja['id']) continue;
+                // Atualiza/adiciona esta máquina sem derrubar as demais.
+                $pms = lojaPareamentos($x);
+                $achou = false;
+                foreach ($pms as $j => $pm) {
+                    if ($machineId !== '' && (string) ($pm['machineId'] ?? '') === $machineId) {
+                        $pms[$j] = $pareamento;
+                        $achou = true;
+                        break;
+                    }
                 }
+                if (!$achou) $pms[] = $pareamento;
+                if (count($pms) > 20) $pms = array_slice($pms, -20);
+                $db['lojas'][$i]['pareamentos'] = $pms;
+                $db['lojas'][$i]['pareamento'] = $pareamento; // legado = última máquina
+                if ($kioskCode !== '') {
+                    $codes = lojaKioskCodes($db['lojas'][$i]);
+                    if (!in_array($kioskCode, $codes, true)) $codes[] = $kioskCode;
+                    $db['lojas'][$i]['kioskCodes'] = $codes;
+                }
+                break;
             }
             saveDb($db);
             respond([
@@ -929,10 +1126,17 @@ try {
 
             $vendas = loadJson('vendas.json', []);
             if (!is_array($vendas)) $vendas = [];
+            // Uma linha por máquina: a loja pode ter vários PDVs e cada um
+            // mantém o próprio snapshot (os relatórios somam por loja).
             $found = null;
+            $legado = null;
             foreach ($vendas as $i => $v) {
-                if (($v['lojaId'] ?? '') === $lojaId && ($v['data'] ?? '') === $data) { $found = $i; break; }
+                if (($v['lojaId'] ?? '') !== $lojaId || ($v['data'] ?? '') !== $data) continue;
+                $vm = trim((string) ($v['machineId'] ?? ''));
+                if ($vm !== '' && $vm === $snap['machineId']) { $found = $i; break; }
+                if ($vm === '' && $legado === null) $legado = $i;
             }
+            if ($found === null && $legado !== null) $found = $legado; // adota snapshot antigo sem machineId
             if ($found !== null) $vendas[$found] = $snap; else $vendas[] = $snap;
             saveJson('vendas.json', $vendas);
             respond(['ok' => true, 'snapshot' => $snap]);
@@ -1111,6 +1315,8 @@ try {
                     'pdv' => $pdv,
                     'pairingCode' => strtoupper(substr(bin2hex(random_bytes(8)), 0, 8)),
                     'kioskCode' => $kioskCode,
+                    'kioskCodes' => [$kioskCode],
+                    'pareamentos' => [],
                     'ativo' => true,
                 ];
                 $machineId = trim((string) ($pend['machineId'] ?? ''));
@@ -1118,16 +1324,20 @@ try {
                     // Mesma trava de clone do kiosk.pair: uma máquina só numa loja.
                     foreach ($db['lojas'] as $l) {
                         if (($l['id'] ?? '') === $id) continue;
-                        if (!empty($l['pareamento']['machineId'])
-                            && hash_equals((string) $l['pareamento']['machineId'], $machineId)) {
-                            fail('MAQUINA_JA_EMPARELHADA', 409);
+                        foreach (lojaPareamentos($l) as $pm) {
+                            if (hash_equals((string) ($pm['machineId'] ?? ''), $machineId)) {
+                                fail('MAQUINA_JA_EMPARELHADA', 409);
+                            }
                         }
                     }
-                    $loja['pareamento'] = [
+                    $pm = [
                         'pdvNome' => $pdv,
                         'machineId' => $machineId,
+                        'kioskCode' => $kioskCode,
                         'emparelhadoEm' => gmdate('c'),
                     ];
+                    $loja['pareamentos'][] = $pm;
+                    $loja['pareamento'] = $pm;
                 }
                 $db['lojas'][] = $loja;
                 unset($db['pendentes'][$kioskCode]);
@@ -1154,10 +1364,24 @@ try {
                 $pairingCode = strtoupper(substr(bin2hex(random_bytes(8)), 0, 8));
             }
 
-            // Código do kiosk (é o que aparece na TELA do PDV — o admin digita aqui).
-            // Cadastro: pode ficar vazio (preencher depois que o kiosk exibir o código).
-            if ($kioskCode === '' && $anterior) {
-                $kioskCode = (string) ($anterior['loja']['kioskCode'] ?? '');
+            // Códigos do kiosk (um por PDV). A edição ADICIONA códigos — para
+            // remover um PDV use `lojas.removeKiosk`. Cadastro pode ficar vazio
+            // (preencher depois que o kiosk exibir o código).
+            $codes = $anterior ? lojaKioskCodes($anterior['loja']) : [];
+            $novosCodes = [];
+            $addCode = function ($v) use (&$codes, &$novosCodes) {
+                $c = normalizarKioskCode($v);
+                if ($c === '') return;
+                if (!in_array($c, $codes, true)) { $codes[] = $c; $novosCodes[] = $c; }
+            };
+            if (isset($p['kioskCodes']) && is_array($p['kioskCodes'])) {
+                foreach ($p['kioskCodes'] as $c) $addCode($c);
+            }
+            $addCode($kioskCode);
+
+            $kioskCodePrincipal = $anterior ? normalizarKioskCode($anterior['loja']['kioskCode'] ?? '') : '';
+            if ($kioskCodePrincipal === '' || !in_array($kioskCodePrincipal, $codes, true)) {
+                $kioskCodePrincipal = $codes[0] ?? '';
             }
 
             // Não deixa duas lojas usarem o mesmo código (de emparelhamento ou de kiosk).
@@ -1167,9 +1391,10 @@ try {
                 if ($outro !== '' && $pairingCode !== '' && hash_equals($outro, $pairingCode)) {
                     fail('CODIGO_EM_USO', 409);
                 }
-                $outroK = (string) ($l['kioskCode'] ?? '');
-                if ($kioskCode !== '' && $outroK !== '' && hash_equals($outroK, $kioskCode)) {
-                    fail('CODIGO_EM_USO — este código do kiosk já está em outra loja', 409);
+                foreach ($codes as $c) {
+                    if (in_array($c, lojaKioskCodes($l), true)) {
+                        fail('CODIGO_EM_USO — este código do kiosk já está em outra loja', 409);
+                    }
                 }
             }
 
@@ -1178,34 +1403,192 @@ try {
                 'nome' => $nome,
                 'pdv' => $pdv,
                 'pairingCode' => $pairingCode,
-                'kioskCode' => $kioskCode,
+                'kioskCode' => $kioskCodePrincipal,
+                'kioskCodes' => $codes,
                 'ativo' => !empty($p['ativo']),
             ];
             if ($anterior) {
                 if (isset($anterior['loja']['pareamento'])) $loja['pareamento'] = $anterior['loja']['pareamento'];
+                if (isset($anterior['loja']['pareamentos'])) $loja['pareamentos'] = $anterior['loja']['pareamentos'];
                 $db['lojas'][$anterior['i']] = $loja;
             } else {
                 $db['lojas'][] = $loja;
             }
-            // Cadastro manual com o mesmo código do wizard → consome o rascunho
-            // (senão sobra em `pendentes` pra sempre).
-            if ($kioskCode !== '' && isset($db['pendentes'][$kioskCode])) {
-                unset($db['pendentes'][$kioskCode]);
+            // Cadastro/adição de código consistente com o wizard → consome o
+            // rascunho do PDV (senão sobra em `pendentes` pra sempre).
+            foreach ($novosCodes as $c) {
+                if (isset($db['pendentes'][$c])) unset($db['pendentes'][$c]);
             }
             saveDb($db);
             respond(['ok' => true, 'loja' => $loja]);
         }
 
+        // Adiciona um PDV (código) à loja existente — o PDV se autoriza sozinho
+        // no próximo poll de 30s. Não substitui os códigos já cadastrados.
+        case 'lojas.addKiosk': {
+            $db = db();
+            $id = trim((string) ($p['id'] ?? ''));
+            $code = normalizarKioskCode($p['kioskCode'] ?? '');
+            if ($id === '' || $code === '') fail('DADOS_INCOMPLETOS: id e kioskCode são obrigatórios');
+            $idx = null;
+            foreach ($db['lojas'] as $i => $l) {
+                if (($l['id'] ?? '') === $id) { $idx = $i; break; }
+            }
+            if ($idx === null) fail('LOJA_NAO_ENCONTRADA', 404);
+            $loja = $db['lojas'][$idx];
+            $codes = lojaKioskCodes($loja);
+            if (in_array($code, $codes, true)) {
+                respond(['ok' => true, 'jaExistia' => true, 'loja' => $loja]);
+            }
+            foreach ($db['lojas'] as $j => $l) {
+                if ($j === $idx) continue;
+                if (in_array($code, lojaKioskCodes($l), true)) {
+                    fail('CODIGO_EM_USO — este código do kiosk já está em outra loja', 409);
+                }
+            }
+            $codes[] = $code;
+            $db['lojas'][$idx]['kioskCodes'] = $codes;
+            if (normalizarKioskCode($db['lojas'][$idx]['kioskCode'] ?? '') === '') {
+                $db['lojas'][$idx]['kioskCode'] = $code;
+            }
+            if (isset($db['pendentes'][$code])) unset($db['pendentes'][$code]);
+            saveDb($db);
+            respond(['ok' => true, 'loja' => $db['lojas'][$idx]]);
+        }
+
+        // Remove um PDV da loja: apaga o código e o pareamento daquela máquina.
+        // O PDV perde a autorização e para de enviar (volta a tentar pair).
+        case 'lojas.removeKiosk': {
+            $db = db();
+            $id = trim((string) ($p['id'] ?? ''));
+            $code = normalizarKioskCode($p['kioskCode'] ?? '');
+            if ($id === '' || $code === '') fail('DADOS_INCOMPLETOS: id e kioskCode são obrigatórios');
+            $idx = null;
+            foreach ($db['lojas'] as $i => $l) {
+                if (($l['id'] ?? '') === $id) { $idx = $i; break; }
+            }
+            if ($idx === null) fail('LOJA_NAO_ENCONTRADA', 404);
+            $loja = $db['lojas'][$idx];
+            $codes = lojaKioskCodes($loja);
+            if (!in_array($code, $codes, true)) {
+                respond(['ok' => true, 'removido' => false, 'loja' => $loja]);
+            }
+            $codes = array_values(array_filter($codes, function ($c) use ($code) { return $c !== $code; }));
+
+            $legado = normalizarKioskCode($loja['kioskCode'] ?? '');
+            $pms = [];
+            foreach (lojaPareamentos($loja) as $pm) {
+                $pmCode = normalizarKioskCode($pm['kioskCode'] ?? '');
+                if ($pmCode !== '') {
+                    if (in_array($pmCode, $codes, true)) $pms[] = $pm;
+                    continue;
+                }
+                // Pareamento antigo sem código: só remove se era o único código.
+                if ($legado === $code && count($codes) === 0) continue;
+                $pms[] = $pm;
+            }
+
+            $db['lojas'][$idx]['kioskCodes'] = $codes;
+            $db['lojas'][$idx]['kioskCode'] = $codes[0] ?? '';
+            $db['lojas'][$idx]['pareamentos'] = $pms;
+            if ($pms) $db['lojas'][$idx]['pareamento'] = $pms[count($pms) - 1];
+            else unset($db['lojas'][$idx]['pareamento']);
+            saveDb($db);
+            respond(['ok' => true, 'removido' => true, 'loja' => $db['lojas'][$idx]]);
+        }
+
         case 'lojas.delete': {
             $db = db();
             $id = trim((string) ($p['id'] ?? ''));
+            if ($id === '') fail('DADOS_INCOMPLETOS: id é obrigatório');
             $before = count($db['lojas']);
             $db['lojas'] = array_values(array_filter($db['lojas'], function ($l) use ($id) {
                 return ($l['id'] ?? '') !== $id;
             }));
             if (count($db['lojas']) === $before) fail('LOJA_NAO_ENCONTRADA', 404);
+
+            // Operadores: remove a loja do vínculo; quem só existia nela é apagado.
+            $usuariosRemovidos = 0;
+            $usuarios = [];
+            foreach (($db['usuarios'] ?? []) as $u) {
+                $lojas = $u['lojas'] ?? (($u['lojaId'] ?? '') !== '' ? [(string) $u['lojaId']] : []);
+                $restantes = [];
+                foreach ($lojas as $l) if ((string) $l !== $id) $restantes[] = (string) $l;
+                if (count($restantes) === 0) { $usuariosRemovidos++; continue; }
+                if (count($restantes) !== count($lojas)) {
+                    $u['lojas'] = $restantes;
+                    if ((string) ($u['lojaId'] ?? '') === $id) $u['lojaId'] = $restantes[0];
+                }
+                $usuarios[] = $u;
+            }
+            $db['usuarios'] = $usuarios;
             saveDb($db);
-            respond(['ok' => true]);
+
+            // Histórico da loja excluída: apaga dos arquivos dos relatórios.
+            $removidos = ['usuarios' => $usuariosRemovidos, 'vendas' => 0, 'pedidos' => 0, 'auditoria' => 0, 'despesas' => 0];
+            $arquivos = [
+                'vendas.json' => 'vendas',
+                'pedidos.json' => 'pedidos',
+                'auditoria.json' => 'auditoria',
+                'despesas.json' => 'despesas',
+            ];
+            foreach ($arquivos as $arquivo => $chave) {
+                $linhas = loadJson($arquivo, null);
+                if (!is_array($linhas)) continue;
+                $filtradas = [];
+                foreach ($linhas as $r) {
+                    if ((string) ($r['lojaId'] ?? '') === $id) { $removidos[$chave]++; continue; }
+                    $filtradas[] = $r;
+                }
+                if (count($filtradas) !== count($linhas)) saveJson($arquivo, $filtradas);
+            }
+            // Catálogo/preços NÃO são apagados: são fixos para todos os PDVs
+            // (o ajuste por loja é opcional e o padrão global continua valendo).
+            respond(['ok' => true, 'removidos' => $removidos]);
+        }
+
+        // Manutenção: apaga registros órfãos de lojas excluídas ANTES da limpeza
+        // em cascata existir. Idempotente e não toca nas lojas cadastradas.
+        case 'lojas.limparOrfaos': {
+            $db = db();
+            $ids = lojaIdsExistentes($db);
+            if (count($ids) === 0) fail('SEM_LOJAS: cadastre uma loja antes de limpar os dados');
+            $removidos = ['usuarios' => 0, 'vendas' => 0, 'pedidos' => 0, 'auditoria' => 0, 'despesas' => 0];
+
+            $mudouUsuarios = false;
+            $usuarios = [];
+            foreach (($db['usuarios'] ?? []) as $u) {
+                $lojas = $u['lojas'] ?? (($u['lojaId'] ?? '') !== '' ? [(string) $u['lojaId']] : []);
+                $existentes = [];
+                foreach ($lojas as $l) if (isset($ids[(string) $l])) $existentes[] = (string) $l;
+                if (count($existentes) === 0) { $removidos['usuarios']++; $mudouUsuarios = true; continue; }
+                if (count($existentes) !== count($lojas)) { $u['lojas'] = $existentes; $mudouUsuarios = true; }
+                if (!isset($ids[(string) ($u['lojaId'] ?? '')])) { $u['lojaId'] = $existentes[0]; $mudouUsuarios = true; }
+                $usuarios[] = $u;
+            }
+            if ($mudouUsuarios) { $db['usuarios'] = $usuarios; saveDb($db); }
+
+            $arquivos = [
+                'vendas.json' => 'vendas',
+                'pedidos.json' => 'pedidos',
+                'auditoria.json' => 'auditoria',
+                'despesas.json' => 'despesas',
+            ];
+            foreach ($arquivos as $arquivo => $chave) {
+                $linhas = loadJson($arquivo, null);
+                if (!is_array($linhas)) continue;
+                $filtradas = [];
+                foreach ($linhas as $r) {
+                    if (!registroDeLojaExistente($ids, $r, $arquivo === 'despesas.json')) {
+                        $removidos[$chave]++;
+                        continue;
+                    }
+                    $filtradas[] = $r;
+                }
+                if (count($filtradas) !== count($linhas)) saveJson($arquivo, $filtradas);
+            }
+            // Catálogo/preços ficam intactos (padrão global + ajustes por loja).
+            respond(['ok' => true, 'removidos' => $removidos]);
         }
 
         case 'precos.save': {
@@ -1271,6 +1654,10 @@ try {
         case 'vendas.resumo': {
             $todas = loadJson('vendas.json', []);
             if (!is_array($todas)) $todas = [];
+            $ids = lojaIdsExistentes(db());
+            $todas = array_values(array_filter($todas, function ($r) use ($ids) {
+                return registroDeLojaExistente($ids, $r);
+            }));
             usort($todas, function ($a, $b) {
                 return strcmp((string) ($b['data'] ?? ''), (string) ($a['data'] ?? ''))
                     ?: strcmp((string) ($a['lojaId'] ?? ''), (string) ($b['lojaId'] ?? ''));
@@ -1288,8 +1675,10 @@ try {
             $dataFim = trim((string) ($p['dataFim'] ?? ''));
             $q = mb_strtolower(trim((string) ($p['q'] ?? '')), 'UTF-8');
             $status = mb_strtolower(trim((string) ($p['status'] ?? '')), 'UTF-8');
+            $ids = lojaIdsExistentes(db());
             $out = [];
             foreach ($todos as $r) {
+                if (!registroDeLojaExistente($ids, $r)) continue;
                 if ($lojaId !== '' && ($r['lojaId'] ?? '') !== $lojaId) continue;
                 if ($dataIni !== '' && ($r['data'] ?? '') < $dataIni) continue;
                 if ($dataFim !== '' && ($r['data'] ?? '') > $dataFim) continue;
@@ -1318,8 +1707,10 @@ try {
             $lojaId = trim((string) ($p['lojaId'] ?? ''));
             $dataIni = trim((string) ($p['dataIni'] ?? ''));
             $dataFim = trim((string) ($p['dataFim'] ?? ''));
+            $ids = lojaIdsExistentes(db());
             $out = [];
             foreach ($todos as $r) {
+                if (!registroDeLojaExistente($ids, $r)) continue;
                 if ($lojaId !== '' && ($r['lojaId'] ?? '') !== $lojaId) continue;
                 if ($dataIni !== '' && ($r['data'] ?? '') < $dataIni) continue;
                 if ($dataFim !== '' && ($r['data'] ?? '') > $dataFim) continue;
@@ -1354,6 +1745,10 @@ try {
         case 'despesas.list': {
             $todas = loadJson('despesas.json', []);
             if (!is_array($todas)) $todas = [];
+            $ids = lojaIdsExistentes(db());
+            $todas = array_values(array_filter($todas, function ($r) use ($ids) {
+                return registroDeLojaExistente($ids, $r, true); // lojaId vazio = despesa geral
+            }));
             usort($todas, function ($a, $b) {
                 return strcmp((string) ($b['data'] ?? ''), (string) ($a['data'] ?? ''))
                     ?: strcmp((string) ($a['lojaId'] ?? ''), (string) ($b['lojaId'] ?? ''));
@@ -1408,10 +1803,18 @@ try {
 
         case 'usuarios.list': {
             $db = db();
+            $ids = lojaIdsExistentes($db);
             $lojaId = (string) ($p['lojaId'] ?? '');
-            $users = array_map(function ($u) {
-                return userVisible($u, true);
-            }, $db['usuarios']);
+            $users = [];
+            foreach (($db['usuarios'] ?? []) as $u) {
+                $lojas = $u['lojas'] ?? (($u['lojaId'] ?? '') !== '' ? [(string) $u['lojaId']] : []);
+                $existentes = [];
+                foreach ($lojas as $l) if (isset($ids[(string) $l])) $existentes[] = (string) $l;
+                if (count($existentes) === 0) continue; // operador órfão de loja excluída
+                if (count($existentes) !== count($lojas)) $u['lojas'] = $existentes;
+                if (!isset($ids[(string) ($u['lojaId'] ?? '')])) $u['lojaId'] = $existentes[0];
+                $users[] = userVisible($u, true);
+            }
             if ($lojaId !== '') {
                 $users = array_values(array_filter($users, function ($u) use ($lojaId) {
                     $lojas = $u['lojas'] ?? (($u['lojaId'] ?? '') ? [$u['lojaId']] : []);

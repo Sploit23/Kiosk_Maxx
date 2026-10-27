@@ -4155,32 +4155,68 @@ function abrirQtdModal(t){
   });
 }
 
+function comboDescricao(combo){
+  if(combo.modo === 'slots'){
+    const partes = [];
+    (combo.regras?.slots||[]).forEach(s=>{
+      if(s.tipo==='tamanho') partes.push((s.modelos||[]).join('/'));
+      else partes.push((s.role||'item'));
+    });
+    (combo.regras?.obrigatorios||[]).forEach(o=>{
+      const p = catalogLookup(o.produtoId, o.tipo);
+      if(p) partes.push((o.qtd>1?o.qtd+'x ':'')+p.label);
+    });
+    return partes.join(' + ');
+  }
+  if(!Array.isArray(combo.itens)) return '';
+  return combo.itens.map(it=>{
+    const p = catalogLookup(it.produtoId, it.tipoProduto);
+    return (it.qtd>1?it.qtd+'x ':'')+(p?p.label:it.produtoId);
+  }).join(' + ');
+}
+function comboSomaIndividual(combo){
+  if(combo.modo === 'slots'){
+    let soma = 0;
+    (combo.regras?.obrigatorios||[]).forEach(o=>{
+      const p = catalogLookup(o.produtoId, o.tipo);
+      if(p) soma += p.preco*(o.qtd||1);
+    });
+    return soma;
+  }
+  if(!Array.isArray(combo.itens)) return 0;
+  return combo.itens.reduce((s,it)=>{
+    const p = catalogLookup(it.produtoId, it.tipoProduto);
+    return s + (p?p.preco:0)*(it.qtd||1);
+  },0);
+}
 function renderCombos(){
   const list = document.getElementById('combos-list');
   if(!list) return;
   list.innerHTML='';
   const qtd15x20Elegiveis = cart.filter(c=>c.tipo==='tamanho' && c.produtoId==='15x20' && !c.zeradoPorCombo).length;
   COMBOS.filter(combo=>!combo.inline).forEach(combo=>{
-    const somaIndividual = combo.itens.reduce((s,it)=>s+catalogLookup(it.produtoId,it.tipoProduto).preco*it.qtd,0);
-    const descricao = combo.itens.map(it=>{
-      const p = catalogLookup(it.produtoId,it.tipoProduto);
-      return (it.qtd>1?it.qtd+'x ':'')+p.label;
-    }).join(' + ');
-    const semEstoque = combo.encarte && saldoFisico('item-encarte')<=0;
-    const faltamFotos = combo.encarte && qtd15x20Elegiveis < 2;
-    const bloqueado = semEstoque || faltamFotos;
+    const somaIndividual = comboSomaIndividual(combo);
+    const descricao = comboDescricao(combo);
+    let bloqueado = false;
     let labelBtn = '+ Adicionar combo';
-    if(semEstoque) labelBtn = 'Sem estoque';
-    else if(faltamFotos) labelBtn = `Faltam ${2-qtd15x20Elegiveis} foto(s) 15x20`;
+    if(combo.id === 'combo-encarte-2x15x20' || combo.id === 'combo3'){
+      const semEstoque = saldoFisico('item-encarte')<=0;
+      const faltamFotos = qtd15x20Elegiveis < 2;
+      bloqueado = semEstoque || faltamFotos;
+      if(semEstoque) labelBtn = 'Sem estoque';
+      else if(faltamFotos) labelBtn = `Faltam ${2-qtd15x20Elegiveis} foto(s) 15x20`;
+    } else if(combo.modo === 'slots'){
+      labelBtn = '+ Montar combo';
+    }
     const card = document.createElement('div');
     card.className='combo-card';
     card.innerHTML = `
       <div class="oc-name">${combo.nome}</div>
-      <div class="combo-itens">${descricao}${combo.encarte?` · estoque do Item Encarte: ${saldoFisico('item-encarte')}`:''}</div>
-      ${combo.encarte ? `<div class="combo-itens" style="color:var(--gold-300)">⚠ Precisa de 2 fotos 15x20 já no carrinho — elas ficam com valor zerado, o combo cobra tudo no Item Encarte</div>` : ''}
+      <div class="combo-itens">${descricao}${(combo.id==='combo-encarte-2x15x20'||combo.id==='combo3')?` · estoque do Item Encarte: ${saldoFisico('item-encarte')}`:''}</div>
+      ${(combo.id==='combo-encarte-2x15x20'||combo.id==='combo3') ? `<div class="combo-itens" style="color:var(--gold-300)">⚠ Seleciona 2 fotos 15x20 ao montar o combo</div>` : ''}
       <div class="combo-bottom">
         <div class="combo-precos">
-          <span class="combo-de">${fmt(somaIndividual)}</span>
+          ${somaIndividual>combo.valorCombo?`<span class="combo-de">${fmt(somaIndividual)}</span>`:''}
           <span class="combo-por">${fmt(combo.valorCombo)}</span>
         </div>
         <button class="oc-add-btn" ${bloqueado?'disabled':''}>${labelBtn}</button>
@@ -4194,10 +4230,94 @@ function renderCombos(){
 /* combo inline no card do tamanho foi removido — todos os tamanhos usam o mesmo
    botão "+ Adicionar este ao carrinho" com pop de quantidade (abrirQtdModal). */
 
+function abrirComboSlots(combo){
+  if(!combo || !currentSession) return;
+  if(!currentFoto) currentFoto = currentSession.fotos[0];
+  const slots = (combo.regras && combo.regras.slots) ? combo.regras.slots : [];
+  const obrig = (combo.regras && combo.regras.obrigatorios) ? combo.regras.obrigatorios : [];
+  const fotosSessao = (currentSession.fotos||[]).map(f=>({seed:f.seed, name:f.name}));
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">Montar combo</div><h3>${combo.nome}</h3></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <p class="modal-sub">Selecione as fotos para cada slot. Valor do combo: ${fmt(combo.valorCombo)}</p>
+    <div id="combo-slots-wrap"></div>
+    <button class="btn-primary" id="combo-slots-confirmar" style="margin-top:14px;">Aplicar combo</button>
+  `);
+  const wrap = document.getElementById('combo-slots-wrap');
+  const selecionados = {};
+  slots.forEach((s,idx)=>{
+    const div = document.createElement('div');
+    div.style.marginBottom = '12px';
+    div.innerHTML = `<div style="font-size:12px;color:var(--gold-300);margin-bottom:6px;">Slot ${idx+1} - ${s.modelos? s.modelos.join('/') : ''} ${s.obrigatorio?'(obrigatório)':''}</div>
+      <select id="combo-slot-${idx}" data-slot-idx="${idx}" style="width:100%;padding:10px;border-radius:8px;background:var(--navy-850);color:var(--cream-100);border:1px solid var(--navy-line)"></select>`;
+    wrap.appendChild(div);
+    const sel = div.querySelector('select');
+    sel.innerHTML = `<option value="">Selecione uma foto</option>` + fotosSessao.map(f=>`<option value="${f.seed}">${f.name||f.seed}</option>`).join('');
+    sel.addEventListener('change', e=>{
+      selecionados[idx] = e.target.value;
+    });
+  });
+  document.getElementById('combo-slots-confirmar').addEventListener('click', ()=>{
+    for(let i=0;i<slots.length;i++){
+      if(slots[i].obrigatorio && !selecionados[i]){
+        toast('⚠ Selecione todas as fotos obrigatórias');
+        return;
+      }
+    }
+    for(const o of obrig){
+      if(!temEstoqueFisico(o.produtoId, o.qtd||1)){
+        const p = catalogLookup(o.produtoId, o.tipo);
+        toast(`⚠ Estoque insuficiente de ${p?p.label:o.produtoId}`);
+        return;
+      }
+    }
+    if(combo.id === 'combo-encarte-2x15x20' || combo.id === 'combo-encarte-2x15x20-digital'){
+      if(saldoFisico('item-encarte')<=0){
+        toast('⚠ Sem estoque do Item Encarte');
+        return;
+      }
+    }
+    let somaIndividual = 0;
+    obrig.forEach(o=>{
+      const p = catalogLookup(o.produtoId, o.tipo);
+      if(p) somaIndividual += p.preco*(o.qtd||1);
+    });
+    const groupId = 'combo-slots-'+Date.now().toString(36);
+    obrig.forEach(o=>{
+      addToCart(o.tipo, o.produtoId, catalogLookup(o.produtoId,o.tipo)?.label||o.produtoId, catalogLookup(o.produtoId,o.tipo)?.preco||0, o.qtd||1);
+    });
+    if(combo.id === 'combo-encarte-2x15x20' || combo.id === 'combo-encarte-2x15x20-digital'){
+      for(const item of cart){
+        if(item.comboGroupId) continue;
+        if(item.tipo==='tamanho' && item.produtoId==='15x20' && !item.zeradoPorCombo){
+          item.zeradoPorCombo = true;
+          item.precoOriginal = item.preco;
+          item.preco = 0;
+        }
+      }
+    }
+    const diferenca = +(somaIndividual - combo.valorCombo).toFixed(2);
+    if(diferenca > 0){
+      cart.push({
+        cartId:'combo-desc-'+Date.now()+Math.random().toString(36).slice(2,5),
+        sessionId: currentSession.id, sessionSenha: currentSession.senha,
+        fotoSeed: currentFoto.seed, tipo:'combo-desconto', produtoId:'combo', label:`Desconto do combo "${combo.nome}"`,
+        qtd:1, precoUnit:-diferenca, preco:-diferenca, comboGroupId: groupId
+      });
+    }
+    cart.forEach(c=>{ if(c.cartId && !c.comboGroupId && (c.tipo==='extra'||c.tipo==='combo-desconto')) c.comboGroupId = groupId; });
+    closeModal();
+    renderCart(); updateRibbonBanner(); renderCombos();
+    toast(`Combo "${combo.nome}" aplicado`);
+  });
+}
 function addCombo(comboId){
   const combo = COMBOS.find(c=>c.id===comboId);
   if(!combo || !currentSession) return;
   if(!currentFoto) currentFoto = currentSession.fotos[0];
+  if(combo.modo === 'slots') return abrirComboSlots(combo);
 
   if(combo.encarte){
     if(saldoFisico('item-encarte')<=0){
@@ -4229,6 +4349,7 @@ function addCombo(comboId){
     return;
   }
 
+  if(!Array.isArray(combo.itens)) return;
   // demais combos: valida estoque físico de todos os itens antes de adicionar qualquer um
   const semEstoqueCombo = combo.itens.find(it=>!temEstoqueFisico(it.produtoId, it.qtd));
   if(semEstoqueCombo){
