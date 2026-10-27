@@ -1706,7 +1706,7 @@ const PLACEHOLDER_IMG = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent
 // o PNG azul "MAX FOTO" só é usado quando a foto REALMENTE falta no sidecar.
 const PLACEHOLDER_BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
 const URL_POR_FOTO = {}; // seed (filename da sessão) -> URL real no sidecar
-const SENHA_MASTER_PDV = '1234';
+const SENHA_MASTER_PDV = '8694';
 let caixaReal = null; // última resposta de caixaEstado/caixaAbrir/caixaFechar
 let _recarregando = false;
 let _sessionsLoaded = false;
@@ -6601,6 +6601,7 @@ function askSenhaMotivo(titulo, subtitulo, onConfirm, pedidoContexto){
   const checar = ()=>{ btn.disabled = !(senhaInput.value.length===4 && motivoInput.value.trim().length>0); };
   senhaInput.addEventListener('input', checar);
   motivoInput.addEventListener('input', checar);
+  setTimeout(()=>{ try{ senhaInput.focus(); }catch{} }, 30);
   btn.addEventListener('click', ()=>{
     const senha = senhaInput.value, motivo = motivoInput.value.trim();
     const uso = {
