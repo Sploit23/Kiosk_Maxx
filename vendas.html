@@ -4409,7 +4409,8 @@ function renderFrame(){
   cropContainer = box;
 
   if(temMoldeCelula){
-    if(modeloDe(t) !== 'bolinha'){
+    const m = modeloDe(t);
+    if(m !== 'bolinha' && m !== 'polaroide'){
       const grid = document.createElement('div');
       grid.className = 'polaroid-grid'+(showOverlay?'':' hidden');
       grid.innerHTML = '<i class="gl gv1"></i><i class="gl gv2"></i><i class="gl gh1"></i><i class="gl gh2"></i>';
@@ -4495,7 +4496,7 @@ function renderFrame(){
   document.getElementById('btn-orientacao').textContent = currentOrientation==='paisagem' ? 'Retrato' : 'Paisagem';
   document.getElementById('btn-overlay').textContent = showOverlay ? 'Ocultar guia' : 'Mostrar guia';
   document.getElementById('btn-overlay').classList.toggle('active', !showOverlay);
-  document.getElementById('btn-overlay').style.display = (temMoldeCelula && modeloDe(t)==='bolinha') ? 'none' : 'inline-flex';
+  document.getElementById('btn-overlay').style.display = (temMoldeCelula && (modeloDe(t)==='bolinha' || modeloDe(t)==='polaroide')) ? 'none' : 'inline-flex';
   document.getElementById('chk-logo').checked = includeLogo;
 }
 
