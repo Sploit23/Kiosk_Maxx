@@ -350,30 +350,38 @@ select.form-input{appearance:none;}
 #toast.show{opacity:1;}
 
 /* ——— FINANCEIRO (painel de resultado) ——— */
-.fin2-filters{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:10px;}
-.fin2-field{display:flex;flex-direction:column;gap:4px;}
-.fin2-field label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--slate-400);font-weight:600;}
+#screen-financeiro .section-head{margin-bottom:14px;}
+#screen-financeiro .section-head h2{font-size:17px;}
+#screen-financeiro .section-head p{font-size:11px;margin-top:2px;}
+#screen-financeiro .card{padding:15px 16px;margin-bottom:14px;}
+#screen-financeiro .grid2{gap:14px;margin-bottom:14px;}
+#screen-financeiro table{font-size:11.5px;}
+#screen-financeiro th{padding:5px 8px;font-size:9.5px;}
+#screen-financeiro td{padding:6px 8px;}
+.fin2-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:8px;}
+.fin2-field{display:flex;flex-direction:column;gap:3px;}
+.fin2-field label{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--slate-400);font-weight:600;}
 .fin2-input,.fin2-select{
   background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);
-  border-radius:8px;padding:7px 10px;font-size:12px;font-family:inherit;outline:none;min-height:32px;
+  border-radius:7px;padding:5px 9px;font-size:11.5px;font-family:inherit;outline:none;min-height:29px;
 }
 .fin2-input:focus,.fin2-select:focus{border-color:var(--gold-500);box-shadow:0 0 0 3px rgba(212,162,76,.12);}
 .fin2-btn{
-  min-height:32px;padding:7px 13px;border-radius:8px;border:1px solid var(--navy-line);
-  background:var(--navy-850);color:var(--slate-300);font-size:12px;font-weight:600;
+  min-height:29px;padding:5px 11px;border-radius:7px;border:1px solid var(--navy-line);
+  background:var(--navy-850);color:var(--slate-300);font-size:11.5px;font-weight:600;
   display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
 }
 .fin2-btn:hover{border-color:var(--gold-500);color:var(--gold-300);}
 .fin2-btn.primary{background:var(--gold-600);border-color:var(--gold-600);color:#fff;}
 .fin2-btn.primary:hover{background:var(--gold-500);border-color:var(--gold-500);color:var(--navy-950);}
 .fin2-btn.danger{color:var(--red-400);border-color:rgba(193,102,107,.45);}
-.fin2-btn.mini{padding:3px 8px;min-height:24px;font-size:11px;border-radius:6px;font-weight:500;}
-.fin2-range{font-size:11.5px;color:var(--slate-400);margin:0 0 16px;}
+.fin2-btn.mini{padding:2px 7px;min-height:21px;font-size:10px;border-radius:5px;font-weight:500;}
+.fin2-range{font-size:10.5px;color:var(--slate-400);margin:0 0 12px;}
 .fin2-range b{color:var(--gold-300);}
-.fin2-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+.fin2-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;}
 .fin2-stat{
-  background:var(--navy-900);border:1px solid var(--navy-line);border-radius:12px;
-  padding:13px 16px;position:relative;overflow:hidden;
+  background:var(--navy-900);border:1px solid var(--navy-line);border-radius:11px;
+  padding:11px 14px;position:relative;overflow:hidden;
 }
 .fin2-stat::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;}
 .fin2-stat.blue::before{background:#5b8def;}
@@ -381,103 +389,103 @@ select.form-input{appearance:none;}
 .fin2-stat.amber::before{background:var(--amber-500);}
 .fin2-stat.green::before{background:var(--green-500);}
 .fin2-stat.red::before{background:var(--red-400);}
-.fin2-stat .l{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--slate-400);margin-bottom:5px;}
-.fin2-stat .v{font-family:'Fraunces',serif;font-size:24px;font-weight:300;line-height:1.1;color:var(--cream-100);}
+.fin2-stat .l{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--slate-400);margin-bottom:4px;}
+.fin2-stat .v{font-family:'Fraunces',serif;font-size:21px;font-weight:300;line-height:1.1;color:var(--cream-100);}
 .fin2-stat .v.neg{color:#e58a8f;}
 .fin2-stat .v.pos{color:#6fd3a4;}
-.fin2-stat .s{font-size:10.5px;color:var(--slate-500);margin-top:4px;}
+.fin2-stat .s{font-size:10px;color:var(--slate-500);margin-top:3px;}
 
 .fin2-graph{
   background:linear-gradient(180deg,var(--navy-900) 0%,var(--navy-850) 100%);
-  border:1px solid var(--navy-line);border-radius:16px;padding:20px;margin-bottom:18px;
+  border:1px solid var(--navy-line);border-radius:14px;padding:16px;margin-bottom:14px;
   position:relative;overflow:hidden;box-shadow:var(--shadow);
 }
 .fin2-graph::before{content:'';position:absolute;inset:0 0 auto 0;height:2px;
   background:linear-gradient(90deg,var(--green-500),#5b8def,var(--red-400));opacity:.85;}
-.fin2-graph-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px;}
-.fin2-kicker{display:flex;align-items:center;gap:7px;color:var(--slate-400);font-size:9.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;margin-bottom:5px;}
-.fin2-kicker i{width:6px;height:6px;border-radius:50%;background:#5b8def;box-shadow:0 0 0 4px rgba(91,141,239,.14);}
-.fin2-title{font-family:'Fraunces',serif;font-size:19px;font-weight:300;color:var(--gold-100);margin:0;}
-.fin2-subtitle{font-size:11.5px;color:var(--slate-400);margin:5px 0 0;max-width:620px;line-height:1.45;}
-.fin2-head-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-left:auto;}
-.fin2-period{display:inline-flex;align-items:center;min-height:28px;padding:5px 10px;border:1px solid var(--navy-line);border-radius:999px;background:var(--navy-850);color:var(--slate-300);font-size:10.5px;font-weight:700;white-space:nowrap;}
-.fin2-legend{display:flex;align-items:center;gap:11px;flex-wrap:wrap;font-size:10.5px;color:var(--slate-400);}
-.fin2-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
-.fin2-dot{display:inline-block;width:8px;height:8px;border-radius:999px;}
+.fin2-graph-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:12px;}
+.fin2-kicker{display:flex;align-items:center;gap:6px;color:var(--slate-400);font-size:9px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;margin-bottom:4px;}
+.fin2-kicker i{width:5px;height:5px;border-radius:50%;background:#5b8def;box-shadow:0 0 0 3px rgba(91,141,239,.14);}
+.fin2-title{font-family:'Fraunces',serif;font-size:17px;font-weight:300;color:var(--gold-100);margin:0;}
+.fin2-subtitle{font-size:10.5px;color:var(--slate-400);margin:4px 0 0;max-width:590px;line-height:1.4;}
+.fin2-head-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto;}
+.fin2-period{display:inline-flex;align-items:center;min-height:26px;padding:4px 9px;border:1px solid var(--navy-line);border-radius:999px;background:var(--navy-850);color:var(--slate-300);font-size:10px;font-weight:700;white-space:nowrap;}
+.fin2-legend{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:9.5px;color:var(--slate-400);}
+.fin2-legend span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
+.fin2-dot{display:inline-block;width:7px;height:7px;border-radius:999px;}
 .fin2-dot.g{background:#3fbf85;}.fin2-dot.r{background:#d66060;}.fin2-dot.b{background:#5b8def;}
 
-.fin2-summary{display:grid;grid-template-columns:1.35fr 1fr 1fr 1fr;gap:10px;margin-bottom:18px;}
-.fin2-sum{border:1px solid var(--navy-line);background:var(--navy-850);border-radius:12px;padding:11px 13px;min-width:0;}
+.fin2-summary{display:grid;grid-template-columns:1.35fr 1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
+.fin2-sum{border:1px solid var(--navy-line);background:var(--navy-850);border-radius:10px;padding:9px 11px;min-width:0;}
 .fin2-sum.main{background:linear-gradient(135deg,rgba(79,174,127,.16),rgba(10,26,46,.2) 70%);border-color:rgba(79,174,127,.38);}
-.fin2-sum .l{font-size:9.5px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:4px;}
-.fin2-sum .v{font-size:19px;line-height:1.1;font-weight:700;color:var(--cream-100);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fin2-sum .l{font-size:8.5px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:3px;}
+.fin2-sum .v{font-size:17px;line-height:1.1;font-weight:700;color:var(--cream-100);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .fin2-sum.main .v{color:#6fd3a4;}
 .fin2-sum .v.neg{color:#e58a8f;}
-.fin2-sum .f{margin-top:4px;font-size:10px;color:var(--slate-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fin2-sum .f{margin-top:3px;font-size:9.5px;color:var(--slate-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
-.fin2-chart-top{display:grid;grid-template-columns:170px minmax(0,1fr) 104px;gap:12px;align-items:center;padding:9px 10px 7px;border-bottom:1px solid var(--navy-line);}
-.fin2-cap{font-size:9px;color:var(--slate-500);font-weight:800;letter-spacing:.08em;text-transform:uppercase;}
+.fin2-chart-top{display:grid;grid-template-columns:150px minmax(0,1fr) 96px;gap:10px;align-items:center;padding:7px 8px 5px;border-bottom:1px solid var(--navy-line);}
+.fin2-cap{font-size:8.5px;color:var(--slate-500);font-weight:800;letter-spacing:.08em;text-transform:uppercase;}
 .fin2-cap.right{text-align:right;}
-.fin2-scale{display:flex;justify-content:space-between;color:var(--slate-500);font-size:9px;font-variant-numeric:tabular-nums;}
+.fin2-scale{display:flex;justify-content:space-between;color:var(--slate-500);font-size:8.5px;font-variant-numeric:tabular-nums;}
 .fin2-scale .c{color:var(--slate-300);font-weight:800;}
-.fin2-list{padding:7px 4px 2px;}
-.fin2-row{display:grid;grid-template-columns:170px minmax(0,1fr) 104px;gap:12px;align-items:center;min-height:46px;padding:4px 6px;border-radius:10px;transition:background .15s;}
+.fin2-list{padding:6px 4px 1px;}
+.fin2-row{display:grid;grid-template-columns:150px minmax(0,1fr) 96px;gap:10px;align-items:center;min-height:40px;padding:3px 5px;border-radius:9px;transition:background .15s;}
 .fin2-row:hover{background:rgba(255,255,255,.025);}
-.fin2-row.total{background:linear-gradient(90deg,rgba(91,141,239,.13),rgba(91,141,239,.04));border:1px solid rgba(91,141,239,.35);margin-top:8px;}
+.fin2-row.total{background:linear-gradient(90deg,rgba(91,141,239,.13),rgba(91,141,239,.04));border:1px solid rgba(91,141,239,.35);margin-top:6px;}
 .fin2-name{min-width:0;}
-.fin2-name .n{font-size:12px;color:var(--cream-100);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fin2-name .n{font-size:11.5px;color:var(--cream-100);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .fin2-row.total .fin2-name .n{color:#9dbcf5;font-weight:800;}
-.fin2-name .s{font-size:9px;color:var(--slate-500);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.fin2-track{position:relative;height:28px;display:grid;grid-template-columns:minmax(0,1fr) 2px minmax(0,1fr);align-items:center;}
+.fin2-name .s{font-size:8.5px;color:var(--slate-500);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fin2-track{position:relative;height:25px;display:grid;grid-template-columns:minmax(0,1fr) 2px minmax(0,1fr);align-items:center;}
 .fin2-lane{position:relative;height:100%;display:flex;align-items:center;z-index:1;}
-.fin2-lane.neg{justify-content:flex-end;padding-right:6px;}
-.fin2-lane.pos{justify-content:flex-start;padding-left:6px;}
-.fin2-zero{width:2px;height:30px;border-radius:2px;background:var(--navy-line);z-index:3;}
-.fin2-bar{height:14px;min-width:3px;border-radius:999px;box-shadow:0 4px 10px rgba(0,0,0,.3);}
+.fin2-lane.neg{justify-content:flex-end;padding-right:5px;}
+.fin2-lane.pos{justify-content:flex-start;padding-left:5px;}
+.fin2-zero{width:2px;height:27px;border-radius:2px;background:var(--navy-line);z-index:3;}
+.fin2-bar{height:12px;min-width:3px;border-radius:999px;box-shadow:0 4px 10px rgba(0,0,0,.3);}
 .fin2-bar.g{background:linear-gradient(90deg,#2f9e6b,#5ed39a);}
 .fin2-bar.r{background:linear-gradient(90deg,#d66060,#a63a3a);}
 .fin2-bar.b{background:linear-gradient(90deg,#3c6fc9,#79aaf0);}
-.fin2-pill{display:inline-flex;align-items:center;min-height:22px;padding:3px 7px;border:1px solid var(--navy-line);border-radius:7px;background:var(--navy-900);font-size:9.5px;font-weight:800;line-height:1;color:var(--slate-300);white-space:nowrap;z-index:5;}
+.fin2-pill{display:inline-flex;align-items:center;min-height:20px;padding:2px 6px;border:1px solid var(--navy-line);border-radius:6px;background:var(--navy-900);font-size:9px;font-weight:800;line-height:1;color:var(--slate-300);white-space:nowrap;z-index:5;}
 .fin2-pill.pos{color:#6fd3a4;border-color:rgba(79,174,127,.4);}
 .fin2-pill.neg{color:#e58a8f;border-color:rgba(193,102,107,.4);}
 .fin2-pill.tot{color:#9dbcf5;border-color:rgba(91,141,239,.45);background:rgba(91,141,239,.1);}
-.fin2-result{font-size:9px;font-weight:800;letter-spacing:.05em;text-align:right;text-transform:uppercase;color:var(--slate-400);}
+.fin2-result{font-size:8.5px;font-weight:800;letter-spacing:.05em;text-align:right;text-transform:uppercase;color:var(--slate-400);}
 .fin2-result.pos{color:#3fbf85;}.fin2-result.neg{color:#e58a8f;}.fin2-result.tot{color:#79aaf0;}
-.fin2-empty{min-height:220px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--slate-400);font-size:12px;padding:30px;}
-.fin2-foot{display:flex;align-items:center;justify-content:flex-end;gap:7px;padding:10px 3px 0;font-size:10px;color:var(--slate-500);}
+.fin2-empty{min-height:180px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--slate-400);font-size:11.5px;padding:24px;}
+.fin2-foot{display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:8px 3px 0;font-size:9.5px;color:var(--slate-500);}
 .fin2-foot b{color:var(--slate-300);}
-.fin2-tip{position:fixed;left:0;top:0;display:none;z-index:99999;width:min(320px,calc(100vw - 24px));padding:12px 13px;border:1px solid var(--navy-line);border-radius:12px;background:rgba(7,18,34,.98);box-shadow:0 18px 42px rgba(0,0,0,.55);pointer-events:none;}
-.fin2-tip .t{font-size:12px;font-weight:700;color:var(--cream-100);display:flex;justify-content:space-between;gap:10px;}
-.fin2-tip .b{font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:3px 6px;border-radius:999px;white-space:nowrap;}
+.fin2-tip{position:fixed;left:0;top:0;display:none;z-index:99999;width:min(300px,calc(100vw - 24px));padding:10px 11px;border:1px solid var(--navy-line);border-radius:11px;background:rgba(7,18,34,.98);box-shadow:0 18px 42px rgba(0,0,0,.55);pointer-events:none;}
+.fin2-tip .t{font-size:11px;font-weight:700;color:var(--cream-100);display:flex;justify-content:space-between;gap:10px;}
+.fin2-tip .b{font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:2px 5px;border-radius:999px;white-space:nowrap;}
 .fin2-tip .b.g{color:#6fd3a4;background:rgba(79,174,127,.16);}
 .fin2-tip .b.r{color:#e58a8f;background:rgba(193,102,107,.16);}
 .fin2-tip .b.t{color:#9dbcf5;background:rgba(91,141,239,.16);}
-.fin2-tip .net{font-size:16px;font-weight:800;margin-top:3px;}
+.fin2-tip .net{font-size:15px;font-weight:800;margin-top:3px;}
 .fin2-tip .net.g{color:#6fd3a4;}.fin2-tip .net.r{color:#e58a8f;}.fin2-tip .net.t{color:#9dbcf5;}
-.fin2-tip .g2{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px;margin-top:9px;padding-top:9px;border-top:1px solid var(--navy-line);}
-.fin2-tip .it span{display:block;font-size:8.5px;color:var(--slate-500);}
-.fin2-tip .it strong{display:block;margin-top:1px;font-size:10px;color:var(--slate-300);}
-.fin2-form{display:grid;grid-template-columns:130px 130px 170px 1fr 120px auto;gap:8px;align-items:center;margin-bottom:12px;}
+.fin2-tip .g2{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-top:8px;padding-top:8px;border-top:1px solid var(--navy-line);}
+.fin2-tip .it span{display:block;font-size:8px;color:var(--slate-500);}
+.fin2-tip .it strong{display:block;margin-top:1px;font-size:9.5px;color:var(--slate-300);}
+.fin2-form{display:grid;grid-template-columns:130px 130px 170px 1fr 120px auto;gap:7px;align-items:center;margin-bottom:10px;}
 .fin2-form.tax{grid-template-columns:repeat(3,1fr) auto;align-items:flex-end;}
 .fin2-form.desp{grid-template-columns:1fr 1fr;align-items:flex-end;}
 .fin2-form.desp .wide{grid-column:1/-1;}
-.fin2-form.tax .fin2-field{gap:4px;}
-.fin2-edit-note{display:none;font-size:11px;color:var(--gold-300);margin:-4px 0 9px;}
+.fin2-form.tax .fin2-field{gap:3px;}
+.fin2-edit-note{display:none;font-size:10.5px;color:var(--gold-300);margin:-4px 0 8px;}
 .fin2-edit-note.on{display:block;}
 @media (max-width:1000px){
   .fin2-stats{grid-template-columns:1fr 1fr;}
   .fin2-summary{grid-template-columns:1fr 1fr;}
   .fin2-form,.fin2-form.tax,.fin2-form.desp{grid-template-columns:1fr 1fr;}
-  .fin2-chart-top,.fin2-row{grid-template-columns:130px minmax(0,1fr) 86px;gap:8px;}
+  .fin2-chart-top,.fin2-row{grid-template-columns:120px minmax(0,1fr) 82px;gap:7px;}
 }
 @media (max-width:640px){
-  .fin2-graph{padding:14px;}
+  .fin2-graph{padding:13px;}
   .fin2-stats,.fin2-summary{grid-template-columns:1fr;}
   .fin2-form,.fin2-form.tax,.fin2-form.desp{grid-template-columns:1fr;}
   .fin2-form.desp .wide{grid-column:auto;}
   .fin2-chart-top{display:none;}
-  .fin2-row{display:block;padding:9px;}
-  .fin2-track{margin-top:8px;height:28px;}
+  .fin2-row{display:block;padding:8px;}
+  .fin2-track{margin-top:7px;height:25px;}
 }
 </style>
 </head>
@@ -579,8 +587,11 @@ select.form-input{appearance:none;}
     <!-- ====== LOJAS ====== -->
     <div class="screen" id="screen-lojas">
       <div class="section-head">
-        <div><h2>Lojas / Kiosks</h2><p>Cadastro das lojas — emparelhe digitando o código exibido na tela do PDV</p></div>
-        <button class="btn btn-primary" id="btn-nova-loja">+ Nova loja</button>
+        <div><h2>Lojas / Kiosks</h2><p>Cadastro das lojas — cada PDV tem seu código e uma loja pode ter vários PDVs</p></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button class="btn btn-ghost" id="btn-limpar-orfaos" style="padding:6px 10px;font-size:11px;" title="Apaga dados que sobraram de lojas já excluídas">Limpar dados de lojas excluídas</button>
+          <button class="btn btn-primary" id="btn-nova-loja">+ Nova loja</button>
+        </div>
       </div>
       <div class="card">
         <h3>Lojas cadastradas</h3>
@@ -828,11 +839,12 @@ select.form-input{appearance:none;}
   <!-- ====== CATÁLOGO DE PRODUTOS (preços por loja) ====== -->
     <div class="screen" id="screen-precos">
       <div class="section-head">
-        <div><h2>Catálogo de produtos</h2><p>Edite, crie e exclua produtos — o PDV aplica as mudanças sozinho em até 60s</p></div>
+        <div><h2>Catálogo de produtos</h2><p>Produtos fixos para todas as lojas — ajustes por loja são opcionais; o PDV aplica em até 60s</p></div>
       </div>
       <div class="card">
-        <h3>Loja / Kiosk</h3>
+        <h3>Aplicar em</h3>
         <select class="form-input" id="precos-loja" style="width:320px;"></select>
+        <p class="cat-hint" style="margin-top:8px;">O padrão vale para lojas novas e para as que não têm ajuste próprio.</p>
       </div>
       <div class="card">
         <div class="cat-box-head" style="margin-bottom:4px;">
@@ -2310,13 +2322,61 @@ async function renderRanking(){
 bindPeriodTabs('#rank-periodo', function(p){ state.rankPeriodo = p; renderRanking(); });
 
 // ——— LOJAS ———
+function lojaCodigos(l){
+  l = l || {};
+  var out = [];
+  function add(v){
+    var c = String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+    if(c && out.indexOf(c) < 0) out.push(c);
+  }
+  (l.kioskCodes||[]).forEach(add);
+  add(l.kioskCode);
+  (l.pareamentos||[]).forEach(function(pm){ if(pm) add(pm.kioskCode); });
+  if(l.pareamento) add(l.pareamento.kioskCode);
+  return out;
+}
+function lojaPareamentos(l){
+  l = l || {};
+  var out = [], seen = {};
+  function add(pm){
+    if(!pm) return;
+    var mid = String(pm.machineId||'').trim();
+    if(!mid || seen[mid]) return;
+    seen[mid] = 1; out.push(pm);
+  }
+  (l.pareamentos||[]).forEach(add);
+  add(l.pareamento);
+  return out;
+}
+function normCode(v){ return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
+function lojaPdvCell(l){
+  var codes = lojaCodigos(l);
+  var pms = lojaPareamentos(l);
+  var byCode = {};
+  pms.forEach(function(pm){
+    var c = normCode(pm.kioskCode) || normCode(l.kioskCode);
+    if(c && !byCode[c]) byCode[c] = pm;
+  });
+  var html = codes.map(function(c){
+    var pm = byCode[c];
+    return '<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;white-space:nowrap;">'+
+      '<span class="pill '+(pm?'pill-green':'pill-slate')+'" style="padding:1px 6px;font-size:9px;">'+(pm?'ON':'…')+'</span>'+
+      '<b style="font-family:ui-monospace,Consolas,monospace;font-size:11px;">'+esc(fmtKiosk(c))+'</b>'+
+      '<span style="font-size:10.5px;color:'+(pm?'var(--slate-300)':'var(--slate-500)')+';">'+esc(pm ? (pm.pdvNome||'PDV') : 'aguardando')+'</span>'+
+      '<button data-rm-kiosk="'+escAttr(l.id)+'|'+escAttr(c)+'" title="Remover este PDV" style="background:none;border:0;color:var(--red-400);cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">×</button>'+
+    '</div>';
+  }).join('');
+  if(!html) html = '<span class="pill pill-slate">—</span>';
+  html += '<button class="btn btn-ghost" style="padding:1px 6px;font-size:10px;margin-top:3px;" data-add-pdv="'+escAttr(l.id)+'">+ PDV</button>';
+  return html;
+}
 function renderLojas(){
   var t = $('#tabela-lojas');
-  t.innerHTML = '<tr><th>ID (kiosk)</th><th>Nome</th><th>PDV</th><th>Operadores</th><th>Emparelhado</th><th>Conexão</th><th>Status</th><th></th></tr>' +
+  t.innerHTML = '<tr><th>ID (kiosk)</th><th>Nome</th><th>PDV</th><th>Operadores</th><th>PDVs / códigos</th><th>Conexão</th><th>Status</th><th></th></tr>' +
     (state.lojas.length ? state.lojas.map(function(l){
       var qtd = state.usuarios.filter(function(u){ return u.lojaId===l.id; }).length;
       return '<tr><td><b>'+esc(l.id)+'</b></td><td>'+esc(l.nome)+'</td><td>'+esc(l.pdv||'—')+'</td><td>'+qtd+'</td>'+
-        '<td>'+(l.pareamento ? '<span class="pill pill-green">✔ '+esc(l.pareamento.pdvNome || l.pdv || l.kioskCode || '—')+'</span>' : '<span class="pill pill-slate">—</span>')+'</td>'+
+        '<td>'+lojaPdvCell(l)+'</td>'+
         '<td>'+connPill(l)+'</td>'+
         '<td><span class="pill '+(l.ativo?'pill-green':'pill-red')+'">'+(l.ativo?'Ativa':'Inativa')+'</span></td>'+
         '<td><button class="btn btn-ghost" style="padding:3px 8px;font-size:11px;" data-edit-loja="'+escAttr(l.id)+'">Editar</button> '+
@@ -2332,11 +2392,88 @@ function renderLojas(){
   t.querySelectorAll('[data-del-loja]').forEach(function(b){
     b.addEventListener('click', function(){ excluirLoja(b.dataset.delLoja); });
   });
+  t.querySelectorAll('[data-add-pdv]').forEach(function(b){
+    b.addEventListener('click', function(){
+      var l = state.lojas.find(function(x){ return x.id===b.dataset.addPdv; });
+      modalAddPdv(l);
+    });
+  });
+  t.querySelectorAll('[data-rm-kiosk]').forEach(function(b){
+    b.addEventListener('click', function(){
+      var parts = String(b.dataset.rmKiosk||'').split('|');
+      removerPdvLoja(parts[0], parts[1]);
+    });
+  });
+}
+function modalAddPdv(l){
+  if(!l) return;
+  openPortalModal(
+    '<div class="modal-head"><h3>Adicionar PDV em '+esc(l.nome)+'</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
+    '<p style="font-size:12.5px;color:var(--slate-400);margin-bottom:14px;">Ligue o outro PC, abra o PDV e copie o <b>código do kiosk</b> que aparece na tela de login (ou no ⚙ Config). Cole abaixo — a máquina se autoriza sozinha em até 30s.</p>'+
+    '<div class="form-row"><label class="form-label">Código do kiosk</label>'+
+    '<input class="form-input" id="f-pdv-code" placeholder="ex.: K8XQ-4B9D" style="letter-spacing:2px;text-transform:uppercase;font-family:ui-monospace,Consolas,monospace;"></div>'+
+    '<div class="modal-actions"><button class="btn btn-primary" id="pdv-add">Adicionar PDV</button>'+
+    '<button class="btn btn-ghost" onclick="nacCloseModal()">Cancelar</button></div>'
+  );
+  var inp = $('#f-pdv-code');
+  inp.addEventListener('input', function(){ inp.value = fmtKiosk(inp.value); });
+  inp.addEventListener('keydown', function(e){ if(e.key==='Enter') $('#pdv-add').click(); });
+  setTimeout(function(){ inp.focus(); }, 50);
+  $('#pdv-add').addEventListener('click', async function(){
+    var code = normCode($('#f-pdv-code').value);
+    if(code.length < 4){ toast('Informe o código que aparece no PDV', true); return; }
+    var btn = $('#pdv-add'); btn.disabled = true;
+    var res = await call('lojas.addKiosk', { id:l.id, kioskCode:code });
+    btn.disabled = false;
+    if(!res.ok){ toast(res.error||'Falha ao adicionar PDV', true); return; }
+    closePortalModal();
+    toast(res.jaExistia ? 'Este código já estava nesta loja' : 'PDV adicionado — aguardando o pareamento (até 30s)');
+    state._lojasAt = 0;
+    await loadAll();
+    renderLojas();
+  });
+}
+async function removerPdvLoja(id, code){
+  var l = state.lojas.find(function(x){ return x.id===id; });
+  if(!l || !code) return;
+  if(!window.confirm('Remover o PDV '+fmtKiosk(code)+' da loja '+l.nome+'?\n\nA máquina perde a autorização e para de enviar dados até ser adicionada de novo.')) return;
+  var res = await call('lojas.removeKiosk', { id:id, kioskCode:code });
+  if(!res.ok){ toast(res.error||'Falha ao remover PDV', true); return; }
+  toast('PDV removido');
+  state._lojasAt = 0;
+  await loadAll();
+  renderLojas();
 }
 function fmtKiosk(s){
   s = String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
   return s.length > 4 ? s.slice(0,4)+'-'+s.slice(4) : s;
 }
+function limparOrfaosLojas(){
+  openPortalModal(
+    '<div class="modal-head"><h3>Limpar dados de lojas excluídas</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
+    '<p style="font-size:12.5px;color:var(--slate-400);margin-bottom:18px;">'+
+    'Apaga vendas, pedidos, despesas, estoque e operadores que sobraram de lojas já excluídas.<br><br>'+
+    '<span style="color:var(--slate-500);font-size:11px;">As lojas cadastradas não são afetadas.</span></p>'+
+    '<div class="modal-actions"><button class="btn btn-primary" id="conf-limpar-orfaos" style="background:var(--red-400);color:#fff;">Limpar</button>'+
+    '<button class="btn btn-ghost" onclick="nacCloseModal()">Cancelar</button></div>'
+  );
+  $('#conf-limpar-orfaos').addEventListener('click', async function(){
+    var res = await call('lojas.limparOrfaos', {});
+    if(!res.ok){ toast(res.error||'Falha ao limpar', true); return; }
+    var r = res.removidos || {};
+    var total = (r.vendas||0)+(r.pedidos||0)+(r.auditoria||0)+(r.despesas||0)+(r.usuarios||0)+(r.precos||0);
+    var msg = (r.vendas||0)+' vendas · '+(r.pedidos||0)+' pedidos · '+(r.despesas||0)+' despesas · '+(r.usuarios||0)+' operadores';
+    toast(total ? 'Limpeza concluída' : 'Nenhum dado órfão encontrado');
+    if(total) notif('🧹','Dados de lojas excluídas removidos', msg);
+    closePortalModal();
+    state._vendasAt = 0;
+    state._pedAt = 0; state._pedDirty = true;
+    state._despAt = 0; state._despDirty = true;
+    await loadAll();
+    renderLojas();
+  });
+}
+$('#btn-limpar-orfaos').addEventListener('click', limparOrfaosLojas);
 $('#btn-nova-loja').addEventListener('click', function(){ modalNovaLoja(); });
 
 /* ── Wizard de 1º uso do PDV ───────────────────────────────────────────
@@ -2356,6 +2493,7 @@ function modalNovaLoja(){
     '<details class="pair-tutorial"><summary>Como funciona? (mini tutorial)</summary>'+
     '<ol><li>Ligue o PDV. O assistente de 1º uso pede o <b>nome do local</b> e depois mostra o <b>Código do kiosk</b>.</li>'+
     '<li>Cole este código no campo acima e clique em <b>Salvar</b> — a loja é criada com o nome digitado no PDV e a máquina já fica emparelhada.</li>'+
+    '<li>Tem mais de um PC? Edite a loja (ou use <b>+ PDV</b> na lista) e adicione o código de cada um — a mesma loja aceita vários PDVs.</li>'+
     '<li>Na sequência, cadastre os <b>colaboradores</b> da loja (eles aparecem no login do PDV).</li>'+
     '<li>Proteção contra imagem clonada: o mesmo código/máquina não vale para duas lojas.</li></ol></details>'+
     '<div class="modal-actions"><button class="btn btn-primary" id="nw-salvar">Salvar</button>'+
@@ -2420,7 +2558,7 @@ function modalPareamentoConcluido(loja){
 
 function modalLoja(l){
   l = l || {};
-  var pm = l.pareamento;
+  var pms = lojaPareamentos(l);
   openPortalModal(
     '<div class="modal-head"><h3>'+(l.id?'Editar loja':'Nova loja — manual')+'</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
     '<div class="form-row"><label class="form-label">ID (identificação do kiosk)</label>'+
@@ -2429,16 +2567,18 @@ function modalLoja(l){
     '<input class="form-input" id="f-loja-nome" value="'+escAttr(l.nome||'')+'" placeholder="Nome da loja/kiosk"></div>'+
     '<div class="form-row"><label class="form-label">PDV (identificação no kiosk)</label>'+
     '<input class="form-input" id="f-loja-pdv" value="'+escAttr(l.pdv||'')+'" placeholder="ex.: VENDA-01"></div>'+
-    '<div class="form-row"><label class="form-label">Código do kiosk (aparece na tela do PDV)</label>'+
-    '<input class="form-input" id="f-loja-kiosk" value="'+escAttr(fmtKiosk(l.kioskCode||''))+'" placeholder="ex.: K8XQ-4B9D" style="letter-spacing:2px;text-transform:uppercase;font-family:ui-monospace,Consolas,monospace;"></div>'+
-    (pm
-      ? '<div class="pair-status">✔ Emparelhado — '+esc(pm.pdvNome || l.pdv || l.kioskCode || '—')+' · '+esc(pm.emparelhadoEm||'')+(pm.machineId?' · '+esc(pm.machineId.slice(0,8)):'')+'</div>'
-      : '<div class="pair-status muted">Ainda não emparelhado — nenhum kiosk validou com este código.</div>')+
-    '<details class="pair-tutorial"><summary>Como emparelhar o kiosk? (mini tutorial)</summary>'+
-    '<ol><li>Ligue o PDV do kiosk. Na tela de login (canto do rodapé) aparece o <b>Código do kiosk</b> (ex.: K8XQ-4B9D).</li>'+
-    '<li>Copie o código que está NA TELA do kiosk e cole neste campo e salve a loja.</li>'+
-    '<li>O kiosk reconhece sozinho (tenta a cada 30 segundos) e esta loja passa a aparecer como <b>✔ Emparelhado</b>. Não precisa editar arquivos no kiosk.</li>'+
-    '<li>Se a mesma tela informar o mesmo código em outro kiosk, o portal bloqueia (protege contra imagem clonada misturar as lojas).</li></ol></details>'+
+    '<div class="form-row"><label class="form-label">Adicionar código de outro PDV (opcional)</label>'+
+    '<input class="form-input" id="f-loja-kiosk" value="" placeholder="código exibido na tela do outro PC" style="letter-spacing:2px;text-transform:uppercase;font-family:ui-monospace,Consolas,monospace;">'+
+    (l.id?'<div style="font-size:10.5px;color:var(--slate-500);margin-top:5px;">Para remover um PDV, use o <b>×</b> na lista de Lojas.</div>':'')+'</div>'+
+    (pms.length
+      ? '<div class="pair-status">✔ '+pms.length+' PDV(s) emparelhado(s): '+pms.map(function(pm){ return esc(pm.pdvNome || l.pdv || '—')+(pm.machineId?' ('+esc(pm.machineId.slice(0,8))+')':''); }).join(', ')+'</div>'
+      : '<div class="pair-status muted">Ainda não emparelhado — nenhum kiosk validou com os códigos desta loja.</div>')+
+    '<details class="pair-tutorial"><summary>Como emparelhar os PDVs? (mini tutorial)</summary>'+
+    '<ol><li>Ligue o PDV. Na tela de login (canto do rodapé) aparece o <b>Código do kiosk</b> (ex.: K8XQ-4B9D).</li>'+
+    '<li>Copie o código que está NA TELA do kiosk, adicione aqui e salve a loja.</li>'+
+    '<li>O kiosk reconhece sozinho (tenta a cada 30 segundos) e passa a aparecer como <b>✔ Emparelhado</b>. Não precisa editar arquivos no kiosk.</li>'+
+    '<li>Para 2 ou 3 PCs, repita com o código de cada um — a mesma loja aceita vários PDVs.</li>'+
+    '<li>Se o mesmo código/máquina for usado em outra loja, o portal bloqueia (protege contra imagem clonada).</li></ol></details>'+
     '<div class="form-row"><label class="form-label">Status</label>'+
     '<select class="form-input" id="f-loja-ativo">'+
     '<option value="1"'+(l.ativo===false?'':' selected')+'>Ativa</option>'+
@@ -2478,7 +2618,7 @@ async function excluirLoja(id){
     '<div class="modal-head"><h3>Excluir loja</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
     '<p style="font-size:12.5px;color:var(--slate-400);margin-bottom:18px;">'+
     'Excluir a loja <b style="color:var(--cream-100)">'+esc(id)+'</b> e todos os seus operadores?<br><br>'+
-    '<span style="color:var(--slate-500);font-size:11px;">Os pedidos locais gravados no kiosk NÃO são afetados.</span></p>'+
+    '<span style="color:var(--slate-500);font-size:11px;">Vendas, pedidos, despesas e estoque desta loja também serão apagados dos relatórios.<br>Os pedidos locais gravados no kiosk NÃO são afetados.</span></p>'+
     '<div class="modal-actions"><button class="btn btn-primary" id="conf-exc-loja" style="background:var(--red-400);color:#fff;">Excluir</button>'+
     '<button class="btn btn-ghost" onclick="nacCloseModal()">Cancelar</button></div>'
   );
@@ -2937,17 +3077,14 @@ function coletarCatalogoDoDom(){
 
 async function renderPrecos(){
   var sel = $('#precos-loja');
-  if(!sel.options.length && state.lojas.length){
-    sel.innerHTML = state.lojas.map(function(l){
-      return '<option value="'+escAttr(l.id)+'">'+esc(l.nome+(l.pdv?' · '+l.pdv:''))+'</option>';
+  var atual = sel.value;
+  sel.innerHTML = '<option value="__global">Padrão — todas as lojas</option>' +
+    state.lojas.map(function(l){
+      return '<option value="'+escAttr(l.id)+'">Ajuste: '+esc(l.nome+(l.pdv?' · '+l.pdv:''))+'</option>';
     }).join('');
-  }
-  var lojaId = sel.value || (state.lojas[0] && state.lojas[0].id) || '';
+  if(atual){ sel.value = atual; if(!sel.value) sel.value = '__global'; }
+  var lojaId = sel.value || '__global';
   var areas = ['#cat-tamanhos', '#cat-extras', '#cat-combos'];
-  if(!lojaId){
-    areas.forEach(function(s){ $(s).innerHTML = '<div class="empty">Nenhuma loja cadastrada — crie uma em Lojas.</div>'; });
-    return;
-  }
   var res = null;
   try{ res = await call('precos', { lojaId: lojaId }); }catch(e){ res = null; }
   precosCarregados = (res && res.ok && res.precos && typeof res.precos === 'object') ? res.precos : {};
@@ -3079,7 +3216,9 @@ function salvarPrecos(){
       precosCarregados = res.precos || precosCarregados;
       catalogoEdit = catNormalizar(res.catalogo);
       renderCatalogo();
-      toast('Catálogo salvo — o PDV atualiza sozinho em até 60s');
+      toast(lojaId==='__global'
+        ? 'Catálogo padrão salvo — vale para todas as lojas sem ajuste próprio'
+        : 'Catálogo salvo — o PDV atualiza sozinho em até 60s');
     } else {
       toast((res && res.error) || 'Falha ao salvar', true);
     }

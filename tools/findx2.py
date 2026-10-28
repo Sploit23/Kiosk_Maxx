@@ -1,0 +1,1 @@
+import io; s=io.open(r'C:\Users\Maxx\Desktop\natal\kiosk_foto\backend\admin.html',encoding='utf-8').read(); # look for carregarCatalogo function def\nfor i in range(2500, 3200):\n    pass\n# just search\nidx=s.find('function carregarCatalogo')\nprint(s[idx:idx+400] if idx>=0 else 'no')
