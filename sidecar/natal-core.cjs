@@ -1889,6 +1889,10 @@ const server = http.createServer(async (req, res) => {
       const sessao = getSessao(body.sessaoId);
       if (!sessao) return sendJson(res, 404, { success: false, error: 'Sessao nao encontrada' });
 
+      const totalPedido = Number(body.total || 0);
+      if (!Number.isFinite(totalPedido) || totalPedido <= 0) {
+        return sendJson(res, 400, { success: false, error: 'Total do pedido invalido' });
+      }
       const numero = nextPedidoNumero();
       let pagamentos = null;
       if (Array.isArray(body.pagamentos) && body.pagamentos.length) {
@@ -1914,7 +1918,7 @@ const server = http.createServer(async (req, res) => {
           : [{ id: sessao.id }],
         itens: body.itens || [],       // fotos: [{ key, qty }]
         produtos: body.produtos || [], // produtos físicos
-        total: Number(body.total || 0),
+        total: totalPedido,
         caixaId: caixaAtual.id,
         status: 'AGUARDANDO',
         criadoEm: Date.now(),
@@ -1952,23 +1956,36 @@ const server = http.createServer(async (req, res) => {
       if (pedido.status !== 'AGUARDANDO') {
         return sendJson(res, 409, { success: false, error: 'Pedido ja foi pago/cancelado' });
       }
-      if (Array.isArray(body.pagamentos) && body.pagamentos.length) {
-        const pgs = body.pagamentos
-          .filter((pg) => pg && Number(pg.valor) > 0)
-          .map((pg) => ({
-            meio: String(pg.meio || ''),
-            valor: Number(pg.valor),
-            parcelas: pg.parcelas ? Number(pg.parcelas) : undefined,
-          }));
-        const somaPaga = pgs.reduce((s, pg) => s + pg.valor, 0);
-        if (Math.abs(somaPaga - Number(pedido.total || 0)) > 0.005) {
-          return sendJson(res, 400, { success: false, error: `Soma dos pagamentos (${somaPaga.toFixed(2)}) diferente do total (${Number(pedido.total || 0).toFixed(2)})` });
-        }
-        pedido.pagamentos = pgs;
-        pedido.meio = pgs.length === 1 ? pgs[0].meio : 'MULTI';
-      } else {
-        pedido.meio = body.meio || pedido.meio;
+      const pgsIn = Array.isArray(body.pagamentos) ? body.pagamentos : [];
+      if (!pgsIn.length) {
+        return sendJson(res, 400, { success: false, error: 'Informe ao menos uma forma de pagamento' });
       }
+      const pgs = [];
+      for (const pg of pgsIn) {
+        const valor = Number(pg && pg.valor);
+        if (!Number.isFinite(valor) || valor < 0) {
+          return sendJson(res, 400, { success: false, error: 'Pagamento com valor invalido' });
+        }
+        if (valor === 0) continue;
+        pgs.push({
+          meio: String((pg && pg.meio) || ''),
+          valor,
+          parcelas: pg && pg.parcelas ? Number(pg.parcelas) : undefined,
+        });
+      }
+      if (!pgs.length) {
+        return sendJson(res, 400, { success: false, error: 'Informe ao menos uma forma de pagamento com valor positivo' });
+      }
+      const totalPedido = Number(pedido.total);
+      if (!Number.isFinite(totalPedido) || totalPedido <= 0) {
+        return sendJson(res, 400, { success: false, error: 'Total do pedido invalido' });
+      }
+      const somaPaga = +pgs.reduce((s, pg) => s + pg.valor, 0).toFixed(2);
+      if (Math.abs(somaPaga - totalPedido) > 0.005) {
+        return sendJson(res, 400, { success: false, error: `Soma dos pagamentos (${somaPaga.toFixed(2)}) diferente do total (${totalPedido.toFixed(2)})` });
+      }
+      pedido.pagamentos = pgs;
+      pedido.meio = pgs.length === 1 ? pgs[0].meio : 'MULTI';
       pedido.status = 'PAGO';
       pedido.pagoEm = Date.now();
       savePedidos();
