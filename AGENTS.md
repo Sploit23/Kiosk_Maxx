@@ -137,7 +137,7 @@ Autenticação pública por usuário; ações admin exigem header `X-Token` (ou 
 | `health` | — | Status da API: `{ ok, app, version, php, time }` |
 | `login` | `lojaId`, `usuario`, `senha` | Valida loja + usuário (usuário ou nome) + senha → `{ user, loja }` |
 | `equipe` | `lojaId` | Lista usuários ativos da loja: `{ loja, usuarios }` |
-| `precos` | `lojaId` | Catálogo + preços da loja (fonte de verdade do PDV): `{ ok, lojaId, precos, catalogo }` — `precos` = mapa chave→valor (compat. PDVs antigos), `catalogo` = `{ tamanhos, extras, combos }` estruturado salvo no admin ou os defaults oficiais (`data/precos.json`) |
+| `precos` | `lojaId` | Catálogo + preços da loja (fonte de verdade do PDV): `{ ok, lojaId, precos, catalogo }` — `precos` = mapa chave→valor (compat. PDVs antigos), `catalogo` = `{ tamanhos, extras, combos }` já recortado para a loja (item com `lojas` só aparece nas lojas marcadas; sem `lojas` = todas). Usa o catálogo mestre `precos.json['__catalogo']`; sem ele, cai no catálogo antigo/default (`CATALOGO_DEFAULT`) |
 | `kiosk.seed` | `kioskCode`, `nome` (+ `pdvNome`, `machineId`) | Wizard de 1º uso: grava RASCUNHO do nome do local em `db.pendentes[kioskCode]` (não cria loja — senão o `kiosk.pair` casaria cedo demais) → `{ ok, pendente }`; loja já existente com o código → `{ ok, jaRegistrado }`; `DADOS_INCOMPLETOS`/`NOME_INVALIDO` |
 | `kiosk.pair` | `kioskCode` (+ `pdvNome`, `machineId`; legado `lojaId`+`pairingCode`) | Emparelha o kiosk com a loja: resolve a loja pelo código exibido NA TELA do PDV, registra `pareamento` e bloqueia máquina já usada por outra loja (`KIOSK_NAO_EMPARELELHADO`, `MAQUINA_JA_EMPARELHADA`) → `{ loja, pareamento }` |
 | `vendas.push` | `lojaId`, `machineId`, `data` (YYYY-MM-DD) + snapshot | PDV → portal: snapshot diário de vendas por loja. Exige `machineId` == `pareamento.machineId` da loja (`LOJA_NAO_EMPARELELHADA` 403, com delay anti-bruteforce). Upsert em `data/vendas.json` por loja+data: `lojaNome`, `pdvNome`, `totalVendido`, `pedidos`, `sessoesCriadas`, `sessoesVendidas`, `taxacombo`, `ribbonRestante`, `papel10x15`/`papel15x20` (papel REAL da impressora via checkPrinter, `null` se sem resposta), `meios {dinheiro,debito,credito,pix}`, `ultimaVenda`, `caixa {numero,aberto}`, `enviadoEm` |
@@ -158,11 +158,15 @@ resolve nome/pdv/máquina no rascunho `pendentes`, gera `id` por `slugLoja()`
 despesas daquela loja — **catálogo e preços NÃO são apagados**),
 `lojas.limparOrfaos` (remove os órfãos de lojas já excluídas; idempotente;
 preserva `precos.json`), `usuarios.list`, `usuarios.save`,
-`usuarios.delete`, `precos.save` (salva `{ lojaId, precos }` **ou**
-`{ lojaId, catalogo }` em `data/precos.json`; com `catalogo` valida
-`sanitizarCatalogo()` — exige os tamanhos `10x15` e `15x20`, deriva o mapa flat
-das chaves oficiais e grava também `__catalogo`; catálogo inválido →
-`CATALOGO_INVALIDO`; sem catálogo, valores vazios resetam para os defaults),
+`usuarios.delete`, `catalogo.get` (catálogo mestre para o editor: os itens vêm
+com `lojas`; se ainda não existe, devolve o efetivo global para migrar),
+`precos.save` (salva `{ lojaId, precos }` **ou** `{ lojaId, catalogo }` em
+`data/precos.json`; **`lojaId:'__master'`** grava a lista única em
+`precos.json['__catalogo']` com `lojas` por item — modelo novo do admin;
+com `catalogo` valida `sanitizarCatalogo()` — exige os tamanhos `10x15` e
+`15x20`, deriva o mapa flat das chaves oficiais e grava também `__catalogo`;
+catálogo inválido → `CATALOGO_INVALIDO`; sem catálogo, valores vazios resetam
+para os defaults),
 `precos.list` (overlay bruto + `defaults` + `catalogoDefault` — admin/backup),
 `vendas.resumo` (todos os snapshots de `data/vendas.json`, data desc → lojaId asc →
 `{ ok, vendas }`), `pedido.list` (pedidos consolidados de `data/pedidos.json`,
@@ -349,9 +353,30 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   catálogo local (`TAMANHOS`/`EXTRAS`/`COMBOS`) com o `catalogo` estruturado
   devolvido. O admin edita/cria/exclui produtos em "Catálogo de
   produtos" (tela `#screen-precos`: 3 listas + modal "novo"; `precos.save` com
-  `{catalogo}`). O seletor tem **Padrão — todas as lojas**
-  (`precos.json['__global']`, herdado por lojas novas e por lojas sem ajuste) e
-  ajustes opcionais por loja; a resolução é loja → global → `CATALOGO_DEFAULT`.
+  `{lojaId:'__master', catalogo}`). O modelo é um **catálogo único** com
+  **lojas por item**: cada tamanho/extra/combo tem `lojas: [ids]` (vazio =
+  todas as lojas, inclusive novas). Os `ids` são os IDs reais de `lojas.list`,
+  que **podem ter espaços/acentos** (ex.: `Mogi Guaçu`) — `catLojas()` aceita
+  qualquer ID imprimível até 64 chars, não só slug. O PDV recebe em `precos` só
+  o recorte da sua loja; `10x15`/`15x20` são sempre mantidos e combos que
+  dependem de um item escondido naquela loja são omitidos (não chega combo
+  quebrado); o admin avisa antes de salvar quando isso vai acontecer. Combos
+  `modo:'slots'` chegam com `regras` preservadas no PDV
+  (`normalizarComboPortal`). Combos com um único tamanho (ex.: 10x15 +
+  porta-foto) passam pelo editor de enquadramento no PDV: o clique seleciona o
+  tamanho, mostra "Aplicar combo" e só adiciona ao carrinho depois do ajuste.
+  Combos com 2+ fotos (ex.: 2 bolinhas, encarte) montam foto por foto: o clique
+  inicia o primeiro tamanho, o botão confirma o enquadramento de cada foto e,
+  ao confirmar a última, todos os itens entram com o recorte capturado naquele
+  slot + a linha de desconto do combo (o encarte novo não zera fotos já no
+  carrinho). Combos de slots mantêm o modal antigo. O PDV também detecta combos no
+  carrinho: se os itens de um combo foram adicionados avulsos, ele insere
+  automaticamente a linha de desconto do combo (melhor combinação, sem duplicar
+  itens de combo já aplicado); a linha é recalculada a cada mudança do carrinho.
+  Remover um item (ou mudar a quantidade) de um combo aplicado explicitamente
+  também remove o desconto daquele combo e libera os itens restantes para o
+  recálculo automático. Sem catálogo mestre, a resolução antiga é loja → global
+  → `CATALOGO_DEFAULT`.
   Cada **tamanho** tem um `modelo` — formato físico de impressão
   (`10x15`/`15x20`/`bolinha`/`polaroide`) — que manda na composição e no `media`
   do Java; `10x15` e `15x20` são obrigatórios (base da impressão/pareamento de

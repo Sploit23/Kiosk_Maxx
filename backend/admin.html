@@ -219,6 +219,13 @@ select.form-input{appearance:none;}
 .cat-ci .form-input{padding:7px 9px;font-size:12px;min-width:0;}
 .cat-ci-del{width:30px;height:29px;}
 .cat-ci-add{margin-top:2px;font-size:11px;padding:6px 10px;}
+.cat-item{margin-bottom:10px;}
+.cat-lojas-line{display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;padding:6px 2px 2px;border-top:1px dashed rgba(255,255,255,.07);}
+.cat-lojas-line .cat-chk{font-size:11px;}
+.cat-lojas-line .cat-lojas-todas{font-weight:600;color:var(--gold-300);}
+.cat-lojas-opts{display:flex;gap:6px 16px;flex-wrap:wrap;align-items:center;}
+.cat-lojas-line:not(.restrito) .cat-lojas-opts .cat-chk{opacity:.55;}
+.cat-lojas-mand{font-size:10.5px;color:var(--slate-500);}
 .cat-hint{font-size:11px;color:var(--slate-500);line-height:1.5;margin-top:6px;}
 .pair-status{font-size:11.5px;color:var(--green-500);background:rgba(79,174,127,.1);border:1px solid rgba(79,174,127,.25);border-radius:8px;padding:8px 10px;margin-bottom:14px;}
 .pair-status.muted{color:var(--slate-500);background:var(--navy-850);border-color:var(--navy-line);}
@@ -836,15 +843,14 @@ select.form-input{appearance:none;}
       </div>
     </div>
 
-  <!-- ====== CATÁLOGO DE PRODUTOS (preços por loja) ====== -->
+  <!-- ====== CATÁLOGO DE PRODUTOS (catálogo único, lojas por item) ====== -->
     <div class="screen" id="screen-precos">
       <div class="section-head">
-        <div><h2>Catálogo de produtos</h2><p>Produtos fixos para todas as lojas — ajustes por loja são opcionais; o PDV aplica em até 60s</p></div>
+        <div><h2>Catálogo de produtos</h2><p>Um catálogo só — escolha em cada item as lojas (PDVs) em que ele aparece; o PDV aplica em até 60s</p></div>
       </div>
       <div class="card">
-        <h3>Aplicar em</h3>
-        <select class="form-input" id="precos-loja" style="width:320px;"></select>
-        <p class="cat-hint" style="margin-top:8px;">O padrão vale para lojas novas e para as que não têm ajuste próprio.</p>
+        <h3>Lojas de cada item</h3>
+        <p class="cat-hint" style="margin-top:8px;">Monte o catálogo uma vez e marque, em cada produto ou combo, as lojas (PDVs) em que ele deve aparecer. <b>Todas as lojas</b> inclui lojas novas; desmarcar uma loja esconde o item só nela. Um combo só aparece nas lojas em que todos os itens dele também aparecem. O PDV aplica a mudança em até 60s.</p>
       </div>
       <div class="card">
         <div class="cat-box-head" style="margin-bottom:4px;">
@@ -876,7 +882,7 @@ select.form-input{appearance:none;}
         <span class="alert-ico">💡</span>
         <div class="alert-body">
           <div class="a-title">Como o PDV usa isso</div>
-          <div class="a-sub">O PDV busca o catálogo ao iniciar e a cada 60s. Criar, editar ou excluir aqui muda o PDV aberto (sem reiniciar). O 10x15 e o 15x20 não podem ser excluídos porque são a base da impressão e dos combos. Se o portal estiver fora, o kiosk segue com a última versão salva localmente.</div>
+          <div class="a-sub">O PDV busca o catálogo ao iniciar e a cada 60s e recebe só os itens marcados para a loja dele. Criar, editar ou excluir aqui muda o PDV aberto (sem reiniciar). O 10x15 e o 15x20 aparecem em todas as lojas porque são a base da impressão e dos combos. Se o portal estiver fora, o kiosk segue com a última versão salva localmente.</div>
         </div>
       </div>
     </div>
@@ -2939,9 +2945,18 @@ var MODELOS_CAT = [
   ['polaroide', 'Polaroide (molde 10x15)'],
 ];
 var catalogoEdit = null;
-var precosCarregados = null;
+var backendMaster = false;
 
 function catClone(o){ return JSON.parse(JSON.stringify(o)); }
+function catLojasArr(v){
+  if(!Array.isArray(v)) return [];
+  var out = [];
+  v.forEach(function(x){
+    x = String(x==null?'':x).trim();
+    if(x && out.indexOf(x) < 0) out.push(x);
+  });
+  return out;
+}
 function catSlug(s){
   var out = String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,32);
@@ -2963,19 +2978,57 @@ function catNormalizar(cat){
       return {
         id: String(t.id), label: t.label || t.id, preco: Number(t.preco) || 0,
         modelo: modelo, unidades: Number(t.unidades) || (modelo==='15x20'?2:1), nota: t.nota || '',
+        lojas: catLojasArr(t.lojas),
       };
     }),
     extras: (cat.extras||[]).map(function(e){
-      return { id:String(e.id), label:e.label||e.id, preco:Number(e.preco)||0, oculto:!!e.oculto, digital:!!e.digital, nota:e.nota||'' };
+      return { id:String(e.id), label:e.label||e.id, preco:Number(e.preco)||0, oculto:!!e.oculto, digital:!!e.digital, nota:e.nota||'', lojas:catLojasArr(e.lojas) };
     }),
     combos: (cat.combos||[]).map(function(c){
-      return {
+      var row = {
         id:String(c.id), nome:c.nome||c.id, valorCombo:Number(c.valorCombo)||0,
         inline:!!c.inline, encarte:!!c.encarte,
         itens:(c.itens||[]).map(function(it){ return { produtoId:String(it.produtoId), qtd:Number(it.qtd)||1 }; }),
+        lojas:catLojasArr(c.lojas),
       };
+      // Combos por slots (regras do catálogo oficial) são preservados como
+      // vieram: o editor de slots ainda não existe no admin, mas salvar aqui
+      // não pode destruir as regras.
+      if(c.modo==='slots' && c.regras){ row.modo='slots'; row.regras=c.regras; }
+      if(c.tamanhoAlvo) row.tamanhoAlvo=String(c.tamanhoAlvo);
+      return row;
     }),
   };
+}
+function catLojaNome(id){
+  var l = (state.lojas||[]).filter(function(x){ return x.id===id; })[0];
+  return l ? (l.nome+(l.pdv?' · '+l.pdv:'')) : id;
+}
+function catLojasDoDom(el){
+  if(!el) return [];
+  var todas = el.querySelector('.cat-todas');
+  if(!todas || todas.checked) return [];
+  var out = [];
+  Array.prototype.slice.call(el.querySelectorAll('.cat-loja')).forEach(function(cb){
+    if(cb.checked) out.push(cb.value);
+  });
+  return out;
+}
+function catLojasLine(item, fixo){
+  if(fixo){
+    return '<div class="cat-lojas-line"><span class="cat-lojas-mand">Obrigatório — aparece em todas as lojas</span></div>';
+  }
+  var lojas = catLojasArr(item.lojas);
+  var todas = lojas.length === 0;
+  var opts = (state.lojas||[]).map(function(l){
+    var marcada = todas || lojas.indexOf(l.id) >= 0;
+    return '<label class="cat-chk"><input type="checkbox" class="cat-loja" value="'+escAttr(l.id)+'"'+(marcada?' checked':'')+(todas?' disabled':'')+'> '+esc(catLojaNome(l.id))+'</label>';
+  }).join('');
+  if(!opts) opts = '<span class="cat-hint">Nenhuma loja cadastrada ainda.</span>';
+  return '<div class="cat-lojas-line'+(todas?'':' restrito')+'">'+
+    '<label class="cat-chk cat-lojas-todas"><input type="checkbox" class="cat-todas"'+(todas?' checked':'')+'> Todas as lojas</label>'+
+    '<span class="cat-lojas-opts">'+opts+'</span>'+
+  '</div>';
 }
 function catOpcoesProdutos(){
   var opts = [];
@@ -2994,24 +3047,30 @@ function renderCatalogo(){
   var tBox = $('#cat-tamanhos');
   tBox.innerHTML = (catalogoEdit.tamanhos||[]).length ? catalogoEdit.tamanhos.map(function(t){
     var fixo = (t.id==='10x15' || t.id==='15x20');
-    return '<div class="cat-row" data-id="'+escAttr(t.id)+'">'+
-      '<input class="form-input cat-label" value="'+escAttr(t.label)+'" placeholder="Nome">'+
-      '<select class="form-input cat-modelo"'+(fixo?' disabled':'')+'>'+
-        MODELOS_CAT.map(function(m){ return '<option value="'+m[0]+'"'+(t.modelo===m[0]?' selected':'')+'>'+esc(m[1])+'</option>'; }).join('')+
-      '</select>'+
-      '<input type="number" min="0" step="0.1" class="form-input cat-preco" value="'+escAttr(t.preco)+'" title="Preço (R$)">'+
-      '<input type="number" class="form-input cat-unid" value="'+(t.modelo==='15x20'?2:1)+'" title="Unidades de ribbon (definido pelo modelo)" disabled>'+
-      '<button class="cat-del" title="'+(fixo?'Obrigatório para a impressão':'Excluir')+'"'+(fixo?' disabled':'')+'>✕</button>'+
+    return '<div class="cat-item" data-id="'+escAttr(t.id)+'">'+
+      '<div class="cat-row" data-id="'+escAttr(t.id)+'">'+
+        '<input class="form-input cat-label" value="'+escAttr(t.label)+'" placeholder="Nome">'+
+        '<select class="form-input cat-modelo"'+(fixo?' disabled':'')+'>'+
+          MODELOS_CAT.map(function(m){ return '<option value="'+m[0]+'"'+(t.modelo===m[0]?' selected':'')+'>'+esc(m[1])+'</option>'; }).join('')+
+        '</select>'+
+        '<input type="number" min="0" step="0.1" class="form-input cat-preco" value="'+escAttr(t.preco)+'" title="Preço (R$)">'+
+        '<input type="number" class="form-input cat-unid" value="'+(t.modelo==='15x20'?2:1)+'" title="Unidades de ribbon (definido pelo modelo)" disabled>'+
+        '<button class="cat-del" title="'+(fixo?'Obrigatório para a impressão':'Excluir')+'"'+(fixo?' disabled':'')+'>✕</button>'+
+      '</div>'+
+      catLojasLine(t, fixo)+
     '</div>';
   }).join('') : '<div class="cat-hint">Nenhum tamanho cadastrado.</div>';
 
   var eBox = $('#cat-extras');
   eBox.innerHTML = (catalogoEdit.extras||[]).length ? catalogoEdit.extras.map(function(e){
-    return '<div class="cat-row cat-row-extra" data-id="'+escAttr(e.id)+'">'+
-      '<input class="form-input cat-label" value="'+escAttr(e.label)+'" placeholder="Nome">'+
-      '<input type="number" min="0" step="0.1" class="form-input cat-preco" value="'+escAttr(e.preco)+'" title="Preço (R$)">'+
-      '<label class="cat-chk"><input type="checkbox" class="cat-oculto"'+(e.oculto?' checked':'')+'> uso interno (só em combos)</label>'+
-      '<button class="cat-del" title="Excluir">✕</button>'+
+    return '<div class="cat-item" data-id="'+escAttr(e.id)+'">'+
+      '<div class="cat-row cat-row-extra" data-id="'+escAttr(e.id)+'">'+
+        '<input class="form-input cat-label" value="'+escAttr(e.label)+'" placeholder="Nome">'+
+        '<input type="number" min="0" step="0.1" class="form-input cat-preco" value="'+escAttr(e.preco)+'" title="Preço (R$)">'+
+        '<label class="cat-chk"><input type="checkbox" class="cat-oculto"'+(e.oculto?' checked':'')+'> uso interno (só em combos)</label>'+
+        '<button class="cat-del" title="Excluir">✕</button>'+
+      '</div>'+
+      catLojasLine(e, false)+
     '</div>';
   }).join('') : '<div class="cat-hint">Nenhum produto extra cadastrado.</div>';
 
@@ -3024,6 +3083,9 @@ function renderCatalogo(){
         '<button class="cat-ci-del" title="Remover item">✕</button>'+
       '</div>';
     }).join('');
+    var corpo = c.modo==='slots'
+      ? '<div class="cat-hint">Combo por slots — regras do catálogo oficial preservadas (as fotos/obrigatórios são definidos pelo modelo de slots).</div>'
+      : '<div class="cat-ci-list">'+itens+'<button class="btn btn-ghost cat-ci-add">+ Item</button></div>';
     return '<div class="cat-combo" data-id="'+escAttr(c.id)+'">'+
       '<div class="cat-row">'+
         '<input class="form-input cat-c-nome" value="'+escAttr(c.nome)+'" placeholder="Nome do combo">'+
@@ -3032,7 +3094,8 @@ function renderCatalogo(){
         '<label class="cat-chk"><input type="checkbox" class="cat-c-encarte"'+(c.encarte?' checked':'')+'> encarte</label>'+
         '<button class="cat-del" title="Excluir combo">✕</button>'+
       '</div>'+
-      '<div class="cat-ci-list">'+itens+'<button class="btn btn-ghost cat-ci-add">+ Item</button></div>'+
+      corpo+
+      catLojasLine(c, false)+
     '</div>';
   }).join('') : '<div class="cat-hint">Nenhum combo cadastrado.</div>';
 }
@@ -3049,6 +3112,7 @@ function coletarCatalogoDoDom(){
     var p = parseFloat(row.querySelector('.cat-preco').value);
     t.preco = isNaN(p) ? 0 : p;
     t.unidades = t.modelo==='15x20' ? 2 : 1;
+    t.lojas = catLojasDoDom(row.closest('.cat-item'));
   });
   $$('#cat-extras .cat-row').forEach(function(row){
     var e = catalogoEdit.extras.filter(function(x){ return x.id===row.dataset.id; })[0];
@@ -3057,6 +3121,7 @@ function coletarCatalogoDoDom(){
     var p = parseFloat(row.querySelector('.cat-preco').value);
     e.preco = isNaN(p) ? 0 : p;
     e.oculto = row.querySelector('.cat-oculto').checked;
+    e.lojas = catLojasDoDom(row.closest('.cat-item'));
   });
   $$('#cat-combos .cat-combo').forEach(function(el){
     var c = catalogoEdit.combos.filter(function(x){ return x.id===el.dataset.id; })[0];
@@ -3066,6 +3131,7 @@ function coletarCatalogoDoDom(){
     c.valorCombo = isNaN(p) ? 0 : p;
     c.inline = !el.querySelector('.cat-c-exibir').checked;
     c.encarte = el.querySelector('.cat-c-encarte').checked;
+    c.lojas = catLojasDoDom(el);
     Array.prototype.slice.call(el.querySelectorAll('.cat-ci')).forEach(function(ci, idx){
       if(!c.itens[idx]) return;
       c.itens[idx].produtoId = ci.querySelector('.cat-ci-prod').value;
@@ -3076,18 +3142,18 @@ function coletarCatalogoDoDom(){
 }
 
 async function renderPrecos(){
-  var sel = $('#precos-loja');
-  var atual = sel.value;
-  sel.innerHTML = '<option value="__global">Padrão — todas as lojas</option>' +
-    state.lojas.map(function(l){
-      return '<option value="'+escAttr(l.id)+'">Ajuste: '+esc(l.nome+(l.pdv?' · '+l.pdv:''))+'</option>';
-    }).join('');
-  if(atual){ sel.value = atual; if(!sel.value) sel.value = '__global'; }
-  var lojaId = sel.value || '__global';
   var areas = ['#cat-tamanhos', '#cat-extras', '#cat-combos'];
   var res = null;
-  try{ res = await call('precos', { lojaId: lojaId }); }catch(e){ res = null; }
-  precosCarregados = (res && res.ok && res.precos && typeof res.precos === 'object') ? res.precos : {};
+  backendMaster = false;
+  try{
+    var rl = await call('lojas.list', {});
+    if(rl && rl.ok && Array.isArray(rl.lojas)) state.lojas = rl.lojas;
+  }catch(e){}
+  try{ res = await call('catalogo.get', {}); }catch(e){ res = null; }
+  if(res && res.ok && res.master) backendMaster = true;
+  if(!res || !res.ok){
+    try{ res = await call('precos', { lojaId:'__global' }); }catch(e){ res = null; }
+  }
   catalogoEdit = catNormalizar((res && res.ok && res.catalogo) ? res.catalogo : {});
   if(!catalogoEdit.tamanhos.length){
     areas.forEach(function(s){ $(s).innerHTML = '<div class="empty">Sem catálogo — recarregue ou crie os produtos.</div>'; });
@@ -3117,11 +3183,11 @@ function abrirNovoCatalogo(tipo){
     var id = catIdUnico(catSlug(nome), catalogoEdit);
     if(tipo==='tamanho'){
       var modelo = $('#nc-modelo').value;
-      catalogoEdit.tamanhos.push({ id:id, label:nome, preco:0, modelo:modelo, unidades:modelo==='15x20'?2:1, nota:'' });
+      catalogoEdit.tamanhos.push({ id:id, label:nome, preco:0, modelo:modelo, unidades:modelo==='15x20'?2:1, nota:'', lojas:[] });
     } else if(tipo==='extra'){
-      catalogoEdit.extras.push({ id:id, label:nome, preco:0, oculto:false, digital:false, nota:'' });
+      catalogoEdit.extras.push({ id:id, label:nome, preco:0, oculto:false, digital:false, nota:'', lojas:[] });
     } else {
-      catalogoEdit.combos.push({ id:id, nome:nome, valorCombo:0, inline:false, encarte:false, itens:[] });
+      catalogoEdit.combos.push({ id:id, nome:nome, valorCombo:0, inline:false, encarte:false, itens:[], lojas:[] });
     }
     closePortalModal();
     renderCatalogo();
@@ -3130,7 +3196,8 @@ function abrirNovoCatalogo(tipo){
 
 function nomeItemEmUso(id){
   return (catalogoEdit.combos||[]).some(function(c){
-    return (c.itens||[]).some(function(it){ return it.produtoId===id; });
+    if((c.itens||[]).some(function(it){ return it.produtoId===id; })) return true;
+    return !!(c.regras && c.regras.obrigatorios || []).some(function(o){ return o.produtoId===id; });
   });
 }
 
@@ -3189,9 +3256,43 @@ $('#cat-combos').addEventListener('click', function(e){
   }
 });
 
+$('#screen-precos').addEventListener('change', function(e){
+  var itemEl = e.target.closest('.cat-item, .cat-combo');
+  if(!itemEl) return;
+  if(e.target.classList.contains('cat-todas')){
+    var restrito = !e.target.checked;
+    itemEl.classList.toggle('restrito', restrito);
+    Array.prototype.slice.call(itemEl.querySelectorAll('.cat-loja')).forEach(function(cb){
+      cb.checked = true;
+      cb.disabled = !restrito;
+    });
+  } else if(e.target.classList.contains('cat-loja')){
+    var todas = itemEl.querySelector('.cat-todas');
+    if(todas) todas.checked = false;
+    itemEl.classList.add('restrito');
+  }
+  // O `click` do combo roda antes deste `change`; coleta de novo para o modelo
+  // refletir os checkboxes já atualizados (senão "Todas as lojas" fica defasado).
+  coletarCatalogoDoDom();
+});
+
 function salvarPrecos(){
-  var lojaId = $('#precos-loja').value;
-  if(!lojaId){ toast('Sem loja selecionada', true); return; }
+  if(!backendMaster){
+    toast('Recarregue o catálogo: o api.php do portal precisa estar atualizado para salvar', true);
+    return;
+  }
+  // Valida antes de coletar: item sem "Todas as lojas" precisa de ao menos
+  // uma loja marcada (senão o PDV não mostraria o item em lugar nenhum).
+  var semLoja = false;
+  $$('#screen-precos .cat-item, #screen-precos .cat-combo').forEach(function(el){
+    var todas = el.querySelector('.cat-todas');
+    if(!todas || todas.checked) return;
+    if(!el.querySelector('.cat-loja:checked')) semLoja = true;
+  });
+  if(semLoja){
+    toast('Marque pelo menos uma loja (ou "Todas as lojas") em cada item', true);
+    return;
+  }
   coletarCatalogoDoDom();
   var cat = catClone(catalogoEdit);
   if(!cat.tamanhos.some(function(t){ return t.id==='10x15'; }) || !cat.tamanhos.some(function(t){ return t.id==='15x20'; })){
@@ -3202,29 +3303,71 @@ function salvarPrecos(){
     cat.combos.some(function(c){ return !String(c.nome||'').trim(); });
   if(semNome){ toast('Preencha o nome de todos os produtos', true); return; }
   var comboInvalido = null;
+  var existeProduto = function(id){
+    return cat.tamanhos.some(function(t){ return t.id===id; }) ||
+      cat.extras.some(function(e){ return e.id===id; });
+  };
   cat.combos.forEach(function(c){
-    if(!c.itens.length) comboInvalido = comboInvalido || ('Combo "'+c.nome+'" está sem itens');
-    c.itens.forEach(function(it){
-      var existe = cat.tamanhos.some(function(t){ return t.id===it.produtoId; }) ||
-        cat.extras.some(function(e){ return e.id===it.produtoId; });
-      if(!existe) comboInvalido = comboInvalido || ('Combo "'+c.nome+'" usa um item que não existe mais');
+    var refs = [];
+    if(c.modo==='slots'){
+      if(!(c.regras && Array.isArray(c.regras.slots) && c.regras.slots.length)){
+        comboInvalido = comboInvalido || ('Combo "'+c.nome+'" está sem regras de slots');
+      }
+      ((c.regras && c.regras.obrigatorios)||[]).forEach(function(o){ refs.push(o.produtoId); });
+    } else {
+      if(!c.itens.length) comboInvalido = comboInvalido || ('Combo "'+c.nome+'" está sem itens');
+      c.itens.forEach(function(it){ refs.push(it.produtoId); });
+    }
+    refs.forEach(function(id){
+      if(!existeProduto(id)) comboInvalido = comboInvalido || ('Combo "'+c.nome+'" usa um item que não existe mais');
     });
   });
   if(comboInvalido){ toast(comboInvalido, true); return; }
-  call('precos.save', { lojaId: lojaId, catalogo: cat }).then(function(res){
+  // Combos restritos a uma loja onde um item dependente está oculto são
+  // omitidos pelo portal (para o PDV não receber combo quebrado). Avisa antes
+  // de salvar para o combo não sumir sem o admin entender o motivo.
+  var produtosPorId = {};
+  cat.tamanhos.concat(cat.extras).forEach(function(x){ produtosPorId[x.id] = x; });
+  var visivelEm = function(prod, lojaId){
+    if(!prod) return true;
+    if(prod.id==='10x15' || prod.id==='15x20') return true;
+    var ls = catLojasArr(prod.lojas);
+    return ls.length===0 || ls.indexOf(lojaId)>=0;
+  };
+  var lojasTodas = (state.lojas||[]).map(function(l){ return l.id; });
+  var avisos = [];
+  cat.combos.forEach(function(c){
+    var alvo = catLojasArr(c.lojas);
+    var lojasCombo = alvo.length ? alvo : lojasTodas;
+    var deps = [];
+    if(c.modo==='slots') ((c.regras && c.regras.obrigatorios)||[]).forEach(function(o){ deps.push(o.produtoId); });
+    else (c.itens||[]).forEach(function(it){ deps.push(it.produtoId); });
+    lojasCombo.forEach(function(lojaId){
+      var ocultos = [];
+      deps.forEach(function(pid){
+        var prod = produtosPorId[pid];
+        if(prod && !visivelEm(prod, lojaId) && ocultos.indexOf(pid)<0) ocultos.push(pid);
+      });
+      if(ocultos.length){
+        avisos.push('"'+(c.nome||c.id)+'" em '+catLojaNome(lojaId)+' (depende de '+ocultos.map(function(pid){ return '"'+pid+'"'; }).join(', ')+')');
+      }
+    });
+  });
+  if(avisos.length){
+    var msg = 'Estes combos serão omitidos em algumas lojas porque dependem de um item que não aparece lá:\n\n- '+avisos.slice(0,8).join('\n- ');
+    if(avisos.length>8) msg += '\n- ... e mais '+(avisos.length-8);
+    if(!confirm(msg+'\n\nSalvar mesmo assim?')) return;
+  }
+  call('precos.save', { lojaId: '__master', catalogo: cat }).then(function(res){
     if(res && res.ok){
-      precosCarregados = res.precos || precosCarregados;
-      catalogoEdit = catNormalizar(res.catalogo);
+      catalogoEdit = catNormalizar(res.catalogo || cat);
       renderCatalogo();
-      toast(lojaId==='__global'
-        ? 'Catálogo padrão salvo — vale para todas as lojas sem ajuste próprio'
-        : 'Catálogo salvo — o PDV atualiza sozinho em até 60s');
+      toast('Catálogo salvo — vale para as lojas marcadas; o PDV atualiza em até 60s');
     } else {
       toast((res && res.error) || 'Falha ao salvar', true);
     }
   });
 }
-$('#precos-loja').addEventListener('change', renderPrecos);
 $('#btn-salvar-precos').addEventListener('click', salvarPrecos);
 $('#btn-recargar-precos').addEventListener('click', renderPrecos);
 $('#cat-add-tamanho').addEventListener('click', function(){ abrirNovoCatalogo('tamanho'); });

@@ -9,7 +9,7 @@
  * Ações admin    : exigem X-Token (header) ou campo "token":
  *   admin.login, lojas.list, lojas.save, lojas.delete,
  *   usuarios.list, usuarios.save, usuarios.delete, admin.changePassword,
- *   precos.save, vendas.resumo, pedido.list, auditoria.list,
+ *   catalogo.get, precos.save, precos.list, vendas.resumo, pedido.list, auditoria.list,
  *   despesas.list, despesas.save, despesas.delete,
  *   parametros.get, parametros.save
  *
@@ -455,6 +455,21 @@ const PRECOS_DEFAULT = [
 // sobrescreve se quiser mudar algo localmente.
 function precosEfetivos(string $lojaId): array
 {
+    // Catálogo mestre (com lojas por item) é a fonte de verdade: o mapa plano
+    // é derivado dele para os PDVs antigos que só conhecem preço por chave.
+    if (catalogoMaster() !== null) {
+        $cat = catalogoEfetivo($lojaId);
+        $out = PRECOS_DEFAULT;
+        foreach (['tamanhos' => 'preco', 'extras' => 'preco', 'combos' => 'valorCombo'] as $grupo => $campo) {
+            foreach ($cat[$grupo] as $it) {
+                if (array_key_exists($it['id'], $out)) {
+                    $out[$it['id']] = round((float) $it[$campo], 2);
+                }
+            }
+        }
+        return $out;
+    }
+
     $saved = loadJson('precos.json', []);
     $camadas = [];
     if ($lojaId !== '__global' && is_array($saved) && isset($saved['__global']) && is_array($saved['__global'])) {
@@ -592,6 +607,24 @@ function catPreco($v): float
     return (is_numeric($v) && (float) $v >= 0) ? round((float) $v, 2) : 0.0;
 }
 
+// Lojas em que um item do catálogo aparece. Lista vazia = todas as lojas
+// (inclusive as criadas depois), que é o padrão do catálogo atual.
+function catLojas($v): array
+{
+    if (!is_array($v)) return [];
+    $out = [];
+    foreach ($v as $id) {
+        $id = trim((string) $id);
+        // IDs de loja reais podem ter espaços/acentos (ex.: "Mogi Guaçu");
+        // só rejeita vazio, longo demais ou caractere de controle.
+        if ($id === '' || mb_strlen($id, 'UTF-8') > 64) continue;
+        if (preg_match('/[\x00-\x1F\x7F]/', $id)) continue;
+        if (!in_array($id, $out, true)) $out[] = $id;
+        if (count($out) >= 100) break;
+    }
+    return $out;
+}
+
 // Valida/normaliza o catálogo vindo do admin. Devolve null quando inválido
 // (sem 10x15/15x20, que são a base da impressão e dos combos).
 function sanitizarCatalogo($cat): ?array
@@ -616,6 +649,8 @@ function sanitizarCatalogo($cat): ?array
             'modelo' => $modelo,
             'unidades' => $u,
         ];
+        $lojas = catLojas($it['lojas'] ?? []);
+        if ($lojas) $row['lojas'] = $lojas;
         $nota = catTexto($it['nota'] ?? '', 160);
         if ($nota !== '') $row['nota'] = $nota;
         $tamanhos[] = $row;
@@ -635,6 +670,8 @@ function sanitizarCatalogo($cat): ?array
         ];
         if (!empty($it['oculto'])) $row['oculto'] = true;
         if (!empty($it['digital'])) $row['digital'] = true;
+        $lojas = catLojas($it['lojas'] ?? []);
+        if ($lojas) $row['lojas'] = $lojas;
         $nota = catTexto($it['nota'] ?? '', 160);
         if ($nota !== '') $row['nota'] = $nota;
         $extras[] = $row;
@@ -646,7 +683,7 @@ function sanitizarCatalogo($cat): ?array
         if (!is_array($it)) continue;
         $id = catId($it['id'] ?? '');
         if ($id === '' || isset($tipos[$id])) continue;
-        $modo = $it['modo'] === 'slots' ? 'slots' : null;
+        $modo = ($it['modo'] ?? '') === 'slots' ? 'slots' : null;
         $regras = null;
         if ($modo === 'slots' && is_array($it['regras'])) {
             $slotsIn = (array) ($it['regras']['slots'] ?? []);
@@ -655,7 +692,7 @@ function sanitizarCatalogo($cat): ?array
                 if (!is_array($s)) continue;
                 $role = catId($s['role'] ?? '');
                 if ($role === '') $role = 'foto';
-                $tiposSlot = $s['tipo'] === 'extra' ? 'extra' : 'tamanho';
+                $tiposSlot = ($s['tipo'] ?? '') === 'extra' ? 'extra' : 'tamanho';
                 $modelos = [];
                 foreach ((array) ($s['modelos'] ?? []) as $m) {
                     $mm = catId($m);
@@ -713,6 +750,8 @@ function sanitizarCatalogo($cat): ?array
         if (!empty($it['encarte'])) $row['encarte'] = true;
         $alvo = catId($it['tamanhoAlvo'] ?? '');
         if ($alvo !== '') $row['tamanhoAlvo'] = $alvo;
+        $lojas = catLojas($it['lojas'] ?? []);
+        if ($lojas) $row['lojas'] = $lojas;
         $combos[] = $row;
         $tipos[$id] = 'combo';
     }
@@ -720,11 +759,66 @@ function sanitizarCatalogo($cat): ?array
     return ['tamanhos' => $tamanhos, 'extras' => $extras, 'combos' => $combos];
 }
 
-// Catálogo efetivo da loja: o salvo (quando existe) ou os defaults com o
-// overlay de preços antigo aplicado — garante que a tela do admin e o PDV
-// mostrem sempre a mesma lista.
+// Catálogo mestre: uma única lista com `lojas` por item (vazio = todas). É o
+// modelo novo do admin, onde cada produto/combo escolhe em quais PDVs aparece.
+function catalogoMaster(): ?array
+{
+    $saved = loadJson('precos.json', []);
+    if (!is_array($saved) || !isset($saved['__catalogo'])) return null;
+    return sanitizarCatalogo($saved['__catalogo']);
+}
+
+function itemVisivelLoja(array $item, string $lojaId): bool
+{
+    if ($lojaId === '' || $lojaId === '__global') return true;
+    $lojas = (array) ($item['lojas'] ?? []);
+    if (!$lojas) return true; // sem restrição = todas as lojas
+    return in_array($lojaId, $lojas, true);
+}
+
+// Recorta o catálogo mestre para uma loja: itens com `lojas` só aparecem nas
+// lojas marcadas; 10x15/15x20 são sempre mantidos (base da impressão). Combos
+// que dependem de um item escondido naquela loja também ficam de fora para o
+// PDV não receber um combo quebrado.
+function filtrarCatalogoPorLoja(array $cat, string $lojaId): array
+{
+    $obrigatorios = ['10x15' => true, '15x20' => true];
+    $tamanhos = [];
+    foreach ((array) $cat['tamanhos'] as $it) {
+        if (isset($obrigatorios[$it['id']]) || itemVisivelLoja($it, $lojaId)) $tamanhos[] = $it;
+    }
+    $extras = [];
+    foreach ((array) $cat['extras'] as $it) {
+        if (itemVisivelLoja($it, $lojaId)) $extras[] = $it;
+    }
+    $visiveis = [];
+    foreach (array_merge($tamanhos, $extras) as $it) $visiveis[$it['id']] = true;
+
+    $combos = [];
+    foreach ((array) $cat['combos'] as $it) {
+        if (!itemVisivelLoja($it, $lojaId)) continue;
+        $ok = true;
+        foreach ((array) ($it['itens'] ?? []) as $ci) {
+            if (!isset($visiveis[$ci['produtoId'] ?? ''])) { $ok = false; break; }
+        }
+        if ($ok && !empty($it['regras']['obrigatorios'])) {
+            foreach ((array) $it['regras']['obrigatorios'] as $o) {
+                if (!isset($visiveis[$o['produtoId'] ?? ''])) { $ok = false; break; }
+            }
+        }
+        if ($ok) $combos[] = $it;
+    }
+    return ['tamanhos' => $tamanhos, 'extras' => $extras, 'combos' => $combos];
+}
+
+// Catálogo efetivo da loja: o mestre recortado por loja (quando existe) ou o
+// salvo antigo/defaults com o overlay de preços aplicado — garante que a tela
+// do admin e o PDV mostrem sempre a mesma lista.
 function catalogoEfetivo(string $lojaId): array
 {
+    $master = catalogoMaster();
+    if ($master !== null) return filtrarCatalogoPorLoja($master, $lojaId);
+
     $saved = loadJson('precos.json', []);
     $global = (is_array($saved) && isset($saved['__global']) && is_array($saved['__global'])) ? $saved['__global'] : [];
     $overlay = (is_array($saved) && $lojaId !== '__global' && isset($saved[$lojaId]) && is_array($saved[$lojaId])) ? $saved[$lojaId] : [];
@@ -1591,6 +1685,15 @@ try {
             respond(['ok' => true, 'removidos' => $removidos]);
         }
 
+        // Catálogo mestre do admin (itens com `lojas`). Se ainda não existe,
+        // devolve o catálogo efetivo global para migrar sem perder o que já
+        // estava publicado.
+        case 'catalogo.get': {
+            $master = catalogoMaster();
+            if ($master === null) $master = catalogoEfetivo('__global');
+            respond(['ok' => true, 'master' => true, 'catalogo' => $master]);
+        }
+
         case 'precos.save': {
             $lojaId = trim((string) ($p['lojaId'] ?? ''));
             $enviados = $p['precos'] ?? null;
@@ -1604,6 +1707,19 @@ try {
                 if ($catalogo === null) {
                     fail('CATALOGO_INVALIDO: informe pelo menos os tamanhos 10x15 e 15x20 e combos com itens válidos');
                 }
+            }
+            if ($lojaId === '__master') {
+                // Modelo novo: uma única lista; cada item traz `lojas` (vazio =
+                // todas). O PDV recebe o recorte da sua loja em `precos`.
+                if ($catalogo === null) {
+                    fail('CATALOGO_INVALIDO: informe pelo menos os tamanhos 10x15 e 15x20 e combos com itens válidos');
+                }
+                $dados = loadJson('precos.json', []);
+                if (!is_array($dados)) $dados = [];
+                unset($dados['__master']); // limpa sobra de deploy antigo
+                $dados['__catalogo'] = $catalogo;
+                saveJson('precos.json', $dados);
+                respond(['ok' => true, 'master' => true, 'precos' => precosEfetivos('__global'), 'catalogo' => $catalogo]);
             }
             $dados = loadJson('precos.json', []);
             if (!is_array($dados)) $dados = [];
