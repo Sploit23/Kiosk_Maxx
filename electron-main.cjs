@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const net = require('net');
 const http = require('http');
 const crypto = require('crypto');
@@ -765,11 +766,12 @@ ipcMain.handle('natal:printGuia', async (event, { html, printerName } = {}) => {
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     const printOpts = { silent: true, printBackground: true, margins: { marginType: 'none' } };
     if (deviceName) printOpts.deviceName = deviceName;
-    await new Promise((resolve) => {
+    const result = await new Promise((resolve) => {
       win.webContents.print(printOpts, (success, failureReason) => resolve({ success, failureReason }));
     });
     win.destroy();
-    return { success: true };
+    if (result.success) return { success: true };
+    return { success: false, error: result.failureReason || 'print_failed' };
   } catch (e) {
     win.destroy();
     return { success: false, error: e.message };
@@ -860,36 +862,90 @@ app.whenReady().then(() => {
 
 
 
-ipcMain.handle('natal:printBematech', async (_event, { texto } = {}) => {
+ipcMain.handle('natal:printBematech', async (_event, { texto, qr } = {}) => {
+  let qrPath = '';
+  const limparQr = () => { if (qrPath) { try { fs.unlinkSync(qrPath); } catch(e){} qrPath = ''; } };
   try {
     const txt = typeof texto === 'string' ? texto : '';
     if (!txt || txt.trim().length === 0) {
       try { logMain('[ImpressaoBematech] texto vazio'); } catch(e){}
       return { success: false, error: 'texto vazio' };
     }
+    // QR opcional (data URL ou base64 puro) — vira um GIF temporário que o GDI
+    // desenha abaixo do texto. Sem isso a Bematech só imprimiria texto puro.
+    if (typeof qr === 'string' && qr.trim()) {
+      const m = qr.match(/^data:image\/[a-z0-9.+-]+;base64,(.+)$/i);
+      const b64qr = (m ? m[1] : qr).replace(/\s+/g, '');
+      const buf = Buffer.from(b64qr, 'base64');
+      if (buf.length > 0) {
+        qrPath = path.join(os.tmpdir(), 'natal-qr-' + process.pid + '-' + Date.now() + '.gif');
+        fs.writeFileSync(qrPath, buf);
+      }
+    }
     const printer = 'MP-4200 TH';
     const safe = txt.replace(/\r/g, '').replace(/\n/g, '\r\n');
     const b64 = Buffer.from(safe + '\r\n\r\n\r\n', 'utf8').toString('base64');
-    const ps = "Add-Type -AssemblyName System.Drawing; Add-Type -AssemblyName System.Windows.Forms; $pd = New-Object System.Drawing.Printing.PrintDocument; $pd.PrinterSettings.PrinterName = '" + printer.replace(/'/g, "''") + "'; $pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins -ArgumentList 0,0,0,0; $txt = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + b64 + "')); $pd.Add_PrintPage({ param($s,$ev); $ev.Graphics.PageUnit = [System.Drawing.GraphicsUnit]::Pixel; $base = 12.0; $f0 = New-Object System.Drawing.Font('Courier New', $base, [System.Drawing.FontStyle]::Bold); $widest = (($txt -split ([Environment]::NewLine)) | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum; $sample = ('0' * [int]$widest); $sz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $sample, $f0); $target = $ev.Graphics.VisibleClipBounds.Width * 0.98; if ($target -le 0) { $target = 576 }; $scale = 1.0; if ($sz.Width -gt 0) { $scale = $target / $sz.Width }; $newSize = [float]([Math]::Max(8.0, [Math]::Min(30.0, $base * $scale))); $f = New-Object System.Drawing.Font('Courier New', $newSize, [System.Drawing.FontStyle]::Bold); [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $txt, $f, (New-Object System.Drawing.Point 4,4), [System.Drawing.Color]::Black); [Console]::WriteLine('PRINT widest=' + $widest + ' measured=' + $sz.Width + ' target=' + [Math]::Round($target,1) + ' scale=' + [Math]::Round($scale,3) + ' size=' + [Math]::Round($newSize,2) + ' visW=' + [Math]::Round($ev.Graphics.VisibleClipBounds.Width,1) + ' dpiY=' + $ev.Graphics.DpiY) }); $pd.Print();";
+    const qrSafe = qrPath.replace(/'/g, "''");
+    const ps = [
+      "Add-Type -AssemblyName System.Drawing;",
+      "Add-Type -AssemblyName System.Windows.Forms;",
+      "$pd = New-Object System.Drawing.Printing.PrintDocument;",
+      "$pd.PrinterSettings.PrinterName = '" + printer.replace(/'/g, "''") + "';",
+      "$pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins -ArgumentList 0,0,0,0;",
+      "$txt = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + b64 + "'));",
+      "$qrPath = '" + qrSafe + "';",
+      "$pd.Add_PrintPage({ param($s,$ev);",
+      "  $ev.Graphics.PageUnit = [System.Drawing.GraphicsUnit]::Pixel;",
+      "  $base = 12.0;",
+      "  $f0 = New-Object System.Drawing.Font('Courier New', $base, [System.Drawing.FontStyle]::Bold);",
+      "  $widest = (($txt -split ([Environment]::NewLine)) | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum;",
+      "  $sample = ('0' * [int]$widest);",
+      "  $sz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $sample, $f0);",
+      "  $target = $ev.Graphics.VisibleClipBounds.Width * 0.98; if ($target -le 0) { $target = 576 };",
+      "  $scale = 1.0; if ($sz.Width -gt 0) { $scale = $target / $sz.Width };",
+      "  $newSize = [float]([Math]::Max(8.0, [Math]::Min(30.0, $base * $scale)));",
+      "  $f = New-Object System.Drawing.Font('Courier New', $newSize, [System.Drawing.FontStyle]::Bold);",
+      "  [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $txt, $f, (New-Object System.Drawing.Point 4,4), [System.Drawing.Color]::Black);",
+      "  if ($qrPath -and (Test-Path -LiteralPath $qrPath)) {",
+      "    try {",
+      "      $img = [System.Drawing.Image]::FromFile($qrPath);",
+      "      $visW = $ev.Graphics.VisibleClipBounds.Width;",
+      "      $maxW = $visW * 0.92;",
+      "      $iw = [double]$img.Width; $ih = [double]$img.Height;",
+      "      if ($iw -gt $maxW) { $ih = $ih * ($maxW / $iw); $iw = $maxW };",
+      "      $lineH = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, 'Ag', $f).Height;",
+      "      $lines = ($txt -split ([Environment]::NewLine)).Count;",
+      "      $ty = 4 + ($lineH * $lines) + 24;",
+      "      $x = ($visW - $iw) / 2;",
+      "      $ev.Graphics.DrawImage($img, [float]$x, [float]$ty, [float]$iw, [float]$ih);",
+      "      $img.Dispose();",
+      "    } catch { }",
+      "  }",
+      "  [Console]::WriteLine('PRINT widest=' + $widest + ' measured=' + $sz.Width + ' target=' + [Math]::Round($target,1) + ' scale=' + [Math]::Round($scale,3) + ' size=' + [Math]::Round($newSize,2) + ' qrPath=' + $qrPath + ' visW=' + [Math]::Round($ev.Graphics.VisibleClipBounds.Width,1) + ' dpiY=' + $ev.Graphics.DpiY)",
+      "});",
+      "$pd.Print();"
+    ].join('\n');
     const { spawn } = require('child_process');
     return await new Promise((resolve) => {
       try {
-        try { logMain('[ImpressaoBematech] enviando para ' + printer + ' (' + txt.length + ' chars)'); } catch(e){}
+        try { logMain('[ImpressaoBematech] enviando para ' + printer + ' (' + txt.length + ' chars' + (qrPath ? ', com QR' : '') + ')'); } catch(e){}
         const psp = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], { windowsHide: true });
         psp.stdout.on('data', (d) => { try { logMain('[ImpressaoBematech] out: ' + String(d).trim()); } catch(e){} });
         psp.stderr.on('data', (d) => { try { logMain('[ImpressaoBematech] err: ' + String(d).trim()); } catch(e){} });
         let done = false;
-        const fim = (r) => { if (!done) { done = true; resolve(r); } };
-        const t = setTimeout(() => { try { psp.kill(); } catch(e){} fim({ success: false, error: 'timeout', printer }); }, 15000);
+        const fim = (r) => { if (!done) { done = true; limparQr(); resolve(r); } };
+        const t = setTimeout(() => { try { psp.kill(); } catch(e){} fim({ success: false, error: 'timeout', printer }); }, 20000);
         psp.on('error', (e) => { clearTimeout(t); try { logMain('[ImpressaoBematech] erro: ' + e.message); } catch(e2){} fim({ success: false, error: e.message, printer }); });
         psp.on('close', (code) => { clearTimeout(t); if (code === 0) { try { logMain('[ImpressaoBematech] ok'); } catch(e){} fim({ success: true, printer }); } else { try { logMain('[ImpressaoBematech] ps_exit_' + code); } catch(e){} fim({ success: false, error: 'ps_exit_' + code, printer }); } });
       } catch (e) {
         try { logMain('[ImpressaoBematech] exc: ' + e.message); } catch(e2){}
+        limparQr();
         resolve({ success: false, error: e.message, printer });
       }
     });
   } catch (e) {
     try { logMain('[ImpressaoBematech] exc2: ' + e.message); } catch(e2){}
+    limparQr();
     return { success: false, error: e.message };
   }
 });

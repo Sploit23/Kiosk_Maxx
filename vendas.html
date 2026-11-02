@@ -1505,7 +1505,7 @@ import portalApi from './shared/api/portalApi.js';
 import { connectSSE } from './shared/api/sse.js';
 import { numeroSessao } from './src/catalog.js';
 import { composePrintImage } from './shared/utils/printUtils.js';
-import { qrSvgTag } from './shared/utils/qr.js';
+import { qrSvgTag, qrDataUrl } from './shared/utils/qr.js';
 import config from './shared/config.js';
 
 /* Erros globais (timers/SSE/callbacks fora de try) → terminal via bridge do main */
@@ -3612,43 +3612,9 @@ async function finalizarVenda(){
       const pdv = (_identidade && _identidade.pdvNome) || (typeof config!=='undefined'?config.pdvNome:'') || '';
       const op = (typeof currentUser!=='undefined' && currentUser && currentUser.nome) || '';
       const dt = new Date().toLocaleString('pt-BR');
-      if(codigoDigital){
-        const html = cupomDigitalHtml({ loja, pdv, operador: op, data: dt, pedidoId, itens: itensResumo, total, pagamentos, codigoDigital });
-        await imprimirThermal(html, 'Cupom digital enviado', thermalPrinterName() || 'MP-4200 TH');
-        return;
-      }
-      const W = 32;
-      const centro = (t) => { t = String(t); const pad = Math.max(0, Math.floor((W - t.length) / 2)); return ' '.repeat(pad) + t; };
-      const linha = (esq, dir) => { esq = String(esq); dir = String(dir); const esp = Math.max(1, W - esq.length - dir.length); return esq + ' '.repeat(esp) + dir; };
-      const sep = '-'.repeat(W);
-      const out = [];
-      out.push(centro('MAX FOTO VENDAS'));
-      if(loja) out.push(centro(loja));
-      if(pdv || op) out.push(centro([pdv, op].filter(Boolean).join(' - ')));
-      out.push(centro(dt));
-      out.push(sep);
-      out.push('Pedido: ' + pedidoId);
-      out.push(sep);
-      itensResumo.forEach(c => {
-        const nome = String(c.label || '');
-        const q = c.qtd > 1 ? c.qtd + 'x ' : '';
-        out.push(q + nome + ' #' + c.sessionSenha);
-        out.push(linha('', fmt(c.preco)));
-      });
-      out.push(sep);
-      out.push(linha('TOTAL', fmt(total)));
-      out.push('Pago: ' + pagamentos);
-      out.push(sep);
-      out.push(centro('Obrigado pela preferencia!'));
-      out.push('');
-      const texto = out.join('\n');
-      if(window.natal && typeof window.natal.ipcInvoke === 'function'){
-        const res = await window.natal.ipcInvoke('natal:printBematech', { texto });
-        if(res && res.success) toast('🧾 Cupom enviado para a Bematech');
-        else toast('⚠ Falha ao imprimir cupom');
-      } else {
-        toast('⚠ Impressão Bematech indisponível');
-      }
+      const texto = cupomBematechTexto({ loja, pdv, operador: op, data: dt, pedidoId, itens: itensResumo, total, pagamentos, codigoDigital });
+      const qrImg = codigoDigital ? qrDataUrl(urlNatal(codigoDigital), { cellSize: 10, margin: 40 }) : null;
+      await imprimirBematechTexto(texto, codigoDigital ? 'Cupom digital enviado' : undefined, qrImg);
     }catch(e){ toast('⚠ Falha ao imprimir cupom'); }
   });
   if(temFoto) document.getElementById('btn-print-fotos').addEventListener('click', ()=>{
@@ -3732,33 +3698,40 @@ function thermalPrinterName(){
 function escHtml(v){
   return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
-function cupomDigitalHtml({ loja, pdv, operador, data, pedidoId, itens, total, pagamentos, codigoDigital }){
-  const itensHtml = itens.map(c => `
-    <div class="rc-line"><span>${c.qtd > 1 ? c.qtd + 'x ' : ''}${escHtml(c.label)} · #${escHtml(c.sessionSenha)}</span><span>${escHtml(fmt(c.preco))}</span></div>
-  `).join('');
-  const operacao = [pdv, operador].filter(Boolean).join(' - ');
-  const site = urlNatal('').replace(/^https?:\/\//, '').replace(/\/$/, '');
-  return `
-    <div class="cupom-center cupom-title">MAX FOTO VENDAS</div>
-    ${loja ? `<div class="cupom-center cupom-sub">${escHtml(loja)}</div>` : ''}
-    ${operacao ? `<div class="cupom-center cupom-sub">${escHtml(operacao)}</div>` : ''}
-    <div class="cupom-center cupom-sub">${escHtml(data)}</div>
-    <div class="cupom-sep"></div>
-    <div class="cupom-sub">Pedido: ${escHtml(pedidoId)}</div>
-    <div class="cupom-sep"></div>
-    ${itensHtml}
-    <div class="cupom-sep"></div>
-    <div class="rc-total"><span>TOTAL</span><span>${escHtml(fmt(total))}</span></div>
-    <div class="rc-pay">Pago: ${escHtml(pagamentos)}</div>
-    <div class="cupom-sep"></div>
-    <div class="cupom-center cupom-sub">Obrigado pela preferencia!</div>
-    <div class="cupom-digital">
-      <div class="cupom-digital-title">FOTO DIGITAL</div>
-      <div class="cupom-qr">${qrSvgTag(urlNatal(codigoDigital), { cellSize: 6, margin: 4 })}</div>
-      <div class="cupom-code">${escHtml(codigoDigital)}</div>
-      <div class="cupom-hint">Acesse ${escHtml(site)}</div>
-      <div class="cupom-hint">e digite o codigo acima</div>
-    </div>`;
+function cupomBematechTexto({ loja, pdv, operador, data, pedidoId, itens, total, pagamentos, codigoDigital }){
+  const W = 32;
+  const centro = (t) => { t = String(t); const pad = Math.max(0, Math.floor((W - t.length) / 2)); return ' '.repeat(pad) + t; };
+  const linha = (esq, dir) => { esq = String(esq); dir = String(dir); const esp = Math.max(1, W - esq.length - dir.length); return esq + ' '.repeat(esp) + dir; };
+  const sep = '-'.repeat(W);
+  const out = [];
+  out.push(centro('MAX FOTO VENDAS'));
+  if(loja) out.push(centro(loja));
+  if(pdv || operador) out.push(centro([pdv, operador].filter(Boolean).join(' - ')));
+  out.push(centro(data));
+  out.push(sep);
+  out.push('Pedido: ' + pedidoId);
+  out.push(sep);
+  itens.forEach(c => {
+    const nome = String(c.label || '');
+    const q = c.qtd > 1 ? c.qtd + 'x ' : '';
+    out.push(q + nome + ' #' + c.sessionSenha);
+    out.push(linha('', fmt(c.preco)));
+  });
+  out.push(sep);
+  out.push(linha('TOTAL', fmt(total)));
+  out.push('Pago: ' + pagamentos);
+  out.push(sep);
+  out.push(centro('Obrigado pela preferencia!'));
+  if(codigoDigital){
+    const site = urlNatal('').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    out.push('');
+    out.push(centro('FOTO DIGITAL'));
+    out.push(centro('Escaneie o QR abaixo'));
+    out.push(centro('ou acesse ' + site));
+    out.push(centro('Codigo: ' + codigoDigital));
+  }
+  out.push('');
+  return out.join('\n');
 }
 async function imprimirThermal(conteudoHtml, rotulo, printerName){
   if(!window.natal || typeof window.natal.ipcInvoke !== 'function'){
@@ -3797,14 +3770,14 @@ async function imprimirThermal(conteudoHtml, rotulo, printerName){
     return false;
   }
 }
-async function imprimirBematechTexto(texto, rotulo){
+async function imprimirBematechTexto(texto, rotulo, qrImg){
   if(!window.natal || typeof window.natal.ipcInvoke !== 'function'){
     toast('⚠ Impressora térmica só funciona dentro do app (Electron)');
     return false;
   }
   if(rotulo) toast('🧾 ' + rotulo);
   try{
-    const res = await window.natal.ipcInvoke('natal:printBematech', { texto });
+    const res = await window.natal.ipcInvoke('natal:printBematech', qrImg ? { texto, qr: qrImg } : { texto });
     if(res && res.success){ toast('🧾 Cupom enviado para a Bematech'); return true; }
     toast('⚠ Falha ao imprimir cupom');
     return false;
