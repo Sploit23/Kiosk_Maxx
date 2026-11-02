@@ -1659,6 +1659,7 @@ let currentFoto = null;
 let currentTamanho = null;
 let pendingComboId = null; // combo aguardando o ajuste de enquadramento da foto
 let pendingComboSlots = null; // fotos (tamanhos) do combo em montagem, uma por item
+let _comboSlotLockUntil = 0;  // evita duplo clique em "Confirmar foto" pular/confirmar 2 slots
 let pendingComboSlotIndex = 0;
 let _posComboNext = null; // callback do upsell para seguir depois de montar um combo multi-foto
 let currentOrientation = 'paisagem'; // 'paisagem' | 'retrato' — default paisagem
@@ -1677,6 +1678,7 @@ let ribbonBalanceBase = null; // saldo REAL de papel do sidecar (GET /api/health
 let vendasHojeTotal = 0; // recalculado a partir dos pedidos reais (recalcularVendasHoje)
 let pedidosRealizados = []; // {id, horario(Date), sessoes:[{id,senha}], itens:[...], total, pagamentosEfetivos:[...], status}
 let editingPedidoId = null; // quando setado, o carrinho/checkout está editando um pedido já existente, não criando um novo
+let _finalizandoVenda = false; // trava contra duplo clique em "Confirmar pedido"
 // fundo de troco agora é dinâmico — definido na abertura do caixa (fundoTrocoCaixa), não fixo
 
 /* ---------------- HELPERS ---------------- */
@@ -3018,7 +3020,7 @@ async function carregarAuditoria(){
       if(usosSenhaLog.some(x => x.id === u.id)) return;
       usosSenhaLog.push({
         id: u.id, titulo: u.titulo || 'Uso de senha master',
-        senha: '••••', motivo: u.motivo || '', operador: u.operador || '—',
+        motivo: u.motivo || '', operador: u.operador || '—',
         data: new Date(u.data || Date.now()),
         pedidoContexto: u.pedidoContexto || null, pedidoGeradoId: u.pedidoGeradoId || null,
         // NÃO marca como enviado: quem manda ao portal é a outbox (a fila só
@@ -3218,6 +3220,25 @@ async function tentarLogin(getSelecionado){
 
 /* ---------------- PEDIDO REAL (criação + pagamento no sidecar) ---------------- */
 async function criarPedidoReal(itens, total, origemPedidoId){
+  const totalNum = Number(total);
+  const pagamentosBrutos = (efetivoRows || []).map(r => {
+    const m = meioInfoDeForma(r.forma);
+    return { meio: m.meio, valor: Number(r.valor), parcelas: m.parcelas || undefined };
+  });
+  if(pagamentosBrutos.some(p => !Number.isFinite(p.valor) || p.valor < 0)){
+    return { error: 'Pagamento com valor inválido' };
+  }
+  const pagamentos = pagamentosBrutos.filter(p => p.valor > 0);
+  const somaPagamentos = +pagamentos.reduce((s, p) => s + p.valor, 0).toFixed(2);
+  if(!Number.isFinite(totalNum) || totalNum <= 0){
+    return { error: 'Total do pedido inválido' };
+  }
+  if(!pagamentos.length){
+    return { error: 'Informe ao menos uma forma de pagamento com valor positivo' };
+  }
+  if(Math.abs(somaPagamentos - totalNum) > 0.005){
+    return { error: `Pagamentos (${somaPagamentos.toFixed(2)}) não conferem com o total (${totalNum.toFixed(2)})` };
+  }
   const sessoesIds = [...new Set(itens.map(c => c.sessionId).filter(Boolean))];
   const fotos = itens.filter(c => c.tipo === 'tamanho');
   const produtos = itens.filter(c => c.tipo === 'extra');
@@ -3235,7 +3256,7 @@ async function criarPedidoReal(itens, total, origemPedidoId){
       orientation: c.orientation || 'paisagem', unitPrice: c.precoUnit || 0, subtotal: c.preco || 0, pdv: true,
     })),
     produtos: produtos.map(c => ({ key: c.produtoId, qty: c.qtd || 1, unitPrice: c.precoUnit || 0, subtotal: c.preco || 0 })),
-    total: +total.toFixed(2),
+    total: +totalNum.toFixed(2),
     origemPedidoId: origemPedidoId || null,
     operador: currentUser ? currentUser.nome : null,
     desconto: descontoValor > 0.005
@@ -3247,12 +3268,7 @@ async function criarPedidoReal(itens, total, origemPedidoId){
   };
   const criado = await natalApi.criarPedido(payload);
   if(!criado || !criado.success) return { error: (criado && criado.error) || 'Erro ao criar pedido' };
-  const pago = await natalApi.registrarPagamento(criado.pedido.id, {
-    pagamentos: efetivoRows.filter(r => r.valor > 0).map(r => {
-      const m = meioInfoDeForma(r.forma);
-      return { meio: m.meio, valor: r.valor, parcelas: m.parcelas || undefined };
-    }),
-  });
+  const pago = await natalApi.registrarPagamento(criado.pedido.id, { pagamentos });
   if(!pago || !pago.success) return { error: (pago && pago.error) || 'Erro ao registrar pagamento' };
   return { pedido: mapearPedido(pago.pedido) };
 }
@@ -3495,7 +3511,27 @@ async function renderDigitalConfigPanel(){
 }
 
 async function finalizarVenda(){
+  if(_finalizandoVenda) return;
+  _finalizandoVenda = true;
+  try {
+    return await finalizarVendaImpl();
+  } finally {
+    _finalizandoVenda = false;
+  }
+}
+
+async function finalizarVendaImpl(){
   const total = cartTotal();
+  if(!Number.isFinite(total) || total <= 0){
+    toast('⚠ Total do pedido inválido — revise os descontos');
+    return;
+  }
+  const valoresPagamento = (efetivoRows || []).map(r => Number(r.valor));
+  const somaPagamentos = valoresPagamento.filter(v => Number.isFinite(v) && v > 0).reduce((s, v) => s + v, 0);
+  if(valoresPagamento.some(v => !Number.isFinite(v) || v < 0) || !valoresPagamento.some(v => v > 0) || Math.abs(somaPagamentos - total) > 0.005){
+    toast('⚠ Pagamento não confere com o total — revise as formas de pagamento');
+    return;
+  }
   const origemRealId = editingPedidoId
     ? ((pedidosRealizados.find(x => x.id === editingPedidoId)) || {})._realId || editingPedidoId
     : null;
@@ -4145,7 +4181,10 @@ function renderOptions(){
 function catalogLookup(produtoId, tipoProduto){
   if(produtoId==='item-encarte') return ITEM_ENCARTE;
   if(produtoId==='porta-cartao-postal') return PORTA_CARTAO_POSTAL;
-  return tipoProduto==='tamanho' ? TAMANHOS.find(t=>t.id===produtoId) : EXTRAS.find(e=>e.id===produtoId);
+  if(tipoProduto==='tamanho') return TAMANHOS.find(t=>t.id===produtoId) || null;
+  // Alguns combos antigos classificam um tamanho (ex.: bolinha) como extra.
+  // Sem o fallback o item entrava com preço 0 e sem foto para imprimir.
+  return EXTRAS.find(e=>e.id===produtoId) || TAMANHOS.find(t=>t.id===produtoId) || null;
 }
 
 /* pop de quantidade para o tamanho — aparece ao clicar em "+ Adicionar este ao carrinho" */
@@ -4304,6 +4343,10 @@ function _autoComboBest(disponiveis, recipes){
 function recalcularCombosAutomaticos(){
   cart = cart.filter(c=>!c.autoCombo);
   if(!cart.length) return;
+  // Pedido reaberto já tem o desconto explícito restaurado; recalcular combo em
+  // cima dele aplicaria desconto em dobro. O operador pode remover a linha para
+  // liberar o recálculo automático.
+  if(cart.some(c=>c.reaberto)) return;
   const disponiveis = new Map();
   cart.forEach(c=>{
     if(!c || !c.produtoId) return;
@@ -4421,12 +4464,34 @@ function renderCombos(){
 /* combo inline no card do tamanho foi removido — todos os tamanhos usam o mesmo
    botão "+ Adicionar este ao carrinho" com pop de quantidade (abrirQtdModal). */
 
+function produtoDoSlotCombo(slot){
+  if(!slot) return null;
+  if(slot.produtoId){
+    const direto = TAMANHOS.find(t=>t.id===slot.produtoId);
+    if(direto) return direto;
+  }
+  const modelos = Array.isArray(slot.modelos) ? slot.modelos : [];
+  for(const modelo of modelos){
+    const t = TAMANHOS.find(x=>modeloDe(x)===modelo);
+    if(t) return t;
+  }
+  return null;
+}
+
 function abrirComboSlots(combo){
   if(!combo || !currentSession) return;
-  if(!currentFoto) currentFoto = currentSession.fotos[0];
   const slots = (combo.regras && combo.regras.slots) ? combo.regras.slots : [];
   const obrig = (combo.regras && combo.regras.obrigatorios) ? combo.regras.obrigatorios : [];
+  if(!slots.length){
+    toast('⚠ Este combo não tem slots configurados');
+    return;
+  }
   const fotosSessao = (currentSession.fotos||[]).map(f=>({seed:f.seed, name:f.name}));
+  if(!fotosSessao.length){
+    toast('⚠ Sessão sem fotos para montar o combo');
+    return;
+  }
+  if(!currentFoto) currentFoto = currentSession.fotos[0];
   openModal(`
     <div class="modal-head">
       <div><div class="modal-step-label">Montar combo</div><h3>${combo.nome}</h3></div>
@@ -4451,65 +4516,63 @@ function abrirComboSlots(combo){
     });
   });
   document.getElementById('combo-slots-confirmar').addEventListener('click', ()=>{
+    const slotsParaAplicar = [];
+    const itens = [];
     for(let i=0;i<slots.length;i++){
-      if(slots[i].obrigatorio && !selecionados[i]){
-        toast('⚠ Selecione todas as fotos obrigatórias');
-        return;
-      }
-    }
-    for(const o of obrig){
-      if(!temEstoqueFisico(o.produtoId, o.qtd||1)){
-        const p = catalogLookup(o.produtoId, o.tipo);
-        toast(`⚠ Estoque insuficiente de ${p?p.label:o.produtoId}`);
-        return;
-      }
-    }
-    if(combo.id === 'combo-encarte-2x15x20' || combo.id === 'combo-encarte-2x15x20-digital'){
-      if(saldoFisico('item-encarte')<=0){
-        toast('⚠ Sem estoque do Item Encarte');
-        return;
-      }
-    }
-    let somaIndividual = 0;
-    obrig.forEach(o=>{
-      const p = catalogLookup(o.produtoId, o.tipo);
-      if(p) somaIndividual += p.preco*(o.qtd||1);
-    });
-    const groupId = 'combo-slots-'+Date.now().toString(36);
-    obrig.forEach(o=>{
-      const p = catalogLookup(o.produtoId,o.tipo);
-      const item = addToCart(o.tipo, o.produtoId, p?.label||o.produtoId, p?.preco||0, o.qtd||1);
-      if(item) item.comboAplicadoId = combo.id;
-    });
-    if(combo.id === 'combo-encarte-2x15x20' || combo.id === 'combo-encarte-2x15x20-digital'){
-      for(const item of cart){
-        if(item.comboGroupId) continue;
-        if(item.tipo==='tamanho' && item.produtoId==='15x20' && !item.zeradoPorCombo){
-          item.zeradoPorCombo = true;
-          item.precoOriginal = item.preco;
-          item.preco = 0;
+      const seed = selecionados[i];
+      if(!seed){
+        if(slots[i].obrigatorio){
+          toast('⚠ Selecione todas as fotos obrigatórias');
+          return;
         }
+        continue;
       }
-    }
-    const diferenca = +(somaIndividual - combo.valorCombo).toFixed(2);
-    if(diferenca > 0){
-      cart.push({
-        cartId:'combo-desc-'+Date.now()+Math.random().toString(36).slice(2,5),
-        sessionId: currentSession.id, sessionSenha: currentSession.senha,
-        fotoSeed: currentFoto.seed, tipo:'combo-desconto', produtoId:'combo', label:`Desconto do combo "${combo.nome}"`,
-        qtd:1, precoUnit:-diferenca, preco:-diferenca, comboGroupId: groupId, comboAplicadoId: combo.id
+      const produto = produtoDoSlotCombo(slots[i]);
+      if(!produto){
+        toast(`⚠ Não há tamanho disponível para o slot ${i+1}`);
+        return;
+      }
+      const foto = (currentSession.fotos||[]).find(f=>f.seed===seed);
+      if(!foto){
+        toast('⚠ A foto escolhida não está mais disponível');
+        return;
+      }
+      slotsParaAplicar.push({
+        produtoId: produto.id,
+        fotoSeed: foto.seed,
+        zoom: 100,
+        offX: 0,
+        offY: 0,
+        orientation: 'paisagem',
+        overlayVariant: '1',
+        logo: includeLogo,
       });
+      itens.push({ produtoId: produto.id, tipoProduto: 'tamanho', qtd: 1 });
     }
-    cart.forEach(c=>{ if(c.cartId && !c.comboGroupId && (c.tipo==='extra'||c.tipo==='combo-desconto')) c.comboGroupId = groupId; });
-    closeModal();
-    renderCart();  renderCombos();
-    toast(`Combo "${combo.nome}" aplicado`);
+    if(!slotsParaAplicar.length){
+      toast('⚠ Selecione ao menos uma foto');
+      return;
+    }
+    obrig.forEach(o=>{
+      itens.push({
+        produtoId: o.produtoId,
+        tipoProduto: o.tipo === 'tamanho' ? 'tamanho' : 'extra',
+        qtd: Math.max(1, Number(o.qtd)||1),
+      });
+    });
+    if(aplicarComboComSlots({ ...combo, itens }, slotsParaAplicar)){
+      closeModal();
+      renderThumbs();
+      renderOptions();
+      renderFrame();
+    }
   });
 }
 function limparComboPendente(){
   pendingComboId = null;
   pendingComboSlots = null;
   pendingComboSlotIndex = 0;
+  _comboSlotLockUntil = 0;
   _posComboNext = null;
 }
 
@@ -4526,6 +4589,7 @@ function comboPhotoItems(combo){
 
 function iniciarComboMultiFoto(combo){
   if(!combo || !currentSession) return false;
+  _comboSlotLockUntil = 0;
   _posComboNext = null;
   const produtos = comboPhotoItems(combo);
   if(!produtos.length) return false;
@@ -4579,6 +4643,9 @@ function capturarComboSlotAtual(){
 
 function aplicarComboMultiFotoPendente(){
   if(!pendingComboSlots || !pendingComboId) return;
+  const agora = Date.now();
+  if(agora < _comboSlotLockUntil) return;
+  _comboSlotLockUntil = agora + 350;
   if(!capturarComboSlotAtual()) return;
   const total = pendingComboSlots.length;
   if(pendingComboSlotIndex < total - 1){
@@ -4692,8 +4759,20 @@ function aplicarComboComSlots(combo, slots){
   });
   let digitalIndex = 0;
   for(const it of extraItens){
+    const tProd = TAMANHOS.find(t=>t.id===it.produtoId);
     const p = catalogLookup(it.produtoId, it.tipoProduto);
     if(!p){ desfazer(); toast(`⚠ Produto do combo "${combo.nome}" não está no catálogo`); return false; }
+    if(tProd){
+      // Alguns combos antigos (ex.: bolinha) classificam um tamanho como extra.
+      // Ele precisa entrar como foto para ser composto e impresso.
+      if(slots[0]) aplicarEstadoSlot(slots[0]);
+      else if(prev.currentFoto) currentFoto = prev.currentFoto;
+      const item = addToCart('tamanho', it.produtoId, p.label, p.preco, 1, { silent: true });
+      if(!item){ desfazer(); toast('⚠ Não foi possível aplicar o combo completo'); return false; }
+      item.comboAplicadoId = combo.id;
+      adicionados.push(item);
+      continue;
+    }
     if(it.produtoId === 'foto-digital'){
       aplicarEstadoSlot(slots[Math.min(digitalIndex, slots.length-1)]);
       digitalIndex++;
@@ -5372,12 +5451,15 @@ document.getElementById('btn-add-cart').addEventListener('click', ()=>{
 
 function cartTotal(){ return cart.reduce((s,c)=>s+c.preco,0); }
 
+const TIPOS_DESCONTO_MANUAL = ['desconto-catalogo', 'desconto-senha-master', 'desconto-falha-operacional', 'desconto-comercial'];
+function temDescontoManual(){ return cart.some(c=>TIPOS_DESCONTO_MANUAL.includes(c.tipo)); }
+
 /* ---------------- DESCONTO DURANTE A VENDA (antes de finalizar) ---------------- */
 document.getElementById('btn-desconto-venda').addEventListener('click', showDescontoVendaModal);
 
 function showDescontoVendaModal(){
   const total = cartTotal();
-  const jaTemDesconto = cart.some(c=>c.tipo==='desconto-catalogo' || c.tipo==='desconto-senha-master');
+  const jaTemDesconto = temDescontoManual();
   const catalogoHtml = DESCONTOS_CATALOGO.map(d=>{
     const elegivel = total >= (d.minimo||0) && !jaTemDesconto;
     const valorCalc = d.tipo==='percentual' ? +(total*d.valor/100).toFixed(2) : d.valor;
@@ -5398,6 +5480,7 @@ function showDescontoVendaModal(){
   `);
   document.querySelectorAll('.oc-add-btn[data-id]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
+      if(temDescontoManual()){ toast('⚠ Já existe um desconto neste pedido'); return; }
       const d = DESCONTOS_CATALOGO.find(x=>x.id===btn.dataset.id);
       const valor = d.tipo==='percentual' ? +(total*d.valor/100).toFixed(2) : d.valor;
       cart.push({
@@ -5411,12 +5494,14 @@ function showDescontoVendaModal(){
     });
   });
   document.getElementById('btn-desconto-senha-master').addEventListener('click', ()=>{
+    if(temDescontoManual()){ toast('⚠ Já existe um desconto neste pedido'); return; }
     askSenhaMotivo('Desconto fora do catálogo', 'Caso excepcional — informe a senha master da loja e o motivo.', (senha,motivo)=>{
       askValor('Valor do desconto', 'Informe o valor do desconto em reais (ex: 15,00).', (valorStr)=>{
         const valor = parseFloat((valorStr||'0').replace(',','.'));
         if(!valor || valor<=0){ toast('Valor inválido — desconto não aplicado'); return; }
+        if(temDescontoManual()){ toast('⚠ Já existe um desconto neste pedido'); return; }
         cart.push({
-          cartId:'desc-sm-'+Date.now(), tipo:'desconto-senha-master', produtoId:'senha-master', label:`Desconto fora do catálogo (senha ${senha})`,
+          cartId:'desc-sm-'+Date.now(), tipo:'desconto-senha-master', produtoId:'senha-master', label:'Desconto fora do catálogo',
           qtd:1, precoUnit:-valor, preco:-valor,
           sessionId: currentSession.id, sessionSenha: currentSession.senha, fotoSeed: currentFoto ? currentFoto.seed : currentSession.fotos[0].seed
         });
@@ -6658,7 +6743,8 @@ function wirePaymentRows(rows, containerId, total, onChange){
   });
   cont.querySelectorAll('.pr-valor').forEach((inp,i)=>{
     inp.addEventListener('input', e=>{
-      rows[i].valor = parseFloat(e.target.value)||0;
+      const valor = parseFloat(e.target.value);
+      rows[i].valor = Number.isFinite(valor) && valor > 0 ? valor : 0;
       // com exatamente duas formas, a diferença cai automaticamente na oposta
       if(rows.length===2){
         const otherIndex = i===0 ? 1 : 0;
@@ -6681,11 +6767,16 @@ function wirePaymentRows(rows, containerId, total, onChange){
 
 function openCheckoutPretendido(){
   const total = cartTotal();
+  if(!Number.isFinite(total) || total <= 0){
+    toast('⚠ Total do pedido inválido — revise os descontos');
+    return;
+  }
   pretendidoRows = [{forma:'Crédito à vista', valor: total}];
   renderCheckoutStep(total);
 }
 
 function renderCheckoutStep(total){
+  const totalValido = Number.isFinite(total) && total > 0;
   const rows = pretendidoRows;
   const alocado = rows.reduce((s,r)=>s+r.valor,0);
   const restante = +(total - alocado).toFixed(2);
@@ -6708,20 +6799,22 @@ function renderCheckoutStep(total){
     </div>
     <div class="pay-rows" id="pay-rows">${paymentRowsHTML(rows, true, formasList)}</div>
     <button class="add-pay-row" id="add-row">+ Adicionar forma de pagamento (multipagamento)</button>
-    <div class="restante-banner ${restante===0?'ok':''}" id="restante-banner">
-      <span>${restante===0?'Valor totalmente alocado':'Restante a alocar'}</span>
+    <div class="restante-banner ${totalValido && restante===0?'ok':''}" id="restante-banner">
+      <span>${!totalValido ? 'Total inválido' : (restante===0?'Valor totalmente alocado':'Restante a alocar')}</span>
       <span>${fmt(Math.abs(restante))}</span>
     </div>
-    <button class="btn-primary" id="btn-confirm-step" ${restante!==0?'disabled':''}>Confirmar pedido</button>
+    <button class="btn-primary" id="btn-confirm-step" ${(!totalValido || restante!==0)?'disabled':''}>Confirmar pedido</button>
   `);
 
   const aplicarDesconto = (tipo, titulo)=>{
+    if(temDescontoManual()){ toast('⚠ Já existe um desconto neste pedido'); return; }
     askSenhaMotivo(titulo, `Código e motivo ficam registrados nesse pedido.`, (senha,motivo)=>{
       askValor('Valor do desconto', 'Informe o valor do desconto em reais (ex: 15,00).', (valorStr)=>{
         const valor = parseFloat((valorStr||'0').replace(',','.'));
         if(!valor || valor<=0){ toast('Valor inválido — desconto não aplicado'); return; }
+        if(temDescontoManual()){ toast('⚠ Já existe um desconto neste pedido'); return; }
         cart.push({
-          cartId:'desc-'+tipo+'-'+Date.now(), tipo, produtoId:tipo, label:`${titulo} (senha ${senha})`,
+          cartId:'desc-'+tipo+'-'+Date.now(), tipo, produtoId:tipo, label:titulo,
           qtd:1, precoUnit:-valor, preco:-valor,
           sessionId: currentSession.id, sessionSenha: currentSession.senha, fotoSeed: currentFoto ? currentFoto.seed : currentSession.fotos[0].seed
         });
@@ -6756,12 +6849,13 @@ function renderCheckoutStep(total){
 }
 
 function updateRestante(rows, total){
+  const totalValido = Number.isFinite(total) && total > 0;
   const alocado = rows.reduce((s,r)=>s+r.valor,0);
   const restante = +(total-alocado).toFixed(2);
   const banner = document.getElementById('restante-banner');
-  banner.className = 'restante-banner'+(restante===0?' ok':'');
-  banner.innerHTML = `<span>${restante===0?'Valor totalmente alocado':'Restante a alocar'}</span><span>${fmt(Math.abs(restante))}</span>`;
-  document.getElementById('btn-confirm-step').disabled = restante!==0;
+  banner.className = 'restante-banner'+(totalValido && restante===0?' ok':'');
+  banner.innerHTML = `<span>${!totalValido ? 'Total inválido' : (restante===0?'Valor totalmente alocado':'Restante a alocar')}</span><span>${fmt(Math.abs(restante))}</span>`;
+  document.getElementById('btn-confirm-step').disabled = !totalValido || restante!==0;
 }
 
 /* ---------------- SELETOR DE PAGAMENTO GENÉRICO (multipagamento) ----------------
@@ -7149,7 +7243,7 @@ function renderVendasScreen(){
 }
 
 /* ================= SENHA + MOTIVO (reutilizável, toda ação sensível passa por aqui) ================= */
-let usosSenhaLog = []; // {id, titulo, senha, motivo, operador, data, pedidoContexto, pedidoGeradoId, _portalEnviado}
+let usosSenhaLog = []; // {id, titulo, motivo, operador, data, pedidoContexto, pedidoGeradoId, _portalEnviado}
 
 function registrarUsoSenhaContexto(pedidoOrigemId, pedidoGeradoId){
   // liga retroativamente os usos de senha feitos durante esta edição ao pedido novo gerado
@@ -7242,9 +7336,16 @@ function askSenhaMotivo(titulo, subtitulo, onConfirm, pedidoContexto){
   setTimeout(()=>{ try{ senhaInput.focus(); }catch{} }, 30);
   btn.addEventListener('click', ()=>{
     const senha = senhaInput.value, motivo = motivoInput.value.trim();
+    if(senha !== SENHA_MASTER_PDV){
+      toast('⚠ Senha master incorreta');
+      senhaInput.value = '';
+      checar();
+      try{ senhaInput.focus(); }catch{}
+      return;
+    }
     const uso = {
       id: 'AUD-' + Date.now().toString(36).toUpperCase(),
-      titulo, senha, motivo,
+      titulo, motivo,
       operador: currentUser ? currentUser.nome : '—',
       data: new Date(),
       pedidoContexto: pedidoContexto || editingPedidoId || null, // pedido que estava sendo editado quando a senha foi usada
@@ -7675,12 +7776,12 @@ function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perd
   closeModal();
 
   if(itensPerdidos.length>0){
-    mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, senha, motivo, perdaInfo || new Map());
+    mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, motivo, perdaInfo || new Map());
   }
 }
 
 /* relatório de perda — impresso pra anexar fisicamente ao material/fotos perdidas, com a senha usada pra auditoria */
-function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, senha, motivo, perdaInfo){
+function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, motivo, perdaInfo){
   const linhasPerdidos = itensPerdidos.map(it=>{
     const motivoPerda = (perdaInfo && perdaInfo.get(it)) === 'impresso' ? 'impresso — perdido' : 'não devolvido — perdido';
     const sessTxt = it.tipo==='tamanho' && it.sessionSenha ? ` · #${it.sessionSenha}` : '';
@@ -7694,7 +7795,7 @@ function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, senha, motivo, 
     <div class="receipt">
       <h4>Maxx Foto — Relatório de perda</h4>
       <div class="rc-sub">Cancelamento autorizado por senha, para auditoria</div>
-      <div class="rc-line"><span>Senha utilizada</span><span>${senha}</span></div>
+      <div class="rc-line"><span>Autorização</span><span>senha master registrada na auditoria</span></div>
       <div class="rc-line"><span>Operador</span><span>${currentUser?currentUser.nome:'—'}</span></div>
       <div class="rc-line"><span>Data/hora</span><span>${new Date().toLocaleString('pt-BR')}</span></div>
       <div class="rc-line"><span>Motivo</span><span style="text-align:right;max-width:200px;">${motivo}</span></div>
@@ -7704,7 +7805,7 @@ function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, senha, motivo, 
       <h4 style="margin-top:12px;">Itens devolvidos ao estoque</h4>
       ${linhasDevolvidos}
     </div>
-    <p class="modal-sub">📎 Oriente a equipe a imprimir este relatório, colocar junto com as fotos/material perdido num pacote, e guardar a senha visível — evita perda sem explicação e mentira, e facilita auditoria posterior.</p>
+    <p class="modal-sub">📎 Oriente a equipe a imprimir este relatório e colocar junto com as fotos/material perdido num pacote — o uso da senha já fica registrado na auditoria do sistema.</p>
     <button class="btn-secondary" id="rp-imprimir-novamente">🖨 Imprimir novamente</button>
     <button class="btn-primary" onclick="closeModal()">Fechar</button>
   `);
@@ -7745,6 +7846,27 @@ function reabrirParaEdicao(pedidoId){
 
   // pré-popula o carrinho com os itens já existentes do pedido — a vendedora ajusta a partir daqui
   cart = p.itens.map(it=>({...it}));
+  // O desconto é gravado separado no pedido (p.desconto); sem reidratar a linha
+  // negativa, reabrir a venda mostrava o total cheio e cobrava a mais.
+  if(p.desconto && Number(p.desconto.valor) > 0){
+    const descontoTipo = p.desconto.tipo === 'combo' ? 'combo-desconto' : 'desconto-catalogo';
+    const primeiraSessao = (p.sessoes && p.sessoes[0]) || {};
+    const itemComFoto = cart.find(it=>it.fotoSeed);
+    cart.push({
+      cartId: 'desc-reabrir-' + p.id,
+      sessionId: primeiraSessao.id || currentSession.id,
+      sessionSenha: primeiraSessao.senha || currentSession.senha,
+      fotoSeed: itemComFoto ? itemComFoto.fotoSeed : null,
+      tipo: descontoTipo,
+      produtoId: descontoTipo === 'combo-desconto' ? 'combo' : 'desconto-reaberto',
+      label: p.desconto.nome || 'Desconto',
+      qtd: 1,
+      precoUnit: -Number(p.desconto.valor),
+      preco: -Number(p.desconto.valor),
+      reaberto: true,
+      pdv: true,
+    });
+  }
 
   document.getElementById('screen-pedidos').classList.remove('active');
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
