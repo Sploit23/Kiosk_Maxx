@@ -147,18 +147,16 @@ def enrich_peer_info(info, local_ips=None):
 
 
 def get_subnet_broadcasts():
+    # 255.255.255.255 funciona em qualquer subrede local; os dirigidos ajudam
+    # quando o Windows/roteador bloqueia o broadcast limitado.
     addrs = ["255.255.255.255"]
-    try:
-        hostname = socket.gethostname()
-        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
-            ip = info[4][0]
-            if _is_private_ip(ip):
-                parts = ip.split(".")
-                bcast = ".".join(parts[:3]) + ".255"
-                if bcast not in addrs:
-                    addrs.append(bcast)
-    except Exception:
-        pass
+    for ip in all_local_ips():
+        parts = ip.split(".")
+        if len(parts) != 4:
+            continue
+        for bcast in (".".join(parts[:3]) + ".255", ".".join(parts[:2]) + ".255.255"):
+            if bcast not in addrs:
+                addrs.append(bcast)
     return addrs
 
 

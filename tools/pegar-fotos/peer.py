@@ -78,10 +78,19 @@ class PeerListener:
     def _listen(self):
         while self.running:
             try:
-                data, _addr = self.sock.recvfrom(1024)
+                data, addr = self.sock.recvfrom(1024)
                 info = parse_broadcast_message(data)
                 if not info:
                     continue
+                # O IP de origem e sempre alcancavel (foi ele que mandou o
+                # pacote); os IPs anunciados podem estar errados/desatualizados.
+                src_ip = addr[0] if isinstance(addr, tuple) and addr else ""
+                ips = list(info.get("ips") or [])
+                if src_ip and src_ip not in ips:
+                    ips.insert(0, src_ip)
+                if ips:
+                    info["ips"] = ips
+                    info["ip"] = src_ip or ips[0]
                 info = enrich_peer_info(info, self.local_ips)
                 if not info.get("ip") or self._is_self(info):
                     continue
@@ -121,7 +130,7 @@ class PeerSync:
 
     def __init__(self, root, sync_interval=8, auto_download=True,
                  on_status=None, on_progress=None, on_batch_done=None, on_error=None,
-                 on_batches=None, on_duplicate=None):
+                 on_batches=None, on_duplicate=None, on_batch_failed=None):
         self.root = root
         self.sync_interval = sync_interval
         self.auto_download = auto_download
@@ -131,6 +140,7 @@ class PeerSync:
         self.on_error = on_error or (lambda *a: None)
         self.on_batches = on_batches or (lambda *a: None)
         self.on_duplicate = on_duplicate or (lambda *a: None)
+        self.on_batch_failed = on_batch_failed or (lambda *a: None)
         self.peer = None
         self.remote_batches = []
         self.running = False
@@ -252,9 +262,51 @@ class PeerSync:
             with self.lock:
                 self.is_downloading = False
 
+    def _marker_complete(self, folder):
+        """True so quando o marcador e todos os arquivos listados existem.
+
+        Versoes antigas gravavam o marcador mesmo quando um download falhava,
+        deixando o lote permanentemente "completo" com fotos faltando.
+        """
+        marker = os.path.join(folder, DONE_MARKER)
+        if not os.path.isfile(marker):
+            return False
+        try:
+            with open(marker, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return False
+        files = data.get("files")
+        if isinstance(files, dict) and files:
+            for name in files:
+                try:
+                    st = os.stat(os.path.join(folder, name))
+                    if not os.path.isfile(os.path.join(folder, name)) or st.st_size <= 0:
+                        return False
+                except OSError:
+                    return False
+            return True
+        # Marcador antigo (sem "files"): compara a contagem gravada.
+        try:
+            expected = int(data.get("count") or 0)
+        except (TypeError, ValueError):
+            expected = 0
+        if expected > 0:
+            actual = 0
+            try:
+                for name in os.listdir(folder):
+                    if name.startswith("."):
+                        continue
+                    if os.path.isfile(os.path.join(folder, name)):
+                        actual += 1
+            except OSError:
+                return False
+            return actual >= expected
+        return True
+
     def is_complete(self, name):
         folder = os.path.join(self.root, name)
-        return os.path.isdir(folder) and os.path.isfile(os.path.join(folder, DONE_MARKER))
+        return os.path.isdir(folder) and self._marker_complete(folder)
 
     def local_hash(self, name):
         """Hash de conteudo do lote local (ou None)."""
@@ -274,8 +326,13 @@ class PeerSync:
             for name in os.listdir(self.root):
                 if name.startswith("."):
                     continue
-                marker = os.path.join(self.root, name, DONE_MARKER)
+                folder = os.path.join(self.root, name)
+                marker = os.path.join(folder, DONE_MARKER)
                 if not os.path.isfile(marker):
+                    continue
+                # Uma pasta com marcador velho/incompleto nao conta como copia
+                # valida - senao o lote nunca seria baixado de novo.
+                if not self._marker_complete(folder):
                     continue
                 try:
                     with open(marker, "r", encoding="utf-8") as f:
@@ -293,6 +350,15 @@ class PeerSync:
         except OSError:
             return False
 
+    def _local_file_ok(self, batch_dir, file_info):
+        path = os.path.join(batch_dir, file_info["name"])
+        if not self._have_file(path, file_info["size"]):
+            return False
+        expected = file_info.get("hash") or ""
+        if expected and file_hash(path) != expected:
+            return False
+        return True
+
     def _download_batch(self, batch, target_name=None):
         name = target_name or batch["name"]
         files, error = self._api(f"/api/batches/{quote(batch['name'])}/files")
@@ -307,16 +373,26 @@ class PeerSync:
             self.on_error(f"Nao consegui criar a pasta {name}: {e}")
             return
 
-        todo = [f for f in files if not self._have_file(os.path.join(batch_dir, f["name"]), f["size"])]
+        # Lote com marcador incompleto (bug antigo): remove para o sidecar nao
+        # criar sessao pela metade e baixa de novo o que falta.
+        marker = os.path.join(batch_dir, DONE_MARKER)
+        if os.path.isfile(marker) and not self._marker_complete(batch_dir):
+            try:
+                os.remove(marker)
+            except OSError:
+                pass
+
         total = len(files)
-        already = total - len(todo)
-        self.on_progress(name, already, total, 0, 0)
+        total_size = sum(int(f.get("size") or 0) for f in files)
+        done_names = {f["name"] for f in files if self._local_file_ok(batch_dir, f)}
+        todo = [f for f in files if f["name"] not in done_names]
+        self.on_progress(name, len(done_names), total, 0, 0)
 
         downloaded = []
         if todo:
             self.on_status(f"Baixando {name} ({len(todo)} arquivo(s))...")
             start_time = time.time()
-            state = {"bytes": 0, "count": 0}
+            state = {"bytes": 0}
             state_lock = threading.Lock()
 
             def task(file_info):
@@ -326,25 +402,51 @@ class PeerSync:
                 if ok:
                     with state_lock:
                         state["bytes"] += file_info["size"]
-                        state["count"] += 1
-                        count_now, bytes_now = state["count"], state["bytes"]
+                        done_names.add(file_info["name"])
+                        count_now, bytes_now = len(done_names), state["bytes"]
                         downloaded.append((file_info["name"], file_info["size"], fhash, qhash))
                     elapsed = max(time.time() - start_time, 0.001)
-                    self.on_progress(name, already + count_now, total, bytes_now, elapsed)
+                    self.on_progress(name, count_now, total, bytes_now, elapsed)
                 return ok
 
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                list(pool.map(task, todo))
+            # Uma tentativa por arquivo pode falhar por Wi-Fi/antivírus; tenta
+            # de novo ANTES de gravar o marcador. Marcador so sai com tudo ok.
+            for attempt in range(3):
+                if self.cancel or not todo:
+                    break
+                if attempt:
+                    self.on_status(
+                        f"Tentando de novo {name} ({len(todo)} arquivo(s) faltando)..."
+                    )
+                    time.sleep(min(1.5 * attempt, 4))
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    list(pool.map(task, todo))
+                todo = [f for f in files if not self._local_file_ok(batch_dir, f)]
 
-        hashes = {f["name"]: f.get("hash", "") for f in files}
-        for fname, _fsize, fhash, _qhash in downloaded:
-            hashes[fname] = fhash
-        for fname, fhash in list(hashes.items()):
-            if not fhash:
-                hashes[fname] = file_hash(os.path.join(batch_dir, fname))
+        if todo:
+            faltam = ", ".join(f["name"] for f in todo[:4])
+            if len(todo) > 4:
+                faltam += ", ..."
+            # Sem marcador: o lote continua como "recebendo" e sera retentado
+            # no proximo ciclo, em vez de ficar travado em "N/6".
+            self.on_progress(name, 0, 0, 0, 0)
+            self.on_error(f"{name}: faltaram {len(todo)} arquivo(s) ({faltam})")
+            self.on_batch_failed(name, len(todo), total)
+            return
+
+        hashes = {}
+        for f in files:
+            path = os.path.join(batch_dir, f["name"])
+            expected = f.get("hash") or ""
+            hashes[f["name"]] = expected or file_hash(path)
 
         self._write_marker(batch_dir, batch, make_lot_hash(list(hashes.items())), hashes)
-        self.on_batch_done(name, len(files), sum(f["size"] for f in files), downloaded)
+        self.on_batch_done(
+            name,
+            len(files),
+            total_size or sum(f["size"] for f in files),
+            downloaded,
+        )
 
     def _download_file(self, batch_name, batch_dir, file_info):
         name = file_info["name"]
@@ -372,6 +474,9 @@ class PeerSync:
                                 head += chunk[:QUICK_HASH_BLOCK - len(head)]
                             tail = (tail + chunk)[-QUICK_HASH_BLOCK:] if written > QUICK_HASH_BLOCK else tail + chunk
                             out.write(chunk)
+                expected = int(file_info.get("size") or 0)
+                if expected > 0 and written != expected:
+                    raise ValueError(f"tamanho {written} != {expected}")
                 os.replace(tmp, dest)
                 return True, digest.hexdigest()[:16], quick_hash_parts(written, head, tail)
             except Exception:
@@ -383,9 +488,11 @@ class PeerSync:
         return False, "", ""
 
     def _write_marker(self, batch_dir, batch, lot_hash="", files=None):
+        marker_path = os.path.join(batch_dir, DONE_MARKER)
+        tmp_path = marker_path + ".tmp"
         try:
             marker = {
-                "count": batch.get("count", 0),
+                "count": len(files) if files else batch.get("count", 0),
                 "size": batch.get("size", 0),
                 "date": batch.get("date", ""),
                 "source": batch.get("source", "peer"),
@@ -393,7 +500,12 @@ class PeerSync:
                 "seq": parse_seq_name(os.path.basename(batch_dir)) or 0,
                 "files": files or {},
             }
-            with open(os.path.join(batch_dir, DONE_MARKER), "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(marker, f)
+            os.replace(tmp_path, marker_path)
         except Exception:
-            pass
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass

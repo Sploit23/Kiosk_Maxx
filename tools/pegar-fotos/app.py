@@ -317,9 +317,11 @@ class UDPBeacon:
     def _loop(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        broadcast_addrs = get_subnet_broadcasts()
         while self.running:
             try:
+                # Recalcula sempre: o Wi-Fi/cabo pode conectar depois do boot e
+                # um broadcast antigo (/24 errado ou vazio) nunca acharia o outro PC.
+                broadcast_addrs = get_subnet_broadcasts()
                 msg = build_broadcast_message(self.name, self.port, self.machine_id)
                 for addr in broadcast_addrs:
                     try:
@@ -434,6 +436,7 @@ class PhotoImportApp:
             on_error=self._peer_error,
             on_batches=self._peer_batches,
             on_duplicate=self._peer_duplicate,
+            on_batch_failed=self._peer_batch_failed,
         )
         self.peer_sync.start()
 
@@ -543,7 +546,7 @@ class PhotoImportApp:
             "nextBatch": next_batch,
             "copying": bool(self.is_copying),
             "card": self._status["card"],
-            "progress": self._status["progress"],
+            "progress": self._status["progress"] if self.is_copying else None,
             "download": self._status["download"],
             "server": {
                 "active": bool(self.http_server),
@@ -1054,9 +1057,16 @@ class PhotoImportApp:
 
     def _peer_progress(self, batch_name, count, total, done_bytes, elapsed):
         speed = (done_bytes / (1024 * 1024)) / elapsed if elapsed else 0
-        self._status["download"] = {
-            "batch": batch_name, "count": count, "total": total, "speed": round(speed, 2),
-        }
+        if total > 0 and count > total:
+            count = total
+        self._status["download"] = (
+            {
+                "batch": batch_name, "count": count, "total": total,
+                "speed": round(speed, 2),
+            }
+            if total > 0
+            else None
+        )
 
         def _apply():
             self.dl_progress["maximum"] = max(total, 1)
@@ -1064,6 +1074,19 @@ class PhotoImportApp:
             self.dl_count_lbl.config(text=f"{count} / {total} arquivos")
             self.dl_speed_lbl.config(text=f"{speed:.1f} MB/s")
             self.dl_file_lbl.config(text=f"[{batch_name}] baixando...")
+
+        self.root.after(0, _apply)
+
+    def _peer_batch_failed(self, batch_name, restantes, total):
+        self._status["download"] = None
+        mensagem = f"{batch_name}: faltaram {restantes} de {total} arquivo(s)"
+        self._status["peer"]["error"] = mensagem
+        self.log("lote %s incompleto: %s" % (batch_name, mensagem))
+
+        def _apply():
+            self.dl_file_lbl.config(text=f"Incompleto: {mensagem}")
+            self.peer_error_lbl.config(text=f"ERRO: {mensagem} - tentando de novo")
+            self.update_remote_table()
 
         self.root.after(0, _apply)
 
@@ -1460,6 +1483,7 @@ class PhotoImportApp:
 
         copied_bytes = 0
         copied_count = 0
+        copy_errors = 0
         start_time = time.time()
 
         lot_entries = []
@@ -1486,12 +1510,28 @@ class PhotoImportApp:
                 speed_mb = (copied_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0
                 self.root.after(0, self.update_progress_ui, idx, total_files, speed_mb, filename)
             except Exception:
-                pass
+                copy_errors += 1
+
+        if copied_count != total_files or copy_errors:
+            # Nunca publica lote incompleto: o sidecar criaria uma sessao
+            # faltando fotos e o cartao poderia ser apagado pelo operador.
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            self.is_copying = False
+            self._status["progress"] = None
+            faltaram = total_files - copied_count
+            self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.NORMAL))
+            self.root.after(0, self.set_status_empty, source_path)
+            self.root.after(0, lambda: self.drive_info_lbl.config(
+                text=f"Falha ao copiar {faltaram} foto(s). Nada foi publicado; tente de novo."))
+            self.log("lote %s NAO publicado: %s de %s copiados" % (
+                batch_name, copied_count, total_files))
+            return
 
         published = self._publish_batch(tmp_dir, final_dir)
         if not published:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             self.is_copying = False
+            self._status["progress"] = None
             self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.NORMAL))
             self.root.after(0, self.set_status_empty, source_path)
             return
@@ -1533,8 +1573,10 @@ class PhotoImportApp:
             return False
 
     def _write_marker(self, batch_dir, count, size, source, lot_hash=None, files=None):
+        marker_path = os.path.join(batch_dir, DONE_MARKER)
+        tmp_path = marker_path + ".tmp"
         try:
-            with open(os.path.join(batch_dir, DONE_MARKER), "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump({
                     "count": count,
                     "size": size,
@@ -1543,8 +1585,13 @@ class PhotoImportApp:
                     "seq": parse_seq_name(os.path.basename(batch_dir)) or 0,
                     "files": files or {},
                 }, f)
+            os.replace(tmp_path, marker_path)
         except Exception:
-            pass
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
 
     def _file_hash(self, path):
         import hashlib
@@ -1623,7 +1670,9 @@ class PhotoImportApp:
         self.btn_manual_copy.config(state=tk.NORMAL)
         self.current_file_lbl.config(text="")
         self.set_status_finished(batch_name, count)
-        self._status["progress"] = {"count": count, "total": count, "speed": 0, "file": ""}
+        # Copia concluida: limpa o progresso para o chip do PDV nao ficar
+        # eternamente em "Copiando 6/6".
+        self._status["progress"] = None
         self.update_history_table()
         self.update_local_table()
         self.update_next_batch_label()

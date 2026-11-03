@@ -537,6 +537,34 @@ async function scanPhotosFolder(folder) {
 }
 
 // ─── Lotes do cartao (pasta do importador embutido) ─────────
+// Marcador de lote do importador. Versoes antigas gravavam `.natal_done`
+// mesmo com downloads falhando; entao o marcador so vale se os arquivos
+// listados existem (ou, no formato antigo, se a contagem confere).
+function marcadorLoteCompleto(subPath) {
+  const markerPath = path.join(subPath, '.natal_done');
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+  } catch {
+    return false;
+  }
+  const files = data && data.files;
+  if (files && typeof files === 'object' && Object.keys(files).length) {
+    for (const name of Object.keys(files)) {
+      try {
+        const st = fs.statSync(path.join(subPath, name));
+        if (!st.isFile() || st.size <= 0) return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
+  const expected = Number(data && data.count) || 0;
+  if (expected > 0) return listImageEntries(subPath).length >= expected;
+  return true;
+}
+
 // Cada subpasta com o marcador `.natal_done` (gravado pelo importador DEPOIS
 // de copiar tudo) vira uma sessao PRONTA, sem esperar o programa externo.
 // Sem o marcador, o lote ainda esta sendo copiado -> espera.
@@ -549,7 +577,7 @@ async function scanImportFolder(folder) {
     let st;
     try { st = fs.statSync(subPath); } catch { continue; }
     if (!st.isDirectory()) continue;
-    if (!fs.existsSync(path.join(subPath, '.natal_done'))) continue; // cópia em andamento
+    if (!marcadorLoteCompleto(subPath)) continue; // cópia em andamento
 
     const chave = path.resolve(subPath);
     const snapAtual = snapshotOf(subPath);
