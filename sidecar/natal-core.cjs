@@ -92,6 +92,7 @@ function bindPaths(dataDir) {
   CONFIG_FILE = path.join(DB_DIR, 'config.json');
   PASTA_IMPORTADAS_FILE = path.join(DB_DIR, 'pasta-importadas.json');
   FILA_IMPRESSAO_FILE = path.join(DB_DIR, 'fila-impressao.json');
+  TESTES_FILE = path.join(DB_DIR, 'testes.json');
   GALERIA_DIR = path.join(dataDir, 'galeria');
   FILA_PORTAL_FILE = path.join(DB_DIR, 'fila-portal.json');
   CACHE_PORTAL_FILE = path.join(DB_DIR, 'cache-portal.json');
@@ -133,7 +134,7 @@ function persistFolderPointer(folder) {
 const BOOT_PHOTOS_FOLDER = readBootstrapPhotosFolder();
 let DATA_DIR = computeDataDir(BOOT_PHOTOS_FOLDER);
 let DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR;
-let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE, FILA_IMPRESSAO_FILE, FILA_PORTAL_FILE, CACHE_PORTAL_FILE, ENVIADOS_PORTAL_FILE, GALERIA_DIR;
+let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE, FILA_IMPRESSAO_FILE, TESTES_FILE, FILA_PORTAL_FILE, CACHE_PORTAL_FILE, ENVIADOS_PORTAL_FILE, GALERIA_DIR;
 bindPaths(DATA_DIR);
 moverDados(LEGACY_BOOT_DIR, DATA_DIR);
 
@@ -158,6 +159,7 @@ function inicializarDados() {
   if (!fs.existsSync(CAIXA_FILE)) fs.writeFileSync(CAIXA_FILE, 'null', 'utf-8');
   if (!fs.existsSync(CAIXAS_FILE)) fs.writeFileSync(CAIXAS_FILE, '[]', 'utf-8');
   if (!fs.existsSync(AUDITORIA_FILE)) fs.writeFileSync(AUDITORIA_FILE, '[]', 'utf-8');
+  if (!fs.existsSync(TESTES_FILE)) fs.writeFileSync(TESTES_FILE, '[]', 'utf-8');
   if (!fs.existsSync(RIBBON_FILE)) fs.writeFileSync(RIBBON_FILE, '400', 'utf-8');
   if (!fs.existsSync(PASTA_IMPORTADAS_FILE)) fs.writeFileSync(PASTA_IMPORTADAS_FILE, '{}', 'utf-8');
 }
@@ -648,6 +650,37 @@ function nextSessionId() {
 // ─── Pedidos ─────────────────────────────────────────────────
 let pedidos = readJson(PEDIDOS_FILE, []);
 function savePedidos() { writeJson(PEDIDOS_FILE, pedidos); }
+
+// Testes de impressão do fotógrafo: no máximo 2 por loja por dia. O registro
+// fica no sidecar (sobrevive a restart) e é impresso pelo mesmo pipeline da
+// ASK-400, mas NÃO entra como pedido/venda nem mexe no estado da sessão.
+const TESTES_LIMITE_DIA = 2;
+let testes = readJson(TESTES_FILE, []);
+function saveTestes() { writeJson(TESTES_FILE, testes); }
+function dataLocal(ts = Date.now()) {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function testesDoDia(lojaId) {
+  const hoje = dataLocal();
+  const alvo = String(lojaId || '');
+  return testes.filter((t) => t && t.data === hoje
+    && String(t.lojaId || '') === alvo
+    && t.status !== 'CANCELADO');
+}
+function statusTestes() {
+  const itens = testesDoDia(machineConfig.lojaId);
+  return {
+    limite: TESTES_LIMITE_DIA,
+    usados: itens.length,
+    restantes: Math.max(0, TESTES_LIMITE_DIA - itens.length),
+    itens: itens.map((t) => ({
+      id: t.id, sessaoId: t.sessaoId, sessaoSenha: t.sessaoSenha,
+      opcao: t.label, criadoEm: t.criadoEm, status: t.status,
+    })),
+  };
+}
 function nextPedidoNumero() {
   const max = pedidos.reduce((m, p) => Math.max(m, p.numero || 0), 0);
   return max + 1;
@@ -839,6 +872,7 @@ function recarregarEstadoLocal() {
   counter = parseInt(readText(COUNTER_FILE), 10) || 0;
   pedidos = readJson(PEDIDOS_FILE, []);
   auditoria = readJson(AUDITORIA_FILE, []);
+  testes = readJson(TESTES_FILE, []);
   caixa = readJson(CAIXA_FILE, null);
   caixas = readJson(CAIXAS_FILE, []);
   pastaImportadas = readJson(PASTA_IMPORTADAS_FILE, {});
@@ -1313,7 +1347,7 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
   try {
     const allPrints = buildPrintList(listaFotos, pedidoId);
     const total = allPrints.length;
-    emit('print-start', { pedidoId, total, reimpressao });
+    emit('print-start', { pedidoId, total, reimpressao, teste: !!opts.teste });
 
     for (let i = 0; i < total; i++) {
       if (cancelado()) return pararPorCancelamento();
@@ -1340,6 +1374,20 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
     consumirRibbonImpresso();
     const ribbon = getRibbon();
 
+    if (opts.teste) {
+      const idx = testes.findIndex((t) => t.id === pedido.id);
+      if (idx >= 0) {
+        testes[idx] = { ...testes[idx], status: 'IMPRESSO', impressoEm: Date.now() };
+        saveTestes();
+      }
+      emit('teste:impresso', { testeId: pedido.id, lojaId: pedido.lojaId || '' });
+      emit('print-complete', { pedidoId, testeId: pedido.id, success: true, teste: true });
+      fs.rmSync(queueDir, { recursive: true, force: true });
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+      console.log(`[natal-core] Teste ${pedido.id} impresso (ribbon: ${ribbon})`);
+      return true;
+    }
+
     pedidos = pedidos.map((p) => (p.id === pedido.id
       ? { ...p, status: 'IMPRESSO', impressoEm: p.impressoEm || Date.now() }
       : p));
@@ -1360,7 +1408,7 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
   } catch (e) {
     consumirRibbonImpresso();
     console.error(`[natal-core] Falha na impressao do pedido ${pedidoId}: ${e.message}`);
-    emit('print-complete', { pedidoId, success: false, reimpressao, error: `Falha Java sidecar: ${e.message}` });
+    emit('print-complete', { pedidoId, success: false, reimpressao, teste: !!opts.teste, error: `Falha Java sidecar: ${e.message}` });
     return false;
   }
 }
@@ -1373,6 +1421,7 @@ function enfileirarImpressao(pedido, fotos, reimpressao = false) {
   if (job) {
     job.fotos = fotos;
     job.reimpressao = reimpressao === true;
+    job.teste = pedido.teste === true;
     job.estado = 'PENDENTE'; // reenviado manualmente → volta pra fila
     job.tentadoEm = null;
   } else {
@@ -1380,6 +1429,7 @@ function enfileirarImpressao(pedido, fotos, reimpressao = false) {
       pedidoId,
       numero: pedido.numero,
       sessaoId: pedido.sessaoId || null,
+      teste: pedido.teste === true,
       fotos,
       reimpressao: reimpressao === true,
       estado: 'PENDENTE',
@@ -1406,10 +1456,15 @@ async function processarFila() {
       emit('print-waiting', { qtd: pendentes });
       return;
     }
-    const pedido = pedidos.find((p) => p.id === job.pedidoId || String(p.numero) === job.pedidoId);
+    const teste = job.teste === true
+      ? testes.find((t) => t.id === job.pedidoId)
+      : null;
+    const pedido = teste || pedidos.find((p) => p.id === job.pedidoId || String(p.numero) === job.pedidoId);
     const reimpressao = job.reimpressao === true;
-    const statusPermitido = pedido && (pedido.status === 'PAGO'
-      || (reimpressao && pedido.status === 'IMPRESSO'));
+    const statusPermitido = teste
+      ? ['AGUARDANDO', 'ENFILEIRADO'].includes(teste.status)
+      : (pedido && (pedido.status === 'PAGO'
+        || (reimpressao && pedido.status === 'IMPRESSO')));
     if (!statusPermitido) {
       filaImpressao = filaImpressao.filter((j) => j !== job);
       saveFila();
@@ -1419,7 +1474,7 @@ async function processarFila() {
     }
     if (!reimpressao) {
       pedido.fotos = job.fotos;
-      savePedidos();
+      if (teste) saveTestes(); else savePedidos();
     }
     job.estado = 'IMPRIMINDO';
     job.tentadoEm = Date.now();
@@ -1427,7 +1482,7 @@ async function processarFila() {
     saveFila();
     pedidosImprimindo.add(job.pedidoId);
     try {
-      const ok = await runPrintPipeline(pedido, job.fotos, { reimpressao });
+      const ok = await runPrintPipeline(pedido, job.fotos, { reimpressao, teste: !!teste });
       if (ok) {
         filaImpressao = filaImpressao.filter((j) => j !== job);
         saveFila();
@@ -1439,6 +1494,10 @@ async function processarFila() {
       } else {
         job.estado = 'FALHOU';
         saveFila();
+        if (teste) {
+          const idx = testes.findIndex((t) => t.id === teste.id);
+          if (idx >= 0) { testes[idx] = { ...testes[idx], status: 'FALHOU' }; saveTestes(); }
+        }
       }
     } finally {
       pedidosImprimindo.delete(job.pedidoId);
@@ -1456,6 +1515,7 @@ function filaParaUI() {
     pedidoId: j.pedidoId,
     numero: j.numero,
     sessaoId: j.sessaoId,
+    teste: j.teste === true,
     fotos: (j.fotos || []).length,
     estado: j.estado,
     tries: j.tries || 0,
@@ -1507,6 +1567,7 @@ function limparDadosLocais(opts = {}) {
     sessoes: (() => { try { return fs.readdirSync(SESSOES_DIR).length; } catch { return 0; } })(),
     pedidos: pedidos.length,
     auditoria: auditoria.length,
+    testes: testes.length,
     filaImpressao: filaImpressao.length,
     filaPortal: filaPortal.length,
     caixaAberto: !!(aberto && aberto.numero),
@@ -1535,6 +1596,7 @@ function limparDadosLocais(opts = {}) {
   writeJson(PEDIDOS_FILE, []);
   writeJson(CAIXAS_FILE, []);
   writeJson(AUDITORIA_FILE, []);
+  writeJson(TESTES_FILE, []);
   writeJson(PASTA_IMPORTADAS_FILE, {});
   writeJson(FILA_IMPRESSAO_FILE, []);
   writeJson(FILA_PORTAL_FILE, []);
@@ -2138,6 +2200,77 @@ const server = http.createServer(async (req, res) => {
       if (!jaAtivo) enfileirarImpressao(pedido, fotos, reimpressao);
       kickFila(); // online → imprime já; offline → fica na fila e o worker retoma
       return sendJson(res, 200, { success: true, enfileirado: !jaAtivo });
+    }
+
+    // ?? Teste de impressao do fotografo (2 por loja/dia) ??
+    if (method === 'GET' && p === '/api/testes/status') {
+      return sendJson(res, 200, { success: true, ...statusTestes() });
+    }
+    if (method === 'POST' && p === '/api/testes') {
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      const sessao = getSessao(body.sessaoId);
+      if (!sessao) return sendJson(res, 404, { success: false, error: 'Sessao nao encontrada' });
+      const status = statusTestes();
+      if (status.restantes <= 0) {
+        return sendJson(res, 429, {
+          success: false, error: 'LIMITE_TESTES',
+          message: `Limite de ${status.limite} testes por loja/dia atingido`,
+          ...status,
+        });
+      }
+      const fotoFilename = sanitizeSegment(body.fotoFilename || '');
+      if (!fotoFilename || !sessao.fotos.some((f) => f.name === fotoFilename)) {
+        return sendJson(res, 400, { success: false, error: 'Foto nao encontrada na sessao' });
+      }
+      const teste = {
+        id: `TST-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
+        teste: true,
+        lojaId: String(machineConfig.lojaId || ''),
+        sessaoId: sessao.id,
+        sessaoSenha: String(body.sessaoSenha || ''),
+        fotoFilename,
+        key: String(body.key || '10x15'),
+        label: String(body.label || body.key || 'Teste'),
+        operador: String(body.operador || ''),
+        status: 'AGUARDANDO',
+        criadoEm: Date.now(),
+        data: dataLocal(),
+        fotos: [],
+      };
+      testes.push(teste);
+      saveTestes();
+      emit('teste:criado', { testeId: teste.id, lojaId: teste.lojaId });
+      return sendJson(res, 200, { success: true, teste, ...statusTestes() });
+    }
+    const testeUpload = p.match(/^\/api\/testes\/([^/]+)\/impressao\/([^/]+)$/);
+    if (method === 'POST' && testeUpload) {
+      const [, testeId, filenameRaw] = testeUpload;
+      const teste = testes.find((t) => t.id === testeId);
+      if (!teste) return sendJson(res, 404, { success: false, error: 'Teste nao encontrado' });
+      const filename = sanitizeSegment(filenameRaw);
+      const dir = path.join(PRINT_QUEUE_DIR, sanitizeSegment(teste.id));
+      fs.mkdirSync(dir, { recursive: true });
+      const buf = await readBody(req);
+      fs.writeFileSync(path.join(dir, filename), buf);
+      return sendJson(res, 200, { success: true, filename });
+    }
+    const testeImprimir = p.match(/^\/api\/testes\/([^/]+)\/imprimir$/);
+    if (method === 'POST' && testeImprimir) {
+      const body = JSON.parse((await readBody(req, 5 * 1024 * 1024)).toString() || '{}');
+      const teste = testes.find((t) => t.id === testeImprimir[1]);
+      if (!teste) return sendJson(res, 404, { success: false, error: 'Teste nao encontrado' });
+      if (!['AGUARDANDO', 'ENFILEIRADO', 'FALHOU'].includes(teste.status)) {
+        return sendJson(res, 409, { success: false, error: 'Teste ja foi impresso' });
+      }
+      const fotos = Array.isArray(body.fotos) ? body.fotos : [];
+      if (!fotos.length) return sendJson(res, 400, { success: false, error: 'Nenhuma foto para imprimir' });
+      teste.fotos = fotos;
+      teste.status = 'ENFILEIRADO';
+      teste.tentadoEm = Date.now();
+      saveTestes();
+      if (!pedidosImprimindo.has(teste.id)) enfileirarImpressao(teste, fotos, false);
+      kickFila();
+      return sendJson(res, 200, { success: true, enfileirado: !pedidosImprimindo.has(teste.id), teste });
     }
 
     // ── Caixa ──

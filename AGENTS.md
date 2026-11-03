@@ -98,6 +98,10 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 | POST | `/api/pedidos/:id/impressao/:filename` | Upload da imagem final de impressão (fila) |
 | POST | `/api/pedidos/:id/imprimir` | Dispara pipeline de impressão (exige `PAGO`, fotos não vazia, lock anti-impressão dupla) |
 | PUT | `/api/pedidos/:id` | Persiste correções pós-pagamento feitas no PDV (total, pagamentos/meio, itens/produtos, desconto, status `CANCELADO`, `codigoDigital` do envio digital) |
+| GET | `/api/testes/status` | Testes de impressão do fotógrafo no dia: `{limite, usados, restantes, itens}` (limite 2 por loja/dia) |
+| POST | `/api/testes` | Cria teste `{sessaoId, sessaoSenha, fotoFilename, key, label, operador}` → `TST-*` `AGUARDANDO`; 429 `LIMITE_TESTES` ao passar de 2/dia |
+| POST | `/api/testes/:id/impressao/:filename` | Upload do JPEG composto do teste na fila de impressão |
+| POST | `/api/testes/:id/imprimir` | Enfileira o teste `{fotos}` (não entra como pedido/venda nem altera a sessão) |
 | POST | `/api/galeria/upload/:codigo/:seq` | Upload do JPEG final do envio digital (pose única) — grava em disco e tenta FTP |
 | POST | `/api/galeria/finalizar/:codigo` | Fecha o envio digital `{total, pedidoId}` → libera o manifesto (sobe por último) |
 | GET | `/api/galeria/fila` | Estado dos envios digitais `{itens, pendentes, fotosPendentes, urlBase}` |
@@ -119,7 +123,8 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 
 **Eventos SSE emitidos:** `sessao:criada`, `sessao:status`, `sessao:concluida`,
 `pedido:criado`, `pedido:pago`, `print-start`, `printer:progress`,
-`print-complete`, `caixa:aberto`, `caixa:fechado`, `galeria:enviado`. Cliente:
+`print-complete`, `teste:criado`, `teste:impresso`, `caixa:aberto`, `caixa:fechado`,
+`galeria:enviado`. Cliente:
 `shared/api/sse.js` `connectSSE(onEvent, onStatus)` é **multi-listener** (portado
 do kiosk-app) — cada chamada registra um callback no mesmo `EventSource`, em vez
 de reabrir a conexão.
@@ -189,6 +194,10 @@ subconjunto, comissões cap 100),
 `despesas.list`/`despesas.save`/`despesas.delete` (CRUD de
 despesas manuais da gestão em `data/despesas.json`,
 `{ id: 'DESP-*', lojaId, data, categoria, descricao, valor, criadoEm }`),
+`estoque.list` (`{lojaId}` → itens do catálogo efetivo com `quantidade`
+contada, `vendidos` desde `contadoEm` e `saldo` = quantidade − vendidos),
+`estoque.save` (`{lojaId, itens:[{produtoId, quantidade}]}` grava
+`data/estoque.json`; mudar a quantidade reinicia `contadoEm`),
 `admin.changePassword`. Ação desconhecida → `ACAO_DESCONHECIDA`.
 
 **Parâmetros globais (`data/parametros.json`, defaults em `PARAMS_DEFAULT` do
@@ -285,6 +294,12 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `GET /api/pdv/caixas` (mais recente primeiro).
 - **Contadores:** `counter.txt` (sessões), `ribbon-counter.txt` (ribbon da
   impressora, default 400), `config.json` (config da máquina).
+- **Testes de impressão (`database/testes.json`):** array de testes do
+  fotógrafo `{id: 'TST-*', teste: true, lojaId, sessaoId, sessaoSenha,
+  fotoFilename, key, label, operador, status: AGUARDANDO|ENFILEIRADO|IMPRESSO|
+  FALHOU, criadoEm, data, fotos: [{key, filename, qty}], tentadoEm?, impressoEm?}`.
+  Limite de 2 por loja/dia (`TESTES_LIMITE_DIA`); não entra em pedidos/vendas e
+  não altera a sessão.
 - **Fila de envio ao portal (`database/fila-portal.json`):** array de itens
   `{id, tipo: vendas|pedido|auditoria, chave, payload, tentativas, ultimoErro,
   criadoEm, atualizadoEm}` — o `payload` é o **corpo completo** guardado no
@@ -347,6 +362,12 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   (`pedido.push`), em ordem de chegada. Alimenta as telas "Financeiro"
   (resultado, DRE e despesas), "Ranking" (agrega por operador/loja) e o
   resultado do período (`pedido.list`).
+- **Estoque (`data/estoque.json`):** contagem física por loja/produto:
+  `{ "<lojaId>": { "<produtoId>": { quantidade, contadoEm, atualizadoEm } } }`.
+  `estoque.list` soma as vendas `pago`/`impresso` de `pedidos.json` desde o
+  `contadoEm` de cada item e devolve `vendidos`/`saldo`; itens sem contagem
+  ficam `configurado:false`. `estoque.save` só reinicia `contadoEm` quando a
+  quantidade muda. Produtos digitais e linhas de ajuste não entram no estoque.
 - **Auditoria (`data/auditoria.json`):** array de usos de senha master por
   `uso.id` (`auditoria.push`). Campos: `id`, `lojaId`, `lojaNome`, `pdvNome`,
   `machineId`, `data`, `criadoEm`, `titulo` (perda/desconto/cancelamento/
@@ -523,6 +544,13 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   sha256, nunca em claro); no offline o PDV valida contra esse hash
   (`POST /api/cache/portal/conferir`). Equipe, preços e catálogo também são cacheados no
   sucesso e reaplicados quando o portal não responde.
+- **Teste de impressão do fotógrafo (`vendas.html`)** — botão na topbar (só
+  função Fotógrafo), no rodapé do carrinho e no checkout. Fluxo: escolhe
+  sessão → foto → tamanho, compõe o JPEG (`composePrintImage` 300 DPI), cria
+  `POST /api/testes` (limite 2/loja/dia), sobe em `/api/testes/:id/impressao/:filename`
+  e enfileira em `/api/testes/:id/imprimir`. Não vira pedido/venda nem muda a
+  sessão; consome ribbon pelo mesmo pipeline da ASK-400. Ao fechar no checkout,
+  volta para o passo de pagamento.
 - **Config da máquina (sidecar)** — `%APPDATA%\natal-app\database\config.json`
   guarda `{ pdvNome, photosFolder, thermalPrinterName, machineId, lojaId,
   lojaNome, pairingCode, importFolder, importSessoes }` via `GET/POST
@@ -612,6 +640,12 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   nas lojas sem pedido no período** (não conta duas vezes). Líquido =
   faturamento − taxas − ribbon − comissões − despesas. A antiga tela
   "Despesas & Taxas" foi absorvida (item de nav removido).
+- **Estoque de produtos (admin, `admin.html`)** — dentro de `#screen-estoque`,
+  `renderEstoqueProdutos` carrega o catálogo efetivo da loja via `estoque.list`,
+  mostra contagem/vendidos/saldo e salva com `estoque.save`. A baixa vem dos
+  itens `tamanho`/`extra` dos pedidos `pago`/`impresso` desde o `contadoEm`;
+  alterar a contagem reinicia a data-base. O card de papel/ribbon continua
+  abaixo, usando o snapshot do PDV.
 - **`vite.config.js`** — alias `@shared` → `./shared`, dedupe de React, porta
   de dev 5173.
 

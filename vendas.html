@@ -1349,7 +1349,10 @@
             <div class="lbl">Total</div>
             <div class="val" id="cart-total">R$ 0,00</div>
           </div>
-          <button class="btn-desconto-venda" id="btn-desconto-venda" disabled>🏷 Aplicar desconto</button>
+          <div style="display:flex;gap:8px;margin-bottom:8px;">
+            <button class="btn-desconto-venda" id="btn-desconto-venda" style="flex:1;margin-bottom:0;" disabled>🏷 Aplicar desconto</button>
+            <button class="btn-desconto-venda" id="btn-teste-fotografo" style="flex:1;margin-bottom:0;">Teste fotógrafo</button>
+          </div>
           <button class="btn-finalizar" id="btn-finalizar" disabled>Finalizar pedido</button>
         </div>
       </div>
@@ -1523,7 +1526,21 @@ const FALLBACK_USERS = [
 let USERS = [];
 let currentUser = null;
 let loginSelecionado = null;
-let testesImpressaoHoje = {}; // {tamanhoId: true} — não cumulativo, zera a cada novo dia (regra do documento)
+let testesFotografoStatus = { limite: 2, usados: 0, restantes: 2, itens: [] };
+async function carregarTestesStatus(){
+  try{
+    const r = await natalApi.testesStatus();
+    if(r && r.success){
+      testesFotografoStatus = {
+        limite: Number(r.limite) || 2,
+        usados: Number(r.usados) || 0,
+        restantes: Number.isFinite(Number(r.restantes)) ? Number(r.restantes) : 2,
+        itens: Array.isArray(r.itens) ? r.itens : [],
+      };
+    }
+  }catch{ }
+  return testesFotografoStatus;
+}
 let caixaAberto = false;
 let caixaAbertoEm = null;
 let fundoTrocoCaixa = 0;
@@ -5605,6 +5622,7 @@ function temDescontoManual(){ return cart.some(c=>TIPOS_DESCONTO_MANUAL.includes
 
 /* ---------------- DESCONTO DURANTE A VENDA (antes de finalizar) ---------------- */
 document.getElementById('btn-desconto-venda').addEventListener('click', showDescontoVendaModal);
+document.getElementById('btn-teste-fotografo').addEventListener('click', ()=>abrirTesteFotografo(false));
 
 function showDescontoVendaModal(){
   const total = cartTotal();
@@ -6972,7 +6990,10 @@ function renderCheckoutStep(total){
     </div>
     <p class="modal-sub">Selecione uma ou mais formas de pagamento. É possível dividir o valor (multipagamento).</p>
     ${!parcelamentoLiberado ? `<p class="modal-sub" style="color:var(--slate-500)">Parcelamento disponível a partir de ${fmt(LOJA_PARCELAMENTO.valorMinimo)} (regra desta loja) — este pedido está abaixo do mínimo.</p>` : ''}
-    <div class="reopen-actions" style="margin-bottom:16px;">${descontoHtml}</div>
+    <div class="reopen-actions" style="margin-bottom:16px;display:flex;gap:8px;align-items:stretch;">
+      <div style="flex:1;min-width:0;">${descontoHtml}</div>
+      <button class="fc-btn" id="btn-teste-checkout" style="white-space:nowrap;">Teste fotógrafo</button>
+    </div>
     <div class="pay-rows" id="pay-rows">${paymentRowsHTML(rows, true, formasList)}</div>
     <button class="add-pay-row" id="add-row">+ Adicionar forma de pagamento (multipagamento)</button>
     <div class="restante-banner ${totalValido && restante===0?'ok':''}" id="restante-banner">
@@ -7001,6 +7022,8 @@ function renderCheckoutStep(total){
     }, total);
   });
 
+  const btnTesteCheckout = document.getElementById('btn-teste-checkout');
+  if(btnTesteCheckout) btnTesteCheckout.addEventListener('click', ()=>abrirTesteFotografo(true));
   const btnRemover = document.getElementById('btn-remover-desconto');
   if(btnRemover) btnRemover.addEventListener('click', ()=>{
     const d = cart.find(c=>TIPOS_DESCONTO_MANUAL.includes(c.tipo));
@@ -8718,11 +8741,40 @@ function mostrarResultadoFechamento(fechamento, sairAposFechar = false){
 
 /* ================= TESTE DE IMPRESSÃO (FOTÓGRAFO, NÃO CUMULATIVO) ================= */
 document.getElementById('btn-teste-impressao').addEventListener('click', ()=>{
-  abrirTesteEscolherSessao();
+  abrirTesteFotografo();
 });
 
+function abrirTesteLimiteModal(){
+  const st = testesFotografoStatus;
+  openModal(`
+    <div class="modal-head"><div><div class="modal-step-label">Fotógrafo</div><h3>Limite de testes atingido</h3></div><button class="modal-close" onclick="fecharTesteFotografo()">×</button></div>
+    <p class="modal-sub">Já foram usados <b>${st.usados} de ${st.limite}</b> testes desta loja hoje. O limite volta a liberar amanhã.</p>
+    <div class="reopen-list">${(st.itens || []).map(t => `<div class="conf-item"><div class="conf-info"><div class="conf-label">Teste ${t.opcao || ''}</div><div class="conf-sub">Sessão #${escHtml(t.sessaoSenha || '')} · ${t.status || ''}</div></div></div>`).join('')}</div>
+    <button class="btn-secondary" style="width:100%;" onclick="fecharTesteFotografo()">Fechar</button>
+  `);
+}
+
+let _testeVoltarCheckout = false;
+function fecharTesteFotografo(){
+  if(_testeVoltarCheckout && typeof pretendidoRows !== 'undefined' && pretendidoRows && pretendidoRows.length){
+    _testeVoltarCheckout = false;
+    renderCheckoutStep(cartTotal());
+    return;
+  }
+  _testeVoltarCheckout = false;
+  closeModal();
+}
+
+async function abrirTesteFotografo(voltarCheckout){
+  _testeVoltarCheckout = voltarCheckout === true;
+  if(!currentUser){ toast('Entre no PDV para usar o teste de impressão'); return; }
+  await carregarTestesStatus();
+  if(testesFotografoStatus.restantes <= 0){ abrirTesteLimiteModal(); return; }
+  abrirTesteEscolherSessao();
+}
+
 function abrirTesteEscolherSessao(){
-  const sessoesHtml = sessions.map(s=>{
+  const sessoesHtml = sessions.filter(s => s.fotos && s.fotos.length).map(s=>{
     const t = tagInfo(s);
     return `<div class="conf-item" data-id="${s.id}" style="cursor:pointer;">
       <div class="conf-info">
@@ -8733,9 +8785,9 @@ function abrirTesteEscolherSessao(){
     </div>`;
   }).join('');
   openModal(`
-    <div class="modal-head"><div><div class="modal-step-label">Fotógrafo · Passo 1 de 3</div><h3>De qual sessão é o teste?</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
-    <p class="modal-sub">O teste precisa ser de uma foto de trabalho real — escolha a sessão.</p>
-    <div class="conf-list">${sessoesHtml}</div>
+    <div class="modal-head"><div><div class="modal-step-label">Fotógrafo · Passo 1 de 3</div><h3>De qual sessão é o teste?</h3></div><button class="modal-close" onclick="fecharTesteFotografo()">×</button></div>
+    <p class="modal-sub">O teste precisa ser de uma foto de trabalho real — escolha a sessão. Restam <b>${testesFotografoStatus.restantes}</b> de ${testesFotografoStatus.limite} testes hoje nesta loja.</p>
+    <div class="conf-list">${sessoesHtml || '<div style="padding:18px;text-align:center;color:var(--slate-400);font-size:12px;">Nenhuma sessão com fotos disponível para teste.</div>'}</div>
   `);
   document.querySelectorAll('.conf-item[data-id]').forEach(el=>{
     el.addEventListener('click', ()=>abrirTesteEscolherFoto(el.dataset.id));
@@ -8751,7 +8803,7 @@ function abrirTesteEscolherFoto(sessionId){
     </div>
   `).join('');
   openModal(`
-    <div class="modal-head"><div><div class="modal-step-label">Fotógrafo · Passo 2 de 3</div><h3>Qual foto, sessão #${s.senha}?</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-head"><div><div class="modal-step-label">Fotógrafo · Passo 2 de 3</div><h3>Qual foto, sessão #${s.senha}?</h3></div><button class="modal-close" onclick="fecharTesteFotografo()">×</button></div>
     <p class="modal-sub">Selecione a foto definitiva de trabalho a testar.</p>
     <div class="reopen-grid">${gridHtml}</div>
     <button class="btn-secondary" id="teste-voltar-sessao">← Trocar sessão</button>
@@ -8764,33 +8816,72 @@ function abrirTesteEscolherFoto(sessionId){
 }
 
 function abrirTesteEscolherTamanho(sessao, fotoSeed){
+  const st = testesFotografoStatus;
+  const pode = st.restantes > 0;
   const cardsHtml = TAMANHOS.map(t=>{
-    const usado = !!testesImpressaoHoje[t.id];
     return `<div class="option-card">
-      <div class="oc-left"><div class="oc-name">${escHtml(t.label)}</div><div class="oc-price">${usado?`já usado hoje · #${testesImpressaoHoje[t.id].sessaoSenha}`:'1 disponível hoje'}</div></div>
-      <button class="oc-add-btn" data-t="${t.id}" ${usado?'disabled':''}>${usado?'Usado':'Imprimir teste'}</button>
+      <div class="oc-left"><div class="oc-name">${escHtml(t.label)}</div><div class="oc-price">${pode ? `${st.restantes} de ${st.limite} testes disponíveis hoje` : 'limite de hoje atingido'}</div></div>
+      <button class="oc-add-btn" data-t="${t.id}" ${pode?'':'disabled'}>${pode?'Imprimir teste':'Limite atingido'}</button>
     </div>`;
   }).join('');
   openModal(`
-    <div class="modal-head"><div><div class="modal-step-label">Fotógrafo · Passo 3 de 3</div><h3>Tamanho do teste</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-head"><div><div class="modal-step-label">Fotógrafo · Passo 3 de 3</div><h3>Tamanho do teste</h3></div><button class="modal-close" onclick="fecharTesteFotografo()">×</button></div>
     <div style="display:flex;justify-content:center;margin-bottom:14px;">
       <img src="${img(fotoSeed,220,275)}" style="width:120px;border-radius:8px;box-shadow:var(--shadow-lift);">
     </div>
-    <p class="modal-sub" style="text-align:center;">Sessão #${sessao.senha} · máximo 1 teste por tamanho, por loja, por dia — não cumulativo.</p>
+    <p class="modal-sub" style="text-align:center;">Sessão #${sessao.senha} · ${st.usados} de ${st.limite} testes usados hoje nesta loja — máximo 2 por dia.</p>
     <div class="option-cards">${cardsHtml}</div>
     <button class="btn-secondary" id="teste-voltar-foto">← Trocar foto</button>
   `);
   document.querySelectorAll('.oc-add-btn[data-t]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const t = TAMANHOS.find(x=>x.id===btn.dataset.t);
-      testesImpressaoHoje[t.id] = {sessaoSenha:sessao.senha, fotoSeed, em:new Date()};
-      ribbonBalanceBase -= t.unidades;
-      renderRibbonChip();
-      toast(`Teste de ${t.label} (sessão #${sessao.senha}) enviado — consumiu ${t.unidades} unidade(s) de ribbon`);
-      abrirTesteEscolherTamanho(sessao, fotoSeed); // recarrega com o botão já desabilitado
-    });
+    btn.addEventListener('click', ()=> executarTesteFotografo(sessao, fotoSeed, TAMANHOS.find(x=>x.id===btn.dataset.t), btn));
   });
   document.getElementById('teste-voltar-foto').addEventListener('click', ()=>abrirTesteEscolherFoto(sessao.id));
+}
+
+async function executarTesteFotografo(sessao, fotoSeed, t, btn){
+  if(!t) return;
+  if(btn){ btn.disabled = true; btn.textContent = 'Enviando...'; }
+  try{
+    const [sessId, fileName] = String(fotoSeed).split('/');
+    const modelo = modeloDe(t);
+    const criado = await natalApi.criarTeste({
+      sessaoId: sessao.id, sessaoSenha: sessao.senha,
+      fotoFilename: fileName, key: modelo, label: t.label,
+      operador: currentUser ? currentUser.nome : '',
+    });
+    if(!criado || !criado.success){
+      if(criado && criado.limite){
+        testesFotografoStatus = {
+          limite: Number(criado.limite) || 2,
+          usados: Number(criado.usados) || 0,
+          restantes: Number(criado.restantes) || 0,
+          itens: Array.isArray(criado.itens) ? criado.itens : [],
+        };
+      }
+      toast((criado && (criado.message || criado.error)) || 'Não foi possível iniciar o teste');
+      if(criado && criado.error === 'LIMITE_TESTES') abrirTesteLimiteModal();
+      else if(btn){ btn.disabled = false; btn.textContent = 'Imprimir teste'; }
+      return;
+    }
+    const teste = criado.teste;
+    const blob = await composePrintImage({
+      key: modelo, url: natalApi.fotoUrl(sessId, 'originais', fileName),
+      scale: 100, diffx: 0, diffy: 0, angle: 0, orientation: 'paisagem',
+      pdv: true, logo: false,
+    });
+    const uploadName = 'teste__' + teste.id + '.jpg';
+    const up = await natalApi.uploadImpressaoTeste(teste.id, uploadName, blob);
+    if(!up || !up.success) throw new Error((up && up.error) || 'Falha ao enviar a imagem do teste');
+    const imp = await natalApi.imprimirTeste(teste.id, [{ key: modelo, filename: uploadName, qty: 1 }]);
+    if(!imp || !imp.success) throw new Error((imp && imp.error) || 'Falha ao enfileirar o teste');
+    await carregarTestesStatus();
+    toast(`Teste de ${t.label} (sessão #${sessao.senha}) enviado — ${testesFotografoStatus.restantes} restante(s) hoje`);
+    fecharTesteFotografo();
+  }catch(e){
+    toast('Falha no teste: ' + ((e && e.message) || e));
+    if(btn){ btn.disabled = false; btn.textContent = 'Imprimir teste'; }
+  }
 }
 
 /* ================= CADASTRO DE USUÁRIO (ADMIN) ================= */
@@ -8882,7 +8973,7 @@ async function INIT(){
     renderLoginUsers();
     document.getElementById('user-chip').textContent = '👤 Selecione seu usuário';
   });
-  try{ await Promise.all([carregarSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon(), carregarAuditoria()]); }
+  try{ await Promise.all([carregarSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon(), carregarAuditoria(), carregarTestesStatus()]); }
   catch{ /* logs no console do sidecar */ }
   try{ await _sincronizarEstadoFila(); }catch{} // fila persistida de boot anterior → chip correto
   agendarSnapshotVendas(4000); // snapshot inicial após o boot (se já emparelhado)
@@ -8936,6 +9027,7 @@ async function INIT(){
       else if(data && data.success){ toast(data.reimpressao ? '✅ Reimpressão concluída!' : '✅ Impressão concluída!'); }
       renderRibbonChip();
     }
+    if(key==='teste:criado' || key==='teste:impresso' || (key==='print-complete' && data && data.teste)) carregarTestesStatus();
     if(['pedido:criado','pedido:pago','pedido:impresso','caixa:aberto','caixa:fechado','print-complete'].includes(key)) carregarPedidos();
     if(['caixa:aberto','caixa:fechado'].includes(key)) carregarCaixa();
     if(key==='caixa:fechado') carregarCaixasHistorico();

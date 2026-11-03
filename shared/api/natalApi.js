@@ -93,6 +93,15 @@ const natalApi = {
     api('POST', `/api/pedidos/${encodeURIComponent(pedidoId)}/imprimir`,
       reimpressao ? { fotos, reimpressao: true } : { fotos }),
 
+  // Teste de impressão do fotógrafo (2 por loja/dia): registra no sidecar,
+  // sobe o JPEG composto e enfileira na ASK-400 sem criar pedido/venda.
+  testesStatus: () => api('GET', '/api/testes/status'),
+  criarTeste: (data) => api('POST', '/api/testes', data),
+  uploadImpressaoTeste: (testeId, filename, blob) =>
+    api('POST', `/api/testes/${encodeURIComponent(testeId)}/impressao/${encodeURIComponent(filename)}`, blob, true),
+  imprimirTeste: (testeId, fotos) =>
+    api('POST', `/api/testes/${encodeURIComponent(testeId)}/imprimir`, { fotos }),
+
   // ─── Saúde / config ──────────────────────────────────────
   health: () => api('GET', '/api/health'),
   configPdv: () => api('GET', '/api/config'),

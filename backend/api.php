@@ -12,7 +12,7 @@
  *   usuarios.delete, admin.changePassword,
  *   catalogo.get, precos.save, precos.list, vendas.resumo, pedido.list, auditoria.list,
  *   despesas.list, despesas.save, despesas.delete,
- *   parametros.get, parametros.save
+ *   estoque.list, estoque.save, parametros.get, parametros.save
  *
  * Pareamento sem copiar código (fluxo principal):
  *   1) o PDV registra `pendentes[kioskCode]` via kiosk.seed com nome do local,
@@ -2203,6 +2203,114 @@ try {
                 return strcmp((string) ($b['criadoEm'] ?? ''), (string) ($a['criadoEm'] ?? '')) ?: 0;
             });
             respond(['ok' => true, 'auditoria' => array_values($out), 'usos' => array_values($out)]);
+        }
+
+        // Estoque de produtos por loja. A quantidade é a contagem física
+        // informada pela gestão; as vendas pagas desde `contadoEm` são
+        // descontadas automaticamente dos pedidos consolidados.
+        case 'estoque.list': {
+            $lojaId = trim((string) ($p['lojaId'] ?? ''));
+            $ids = lojaIdsExistentes(db());
+            if ($lojaId === '' || !isset($ids[$lojaId])) fail('LOJA_INVALIDA');
+
+            $cat = catalogoEfetivo($lojaId);
+            $estoque = loadJson('estoque.json', []);
+            if (!is_array($estoque)) $estoque = [];
+            $atual = (isset($estoque[$lojaId]) && is_array($estoque[$lojaId])) ? $estoque[$lojaId] : [];
+
+            $vendas = [];
+            $pedidos = loadJson('pedidos.json', []);
+            if (!is_array($pedidos)) $pedidos = [];
+            foreach ($pedidos as $pedido) {
+                if (!is_array($pedido) || ($pedido['lojaId'] ?? '') !== $lojaId) continue;
+                $status = strtolower(trim((string) ($pedido['status'] ?? '')));
+                if (!in_array($status, ['pago', 'impresso'], true)) continue;
+                $quando = strtotime((string) ($pedido['pagoEm'] ?? '')) ?: strtotime((string) ($pedido['criadoEm'] ?? ''));
+                if (!$quando) continue;
+                foreach ((array) ($pedido['itens'] ?? []) as $item) {
+                    if (!is_array($item)) continue;
+                    $tipo = trim((string) ($item['tipo'] ?? ''));
+                    if (!in_array($tipo, ['tamanho', 'extra'], true)) continue;
+                    $produtoId = trim((string) ($item['produtoId'] ?? ''));
+                    $qtd = max(0, (int) ($item['qtd'] ?? 0));
+                    if ($produtoId === '' || $qtd <= 0) continue;
+                    $vendas[] = ['produtoId' => $produtoId, 'qtd' => $qtd, 'ts' => $quando];
+                }
+            }
+
+            $saida = [];
+            foreach (['tamanhos' => 'Tamanhos', 'extras' => 'Extras'] as $grupo => $grupoLabel) {
+                foreach ((array) ($cat[$grupo] ?? []) as $produto) {
+                    if (!is_array($produto) || !empty($produto['digital'])) continue;
+                    $produtoId = trim((string) ($produto['id'] ?? ''));
+                    if ($produtoId === '') continue;
+                    $registro = (isset($atual[$produtoId]) && is_array($atual[$produtoId])) ? $atual[$produtoId] : null;
+                    $quantidade = $registro !== null ? (int) ($registro['quantidade'] ?? 0) : 0;
+                    $contadoEm = $registro !== null ? (string) ($registro['contadoEm'] ?? '') : '';
+                    $limite = $contadoEm !== '' ? strtotime($contadoEm) : false;
+                    $vendidos = 0;
+                    if ($limite) {
+                        foreach ($vendas as $venda) {
+                            if ($venda['produtoId'] === $produtoId && $venda['ts'] >= $limite) $vendidos += $venda['qtd'];
+                        }
+                    }
+                    $saida[] = [
+                        'produtoId' => $produtoId,
+                        'label' => trim((string) ($produto['label'] ?? $produtoId)),
+                        'grupo' => $grupoLabel,
+                        'preco' => round((float) ($produto['preco'] ?? 0), 2),
+                        'quantidade' => $quantidade,
+                        'contadoEm' => $contadoEm,
+                        'vendidos' => $vendidos,
+                        'saldo' => $quantidade - $vendidos,
+                        'configurado' => $contadoEm !== '',
+                    ];
+                }
+            }
+            respond(['ok' => true, 'lojaId' => $lojaId, 'itens' => $saida]);
+        }
+
+        case 'estoque.save': {
+            $lojaId = trim((string) ($p['lojaId'] ?? ''));
+            $ids = lojaIdsExistentes(db());
+            if ($lojaId === '' || !isset($ids[$lojaId])) fail('LOJA_INVALIDA');
+            $itens = $p['itens'] ?? null;
+            if (!is_array($itens)) fail('DADOS_INCOMPLETOS: itens é obrigatório');
+
+            $cat = catalogoEfetivo($lojaId);
+            $permitidos = [];
+            foreach (['tamanhos', 'extras'] as $grupo) {
+                foreach ((array) ($cat[$grupo] ?? []) as $produto) {
+                    if (!is_array($produto) || !empty($produto['digital'])) continue;
+                    $produtoId = trim((string) ($produto['id'] ?? ''));
+                    if ($produtoId !== '') $permitidos[$produtoId] = true;
+                }
+            }
+
+            $estoque = loadJson('estoque.json', []);
+            if (!is_array($estoque)) $estoque = [];
+            if (!isset($estoque[$lojaId]) || !is_array($estoque[$lojaId])) $estoque[$lojaId] = [];
+            $atual = $estoque[$lojaId];
+            $agora = gmdate('c');
+            $salvos = 0;
+            foreach ($itens as $item) {
+                if (!is_array($item)) continue;
+                $produtoId = trim((string) ($item['produtoId'] ?? ''));
+                if ($produtoId === '' || !isset($permitidos[$produtoId])) continue;
+                $quantidade = max(0, (int) ($item['quantidade'] ?? 0));
+                $anterior = (isset($atual[$produtoId]) && is_array($atual[$produtoId])) ? $atual[$produtoId] : null;
+                $qtdAnterior = $anterior !== null ? (int) ($anterior['quantidade'] ?? 0) : null;
+                $mudou = $anterior === null || $qtdAnterior !== $quantidade;
+                if ($anterior === null && $quantidade <= 0) continue;
+                $registro = $anterior !== null ? $anterior : [];
+                $registro['quantidade'] = $quantidade;
+                if ($mudou || empty($registro['contadoEm'])) $registro['contadoEm'] = $agora;
+                $registro['atualizadoEm'] = $agora;
+                $estoque[$lojaId][$produtoId] = $registro;
+                $salvos++;
+            }
+            if (!saveJson('estoque.json', $estoque)) fail('FALHA_AO_SALVAR', 500);
+            respond(['ok' => true, 'salvos' => $salvos]);
         }
 
         // Parâmetros globais (DRE/estoque) — leitura e gravação pela gestão.

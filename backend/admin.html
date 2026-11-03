@@ -814,10 +814,23 @@ select.form-input{appearance:none;}
       <div class="section-head">
         <div>
           <h2>Gestão de estoque</h2>
-          <p>Ribbon das impressoras ASK-400 por loja — saldo do snapshot que o PDV envia</p>
+          <p>Produtos por loja com baixa automática nas vendas pagas + ribbon das impressoras ASK-400</p>
         </div>
       </div>
       <div class="kpi-grid" id="estoque-kpis"></div>
+      <div class="card">
+        <h3>Estoque de produtos <em style="color:var(--slate-400);font-size:11px;font-weight:400;">(contagem física por loja; vendas pagas desde a contagem saem do saldo automaticamente)</em></h3>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+          <label style="font-size:11px;color:var(--slate-400);">Loja<br>
+            <select id="estoque-loja-select" style="min-width:220px;margin-top:4px;"></select>
+          </label>
+          <button class="btn btn-primary" id="estoque-salvar">Salvar contagem</button>
+          <span id="estoque-produtos-msg" style="font-size:11px;color:var(--slate-400);"></span>
+        </div>
+        <div style="max-height:430px;overflow-y:auto;">
+          <table id="estoque-produtos"></table>
+        </div>
+      </div>
       <div class="card">
         <h3>Papel/ribbon por loja — agora <em style="color:var(--slate-400);font-size:11px;font-weight:400;">(10x15/15x20 = papel real da impressora; ribbon = contador interno do PDV)</em></h3>
         <table id="estoque-ribbon"></table>
@@ -920,7 +933,7 @@ var FN_LABEL = { vendedor:'Vendedora', fotografo:'Fotógrafo', admin:'Administra
 var FN_ACESSO = { vendedor:'Kiosk', fotografo:'Kiosk', admin:'Total', gerente:'Regional' };
 
 var token = sessionStorage.getItem('nac_token') || '';
-var state = { currentUser:null, lojas:[], usuarios:[], pendentes:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje' };
+var state = { currentUser:null, lojas:[], usuarios:[], pendentes:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje', estoqueLoja:'', estoqueItens:[], _estoqueAt:0 };
 var notificacoes = [];
 var currentScreen = 'dashboard';
 
@@ -1107,7 +1120,7 @@ function iniciarAutoRefresh(){
   if(_autoRefreshTimer) return;
   _autoRefreshTimer = setInterval(function(){
     if(!state.currentUser) return;
-    state._vendasAt = 0; state._pedAt = 0; state._despAt = 0; state._paramAt = 0;
+    state._vendasAt = 0; state._pedAt = 0; state._despAt = 0; state._paramAt = 0; state._estoqueAt = 0;
     var s = currentScreen;
     if(s === 'dashboard') renderDashboard();
     else if(s === 'financeiro') renderFinanc();
@@ -1238,6 +1251,18 @@ function getParametros(){
     }).catch(function(){ state.parametros = null; return state.parametros; });
   }
   return state._paramProm;
+}
+function getEstoque(lojaId){
+  var key = 'estoque-' + lojaId;
+  if(!state._estoqueProm || state._estoqueLojaKey !== key || !cacheFresh(state._estoqueAt)){
+    state._estoqueAt = Date.now();
+    state._estoqueLojaKey = key;
+    state._estoqueProm = call('estoque.list', {lojaId:lojaId}).then(function(res){
+      state.estoqueItens = (res && res.ok && Array.isArray(res.itens)) ? res.itens : [];
+      return state.estoqueItens;
+    }).catch(function(){ state.estoqueItens = []; return state.estoqueItens; });
+  }
+  return state._estoqueProm;
 }
 function getPrecos(){
   if(!state._precosProm){
@@ -2214,8 +2239,78 @@ function efetivoTxt(v){
     ? ' <span class="pill pill-amber" style="font-size:9px;padding:1px 5px;">contador</span>'
     : '');
 }
+async function renderEstoqueProdutos(){
+  var sel = $('#estoque-loja-select');
+  if(!sel) return;
+  var lojas = state.lojas || [];
+  if(!state.estoqueLoja || !lojas.some(function(l){ return l.id===state.estoqueLoja; })){
+    state.estoqueLoja = lojas.length ? lojas[0].id : '';
+    state._estoqueAt = 0;
+  }
+  sel.innerHTML = lojas.length
+    ? lojas.map(function(l){ return '<option value="'+escAttr(l.id)+'">'+esc(l.nome||l.id)+'</option>'; }).join('')
+    : '<option value="">Nenhuma loja cadastrada</option>';
+  sel.value = state.estoqueLoja;
+  if(!sel.dataset.bound){
+    sel.dataset.bound = '1';
+    sel.addEventListener('change', function(){
+      state.estoqueLoja = sel.value;
+      state._estoqueAt = 0;
+      renderEstoqueProdutos();
+    });
+  }
+  var btnSalvar = $('#estoque-salvar');
+  if(btnSalvar && !btnSalvar.dataset.bound){
+    btnSalvar.dataset.bound = '1';
+    btnSalvar.addEventListener('click', async function(){
+      var lojaId = state.estoqueLoja;
+      if(!lojaId){ toast('Cadastre uma loja antes de salvar o estoque.'); return; }
+      var itens = $$('#estoque-produtos input[data-produto]').map(function(inp){
+        return { produtoId: inp.dataset.produto, quantidade: Math.max(0, parseInt(inp.value,10)||0) };
+      });
+      btnSalvar.disabled = true;
+      var res = await call('estoque.save', { lojaId: lojaId, itens: itens });
+      btnSalvar.disabled = false;
+      if(!res || !res.ok){ toast('Falha ao salvar: '+((res&&res.error)||'erro')); return; }
+      toast('Estoque salvo ('+res.salvos+' item(ns)).');
+      state._estoqueAt = 0;
+      renderEstoqueProdutos();
+    });
+  }
+
+  var tb = $('#estoque-produtos');
+  var msg = $('#estoque-produtos-msg');
+  if(!state.estoqueLoja){
+    tb.innerHTML = '<tr><td class="empty" colspan="7">Cadastre uma loja para controlar o estoque.</td></tr>';
+    if(msg) msg.textContent = '';
+    return;
+  }
+  await getEstoque(state.estoqueLoja);
+  var itens = state.estoqueItens || [];
+  if(msg) msg.textContent = itens.filter(function(i){ return i.configurado; }).length + ' de ' + itens.length + ' produto(s) com contagem registrada';
+  if(!itens.length){
+    tb.innerHTML = '<tr><td class="empty" colspan="7">Nenhum produto no catálogo desta loja.</td></tr>';
+    return;
+  }
+  tb.innerHTML = '<tr><th>Produto</th><th>Grupo</th><th>Preço</th><th>Contagem</th><th>Vendidos</th><th>Saldo</th><th>Contado em</th></tr>' +
+    itens.map(function(it){
+      var saldo = Number(it.saldo)||0;
+      var cls = saldo < 0 ? 'pill-red' : (saldo <= 5 ? 'pill-amber' : 'pill-green');
+      var contado = it.contadoEm ? fmtDt(it.contadoEm) : 'nunca contado';
+      return '<tr>'+
+        '<td><b>'+esc(it.label||it.produtoId)+'</b><div style="font-size:10px;color:var(--slate-500);">'+esc(it.produtoId)+'</div></td>'+
+        '<td style="font-size:11px;color:var(--slate-400);">'+esc(it.grupo||'')+'</td>'+
+        '<td>'+fmtBRL(toNum(it.preco))+'</td>'+
+        '<td><input data-produto="'+escAttr(it.produtoId)+'" type="number" min="0" step="1" value="'+(Number(it.quantidade)||0)+'" style="width:90px;padding:5px 7px;border:1px solid var(--slate-700);border-radius:6px;background:var(--ink-900);color:var(--slate-100);"></td>'+
+        '<td>'+(Number(it.vendidos)||0)+'</td>'+
+        '<td><span class="pill '+cls+'">'+saldo+'</span></td>'+
+        '<td style="font-size:11px;color:var(--slate-400);">'+esc(contado)+'</td></tr>';
+    }).join('');
+}
+
 async function renderEstoque(){
   await Promise.all([getVendas(), getParametros()]);
+  renderEstoqueProdutos();
   var latest = latestByLoja(state.vendasRaw);
   var ef = latest.map(estoqueEfetivo);
   var totalEf = ef.reduce(function(s,e){ return s + e.valor; }, 0);
