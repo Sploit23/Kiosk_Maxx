@@ -2045,6 +2045,7 @@ const FUNCAO_EXIBICAO = {
 };
 
 async function carregarEquipe(){
+  const lojaAtual = portalApi.lojaIdAtivo();
   try{
     const res = await portalApi.equipe();
     /* contrato real do portal: { ok, loja, usuarios: [{ id, usuario, nome, funcao, ativo }] } */
@@ -2065,8 +2066,9 @@ async function carregarEquipe(){
           };
         });
       if(USERS.length){
-        // equipe real → cache no sidecar (login offline usa a MESMA lista + senha)
-        natalApi.cachePortalSave({ equipe: lista }).catch(()=>{});
+        // equipe real → cache no sidecar (login offline usa a MESMA lista + senha).
+        // O lojaId carimba o cache: trocar de loja não pode reidratar a equipe antiga.
+        natalApi.cachePortalSave({ equipe: lista, lojaId: lojaAtual }).catch(()=>{});
         return;
       }
     }
@@ -2075,7 +2077,9 @@ async function carregarEquipe(){
   try{
     const c = await natalApi.cachePortalGet();
     const eq = c && c.cache && Array.isArray(c.cache.equipe) ? c.cache.equipe : null;
-    if(eq && eq.length){
+    const cacheLoja = String((c && c.cache && c.cache.lojaId) || '');
+    // cache antigo (sem lojaId) continua valendo; cache de OUTRA loja nunca.
+    if(eq && eq.length && (!cacheLoja || cacheLoja === lojaAtual)){
       USERS = eq.filter(u => u.ativo !== false).map((u, i) => {
         const ex = FUNCAO_EXIBICAO[u.funcao] || { funcao: (u.funcao || 'Vendedora'), isAdmin: false };
         return {
@@ -2090,6 +2094,19 @@ async function carregarEquipe(){
     }
   }catch{ }
   USERS = FALLBACK_USERS.map(u => ({ ...u }));
+}
+
+// Troca de loja (teste → produção ou transferência autorizada no portal):
+// descarta equipe/preços da loja antiga e busca de novo no portal.
+async function recarregarLojaLocal(lojaId){
+  USERS = [];
+  try{ renderLoginUsers(); }catch{}
+  try{
+    await natalApi.cachePortalSave({ lojaId: lojaId || '', equipe: [], precos: {}, catalogo: null });
+  }catch{}
+  await carregarEquipe();
+  try{ renderLoginUsers(); }catch{}
+  carregarPrecosPortal();
 }
 
 async function recarregarDados(){
@@ -2199,7 +2216,26 @@ async function emparelharKiosk(){
     if(!ident || !ident.kioskCode || !ident.machineId) return; // sidecar ainda subindo — re-tenta no próximo tick
     const res = await portalApi.pair({ kioskCode: ident.kioskCode, machineId: ident.machineId });
     if(res && res.ok){
+      const lojaPortal = (res.loja && res.loja.id) || '';
+      const lojaLocal = (_identidade && _identidade.lojaId) || '';
+      const pareadoLocal = (_identidade && _identidade.pareadoLojaId) || '';
+      const lojaMudou = !!(lojaPortal && lojaLocal && lojaPortal !== lojaLocal
+        && pareadoLocal && pareadoLocal === lojaLocal);
+      const jaEraMesma = !!(window.kioskPair && window.kioskPair.ok
+        && window.kioskPair.loja && window.kioskPair.loja.id === lojaPortal);
       window.kioskPair = res;
+      // Loja local trocada no ⚙ mas o portal ainda autoriza a antiga: avisa
+      // (uma vez por par) para o admin mover o PDV antes de vender errado.
+      if(lojaLocal && lojaPortal && lojaLocal !== lojaPortal && !lojaMudou){
+        const aviso = lojaLocal + '|' + lojaPortal;
+        if(window._pairLojaAviso !== aviso){
+          window._pairLojaAviso = aviso;
+          try{ toast('⚠ Portal ainda autoriza "' + lojaPortal + '". Autorize este PDV em "' + lojaLocal + '" no portal.'); }catch{}
+        }
+      }
+      // Reconfirmação periódica sem mudança de loja: não reescreve config nem
+      // re-renderiza o login a cada 5 min.
+      if(jaEraMesma && !( _wz.ativo && _wz.modo === 'vincular' )) return;
       // A loja é definida NO APP: o pareamento só autoriza a MÁQUINA. Guardamos
       // a autorização (para a fila saber que pode enviar) sem sobrescrever o
       // nome/id local da loja. Só faz o SEED quando a loja ainda está vazia
@@ -2207,12 +2243,16 @@ async function emparelharKiosk(){
       // EXCEÇÃO: no modo "vincular a uma loja existente" do wizard, o portal
       // é a fonte da verdade e preenche lojaId/lojaNome desta máquina.
       const vincular = _wz.ativo && _wz.modo === 'vincular';
+      // Mudança de loja no portal (ex.: PC saiu do "teste" e foi autorizado em
+      // Mogi): se a máquina estava pareada com a loja local e o portal agora
+      // devolve OUTRA loja, o portal vence e a config local acompanha.
+      const adotarLoja = vincular || lojaMudou;
       const seed = {};
-      if(vincular){
-        seed.lojaId = res.loja.id;
+      if(adotarLoja){
+        seed.lojaId = lojaPortal;
         if(res.loja && res.loja.nome) seed.lojaNome = res.loja.nome;
       } else {
-        if(!_identidade || !_identidade.lojaId) seed.lojaId = res.loja.id;
+        if(!_identidade || !_identidade.lojaId) seed.lojaId = lojaPortal;
         if((!_identidade || !_identidade.lojaNome) && res.loja && res.loja.nome) seed.lojaNome = res.loja.nome;
       }
       try{
@@ -2220,9 +2260,16 @@ async function emparelharKiosk(){
           pareadoEm: new Date().toISOString(),
           pareadoLojaId: res.loja.id,
           machineId: ident.machineId,
-          ...(vincular ? { _allowLojaChange: true } : {}),
+          ...(adotarLoja ? { _allowLojaChange: true } : {}),
           ...seed,
         });
+        // Mantém o electron-config.json em sincronia quando o portal move a
+        // loja (o ⚙ grava nos dois; o pareamento automático só grava no sidecar).
+        if(adotarLoja && window.natal?.saveConfig){
+          const electronSeed = { lojaId: seed.lojaId };
+          if(seed.lojaNome) electronSeed.lojaNome = seed.lojaNome;
+          await window.natal.saveConfig(electronSeed).catch(()=>{});
+        }
       }catch{ }
       if(_identidade){
         _identidade.pareadoEm = new Date().toISOString();
@@ -2231,10 +2278,16 @@ async function emparelharKiosk(){
       }
       publicarIdentidade();
       console.log('[pair] kiosk autorizado:', res.loja.id, res.pareamento);
-      carregarEquipe().then(() => renderLoginUsers());
+      if(lojaMudou){
+        console.warn('[pair] loja alterada no portal:', lojaLocal, '→', lojaPortal);
+        try{ toast('Loja atualizada: ' + (res.loja.nome || lojaPortal)); }catch{}
+        await recarregarLojaLocal(lojaPortal);
+      } else {
+        carregarEquipe().then(() => renderLoginUsers());
+        carregarPrecosPortal();
+      }
       if(_wz.ativo && _wz.etapa === 2) wzIr(3); // wizard: pareou → próxima etapa
       agendarSincronizacao(1500); // manda o que estiver pendente assim que liberar
-      carregarPrecosPortal();
     } else if(res && !res.offline && res.error && res.error !== 'KIOSK_NAO_EMPARELELHADO'){
       console.warn('[pair] falha:', res.error);
     } else if(res && !res.offline && res.error === 'KIOSK_NAO_EMPARELELHADO'){
@@ -3309,11 +3362,11 @@ async function carregarPrecosPortal(){
         (res.catalogo && (res.catalogo.tamanhos || []).length) || 0, 'tamanhos,',
         (res.catalogo && (res.catalogo.extras || []).length) || 0, 'extras,',
         (res.catalogo && (res.catalogo.combos || []).length) || 0, 'combos');
-      // cache offline-first (catálogo + preços)
-      const cache = {};
+      // cache offline-first (catálogo + preços) carimbado com a loja
+      const cache = { lojaId: portalApi.lojaIdAtivo() };
       if(res.precos) cache.precos = res.precos;
       if(res.catalogo) cache.catalogo = res.catalogo;
-      if(Object.keys(cache).length) natalApi.cachePortalSave(cache).catch(()=>{});
+      natalApi.cachePortalSave(cache).catch(()=>{});
       return;
     }
     console.warn('[precos] portal sem catálogo, mantendo o local');
@@ -3323,7 +3376,9 @@ async function carregarPrecosPortal(){
   // offline → aplica o último catálogo salvo pelo sidecar
   try{
     const c = await natalApi.cachePortalGet();
-    if(c && c.cache){
+    const cacheLoja = String((c && c.cache && c.cache.lojaId) || '');
+    // cache de outra loja não pode vazar preço/catálogo para a loja atual
+    if(c && c.cache && (!cacheLoja || cacheLoja === portalApi.lojaIdAtivo())){
       const mudouCat = aplicarCatalogoPortal(c.cache.catalogo);
       const mudouPreco = (c.cache.precos && Object.keys(c.cache.precos).length)
         ? aplicarPrecosPortal(c.cache.precos) : false;
@@ -6760,6 +6815,8 @@ const r = await natalApi.limparFila({ pedidoId });
     const lojaNomeEl = document.getElementById('cfg-loja-nome');
     const lojaIdVal = (lojaIdEl ? lojaIdEl.value.trim() : '');
     const lojaNomeVal = (lojaNomeEl ? lojaNomeEl.value.trim() : '');
+    const lojaAnterior = String((_identidade && _identidade.lojaId) || cfg.lojaId || '');
+    const lojaMudouCfg = !!(lojaIdEl && lojaIdVal && lojaIdVal !== lojaAnterior);
     const impFolderEl = document.getElementById('cfg-import-folder');
     const impFolderVal = (impFolderEl ? impFolderEl.value.trim() : '');
   const impSessoesEl = document.getElementById('cfg-import-sessoes');
@@ -6783,6 +6840,11 @@ const r = await natalApi.limparFila({ pedidoId });
       }
       publicarIdentidade();
       atualizarLojaHeader();
+      if(lojaMudouCfg){
+        // Não deixa a equipe/preços da loja antiga na tela nem no cache offline.
+        // Em background para o "Salvar" não esperar o timeout do portal.
+        recarregarLojaLocal(lojaIdVal).catch(()=>{});
+      }
       // A raiz/pasta do importador é resolvida pelo main no start: se mudou,
       // reinicia o importador para ele passar a gravar/ler no lugar certo.
       const impFolderMudou = impFolderEl && impFolderVal !== importFolderCustomCfg;
@@ -8956,6 +9018,11 @@ async function INIT(){
   setInterval(() => {
     if(!window.kioskPair || !window.kioskPair.ok) emparelharKiosk(); // re-tenta até o admin cadastrar o código
   }, 30000);
+  // Já pareado também reconfere de vez em quando: o admin pode transferir o
+  // PDV para outra loja (teste → produção) sem reiniciar o app.
+  setInterval(() => {
+    if(window.kioskPair && window.kioskPair.ok) emparelharKiosk();
+  }, 300000);
   document.getElementById('busca-sessao').addEventListener('input', e=>{
     buscaSessao = e.target.value;
     renderPainel();
