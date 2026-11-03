@@ -7,24 +7,26 @@
  * Ações públicas : health, login, equipe, kiosk.seed, kiosk.pair, precos,
  *                  vendas.push, pedido.push, auditoria.push
  * Ações admin    : exigem X-Token (header) ou campo "token":
- *   admin.login, lojas.list, lojas.save, lojas.delete,
- *   usuarios.list, usuarios.save, usuarios.delete, admin.changePassword,
+ *   admin.login, lojas.list, lojas.save, lojas.addKiosk, lojas.removeKiosk,
+ *   lojas.delete, kiosk.descartar, usuarios.list, usuarios.save,
+ *   usuarios.delete, admin.changePassword,
  *   catalogo.get, precos.save, precos.list, vendas.resumo, pedido.list, auditoria.list,
  *   despesas.list, despesas.save, despesas.delete,
  *   parametros.get, parametros.save
  *
- * Wizard de 1º uso (kiosk.seed + lojas.save com código-only):
- *   1) o PDV registra o NOME DO LOCAL em `pendentes[kioskCode]` (rascunho,
- *      não cria loja);
- *   2) o admin abre "Nova loja" no portal, cola SÓ o código que aparece na
- *      tela do PDV e salva — lojas.save resolve nome/pdv/máquina do rascunho,
- *      gera o id (slug do nome) e grava o pareamento na hora;
- *   3) em seguida o admin cadastra os colaboradores da nova loja.
+ * Pareamento sem copiar código (fluxo principal):
+ *   1) o PDV registra `pendentes[kioskCode]` via kiosk.seed com nome do local,
+ *      machineName, IP e a loja local (se houver);
+ *   2) o admin vê o PC em Lojas → "PDVs aguardando" e clica em Autorizar
+ *      (lojas.addKiosk): o pareamento é gravado NA HORA e a máquina entra no
+ *      registro permanente `devices[machineId]`;
+ *   3) nos próximos polls de kiosk.pair a máquina é reconhecida pelo
+ *      machineId — editar a loja ou perder o kioskCode local não desemparelha.
+ *      Só lojas.removeKiosk/lojas.delete revogam.
  *
- * Emparelhamento (kiosk.pair): cada loja tem um pairingCode gerado no admin.
- * O PDV envia { lojaId, pairingCode, pdvNome, machineId } e o portal valida
- * o código e impede dois kiosks de usarem o mesmo código/máquina (evita que
- * imagens clonadas misturem dados).
+ * Fallback manual: o admin cola o código na loja (Nova loja ou + PDV) e o PDV
+ * se autoriza sozinho; lojas.save com código-only cria a loja a partir do
+ * rascunho (nome do local) e grava o pareamento na hora.
  *
  * Métodos: GET (action na query) ou POST (action na query ou no corpo JSON).
  */
@@ -344,6 +346,103 @@ function lojaPareamentos(array $loja): array
     return $out;
 }
 
+// Registro permanente do dispositivo, independente do cadastro da loja.
+// `pareamentos` é a lista exibida/editada no portal; este mapa por machineId é
+// o que garante que editar a loja (ou perder o código local) não desemparelhe
+// a máquina. Só `lojas.removeKiosk`/`lojas.delete` removem a autorização.
+function registrarDispositivo(array &$db, string $machineId, array $loja, string $kioskCode, string $pdvNome): void
+{
+    if ($machineId === '') return;
+    if (!isset($db['devices']) || !is_array($db['devices'])) $db['devices'] = [];
+    $atual = $db['devices'][$machineId] ?? null;
+    $agora = gmdate('c');
+    $db['devices'][$machineId] = [
+        'machineId' => $machineId,
+        'lojaId' => (string) ($loja['id'] ?? ''),
+        'lojaNome' => (string) ($loja['nome'] ?? ''),
+        'pdvNome' => $pdvNome !== '' ? $pdvNome : (string) ($loja['pdv'] ?? ''),
+        'kioskCode' => normalizarKioskCode($kioskCode),
+        'criadoEm' => is_array($atual) && !empty($atual['criadoEm']) ? (string) $atual['criadoEm'] : $agora,
+        'atualizadoEm' => $agora,
+    ];
+}
+
+function dispositivoPorMachineId(array $db, string $machineId): ?array
+{
+    if (!isset($db['devices']) || !is_array($db['devices'])) return null;
+    $d = $db['devices'][$machineId] ?? null;
+    return is_array($d) ? $d : null;
+}
+
+// Um machineId só pode pertencer a UMA loja. O mapa `devices` é a fonte
+// permanente de autorização; a checagem por `pareamentos` sozinha deixaria
+// passar uma máquina já autorizada noutra loja caso esse array fosse perdido.
+function dispositivoDeOutraLoja(array $db, string $machineId, string $lojaId): ?array
+{
+    $dev = dispositivoPorMachineId($db, $machineId);
+    if (!is_array($dev)) return null;
+    $devLoja = trim((string) ($dev['lojaId'] ?? ''));
+    if ($devLoja === '' || $devLoja === $lojaId) return null;
+    if (findLoja($db, $devLoja) === null) return null; // registro órfão de loja excluída
+    return $dev;
+}
+
+// Grava/atualiza o pareamento de uma máquina dentro da loja (sem derrubar os
+// outros PDVs) e garante o código na lista `kioskCodes`.
+function aplicarPareamentoLoja(array &$db, string $lojaId, array $pareamento): void
+{
+    foreach ($db['lojas'] as $i => $x) {
+        if (($x['id'] ?? '') !== $lojaId) continue;
+        $pms = lojaPareamentos($x);
+        $achou = false;
+        foreach ($pms as $j => $pm) {
+            if ((string) ($pm['machineId'] ?? '') === (string) ($pareamento['machineId'] ?? '')) {
+                $pms[$j] = $pareamento;
+                $achou = true;
+                break;
+            }
+        }
+        if (!$achou) $pms[] = $pareamento;
+        if (count($pms) > 20) $pms = array_slice($pms, -20);
+        $db['lojas'][$i]['pareamentos'] = $pms;
+        $db['lojas'][$i]['pareamento'] = $pareamento; // legado = última máquina
+        $code = normalizarKioskCode($pareamento['kioskCode'] ?? '');
+        if ($code !== '') {
+            $codes = lojaKioskCodes($db['lojas'][$i]);
+            if (!in_array($code, $codes, true)) $codes[] = $code;
+            $db['lojas'][$i]['kioskCodes'] = $codes;
+        }
+        break;
+    }
+}
+
+// Rascunhos enviados pelo kiosk.seed, do mais recente para o mais antigo.
+function pendentesLista(array $db): array
+{
+    $out = [];
+    foreach ((array) ($db['pendentes'] ?? []) as $code => $p) {
+        if (!is_array($p)) continue;
+        $c = normalizarKioskCode($p['kioskCode'] ?? $code);
+        if ($c === '') continue;
+        $out[] = [
+            'kioskCode' => $c,
+            'nome' => trim((string) ($p['nome'] ?? '')),
+            'pdvNome' => trim((string) ($p['pdvNome'] ?? '')),
+            'machineName' => trim((string) ($p['machineName'] ?? '')),
+            'lojaId' => trim((string) ($p['lojaId'] ?? '')),
+            'lojaNome' => trim((string) ($p['lojaNome'] ?? '')),
+            'ip' => trim((string) ($p['ip'] ?? '')),
+            'machineId' => trim((string) ($p['machineId'] ?? '')),
+            'criadoEm' => (string) ($p['criadoEm'] ?? ''),
+            'atualizadoEm' => (string) ($p['atualizadoEm'] ?? ''),
+        ];
+    }
+    usort($out, function ($a, $b) {
+        return strcmp((string) ($b['atualizadoEm'] ?? ''), (string) ($a['atualizadoEm'] ?? ''));
+    });
+    return $out;
+}
+
 // Valida que o kiosk que está chamando é a máquina pareada com a loja
 // (pedido.push / auditoria.push / vendas.push). Protege contra push de dados
 // de fora: só as máquinas físicas daquela loja conseguem mandar.
@@ -364,6 +463,16 @@ function validarLojaPareada(array $p): array
         if (!is_array($l)) continue;
         foreach (lojaPareamentos($l) as $pm) {
             if ((string) ($pm['machineId'] ?? '') === $machineId) { $loja = $l; break 2; }
+        }
+    }
+    // Fallback: registro permanente do dispositivo. Vale mesmo se o pareamento
+    // foi removido da loja por edição/corrupção — só a revogação explícita
+    // (lojas.removeKiosk/lojas.delete) apaga este mapa.
+    if (!$loja) {
+        $dev = dispositivoPorMachineId($db, $machineId);
+        if (is_array($dev) && !empty($dev['lojaId'])) {
+            $porDispositivo = findLoja($db, (string) $dev['lojaId']);
+            if ($porDispositivo) $loja = $porDispositivo;
         }
     }
     if (!$loja) {
@@ -1021,23 +1130,30 @@ try {
 
         // Wizard de 1º uso do PDV: o operador digita o NOME DO LOCAL no
         // kiosk; aqui guardamos um RASCUNHO por código (não cria loja —
-        // senão o kiosk.pair casaria antes de o admin confirmar). O admin
-        // depois cola o mesmo código no "Nova loja" do portal e a loja é
-        // criada com este nome + a máquina já fica emparelhada.
+        // senão o kiosk.pair casaria antes de o admin confirmar). O admin vê
+        // os rascunhos em Lojas → "PDVs aguardando" e autoriza em 1 clique,
+        // sem copiar código. O código fica como fallback manual.
         case 'kiosk.seed': {
             $db = db();
-            $kioskCode = preg_replace('/[^A-Z0-9]/', '', strtoupper(trim((string) ($p['kioskCode'] ?? ''))));
+            $kioskCode = normalizarKioskCode($p['kioskCode'] ?? '');
             $nome = trim((string) ($p['nome'] ?? ''));
             $pdvNome = trim((string) ($p['pdvNome'] ?? ''));
             $machineId = trim((string) ($p['machineId'] ?? ''));
+            $machineName = trim((string) ($p['machineName'] ?? ''));
+            $lojaId = trim((string) ($p['lojaId'] ?? ''));
+            $lojaNome = trim((string) ($p['lojaNome'] ?? ''));
+            $ip = trim((string) ($p['ip'] ?? ''));
             if ($kioskCode === '' || $nome === '') fail('DADOS_INCOMPLETOS: kioskCode e nome são obrigatórios', 400);
             if (mb_strlen($nome, 'UTF-8') > 80) fail('NOME_INVALIDO', 400);
+            if (mb_strlen($machineName, 'UTF-8') > 80) $machineName = mb_substr($machineName, 0, 80, 'UTF-8');
+            if (mb_strlen($lojaNome, 'UTF-8') > 80) $lojaNome = mb_substr($lojaNome, 0, 80, 'UTF-8');
 
             // Já existe loja com este código? Então nada a fazer (pareamento
             // segue pelo kiosk.pair normal) — responde ok para o PDV parar.
+            // Confere a lista inteira (`kioskCodes`), não só o código principal.
             $existe = false;
             foreach ($db['lojas'] as $l) {
-                if ((string) ($l['kioskCode'] ?? '') === $kioskCode) { $existe = true; break; }
+                if (in_array($kioskCode, lojaKioskCodes($l), true)) { $existe = true; break; }
             }
             if ($existe) {
                 respond(['ok' => true, 'jaRegistrado' => true]);
@@ -1052,6 +1168,10 @@ try {
                 'nome' => $nome,
                 'pdvNome' => $pdvNome,
                 'machineId' => $machineId,
+                'machineName' => $machineName,
+                'lojaId' => $lojaId,
+                'lojaNome' => $lojaNome,
+                'ip' => $ip,
                 'criadoEm' => is_array($atual) && !empty($atual['criadoEm']) ? $atual['criadoEm'] : $agora,
                 'atualizadoEm' => $agora,
             ];
@@ -1068,15 +1188,42 @@ try {
             $machineId = trim((string) ($p['machineId'] ?? ''));
             if ($machineId === '') fail('DADOS_INCOMPLETOS: machineId é obrigatório', 400);
 
+            // Autorização permanente por machineId: se a máquina já foi
+            // autorizada uma vez, ela NÃO depende mais do código local nem da
+            // lista `pareamentos` da loja (editar a loja não desemparelha).
+            $device = dispositivoPorMachineId($db, $machineId);
+            if (is_array($device) && !empty($device['lojaId'])) {
+                $lojaDev = findLoja($db, (string) $device['lojaId']);
+                if ($lojaDev) {
+                    if (empty($lojaDev['ativo'])) fail('LOJA_INVALIDA', 404);
+                    if ($kioskCode === '') $kioskCode = normalizarKioskCode($device['kioskCode'] ?? '');
+                    $pareamento = [
+                        'pdvNome' => resolverPdvNome($pdvNome !== '' ? $pdvNome : (string) ($device['pdvNome'] ?? ''), $lojaDev),
+                        'machineId' => $machineId,
+                        'kioskCode' => $kioskCode !== '' ? $kioskCode : normalizarKioskCode($lojaDev['kioskCode'] ?? ''),
+                        'emparelhadoEm' => gmdate('c'),
+                    ];
+                    aplicarPareamentoLoja($db, (string) $lojaDev['id'], $pareamento);
+                    registrarDispositivo($db, $machineId, $lojaDev, (string) $pareamento['kioskCode'], (string) $pareamento['pdvNome']);
+                    saveDb($db);
+                    respond([
+                        'ok' => true,
+                        'loja' => ['id' => $lojaDev['id'], 'nome' => $lojaDev['nome'], 'pdv' => $lojaDev['pdv'], 'kioskCode' => $kioskCode],
+                        'pareamento' => $pareamento,
+                    ]);
+                }
+            }
+
             // Fluxo principal: o kiosk envia o CÓDIGO que aparece na tela dele.
-            // A loja pode ter VÁRIOS códigos (um por PDV); o admin digita cada
-            // um na loja e cada máquina se autoriza sozinha.
+            // A loja pode ter VÁRIOS códigos (um por PDV); o admin autoriza em
+            // 1 clique (Lojas → PDVs aguardando) ou, no fallback, digita o
+            // código na loja e cada máquina se autoriza sozinha.
             $loja = null;
             if ($kioskCode !== '') {
                 foreach ($db['lojas'] as $l) {
                     if (in_array($kioskCode, lojaKioskCodes($l), true)) { $loja = $l; break; }
                 }
-                if (!$loja) fail('KIOSK_NAO_EMPARELELHADO', 404); // admin ainda não digitou este código numa loja
+                if (!$loja) fail('KIOSK_NAO_EMPARELELHADO', 404); // admin ainda não autorizou este código numa loja
             } elseif ($lojaId !== '' && $pairingCode !== '') {
                 // Legado: código gerado no portal e colocado no electron-config.json.
                 $loja = findLoja($db, $lojaId);
@@ -1100,6 +1247,9 @@ try {
                     }
                 }
             }
+            if (dispositivoDeOutraLoja($db, $machineId, (string) $loja['id']) !== null) {
+                fail('MAQUINA_JA_EMPARELHADA', 409);
+            }
 
             $pareamento = [
                 'pdvNome' => resolverPdvNome($pdvNome, $loja),
@@ -1107,29 +1257,8 @@ try {
                 'kioskCode' => $kioskCode !== '' ? $kioskCode : normalizarKioskCode($loja['kioskCode'] ?? ''),
                 'emparelhadoEm' => gmdate('c'),
             ];
-            foreach ($db['lojas'] as $i => $x) {
-                if (($x['id'] ?? '') !== $loja['id']) continue;
-                // Atualiza/adiciona esta máquina sem derrubar as demais.
-                $pms = lojaPareamentos($x);
-                $achou = false;
-                foreach ($pms as $j => $pm) {
-                    if ($machineId !== '' && (string) ($pm['machineId'] ?? '') === $machineId) {
-                        $pms[$j] = $pareamento;
-                        $achou = true;
-                        break;
-                    }
-                }
-                if (!$achou) $pms[] = $pareamento;
-                if (count($pms) > 20) $pms = array_slice($pms, -20);
-                $db['lojas'][$i]['pareamentos'] = $pms;
-                $db['lojas'][$i]['pareamento'] = $pareamento; // legado = última máquina
-                if ($kioskCode !== '') {
-                    $codes = lojaKioskCodes($db['lojas'][$i]);
-                    if (!in_array($kioskCode, $codes, true)) $codes[] = $kioskCode;
-                    $db['lojas'][$i]['kioskCodes'] = $codes;
-                }
-                break;
-            }
+            aplicarPareamentoLoja($db, (string) $loja['id'], $pareamento);
+            registrarDispositivo($db, $machineId, $loja, (string) $pareamento['kioskCode'], (string) $pareamento['pdvNome']);
             saveDb($db);
             respond([
                 'ok' => true,
@@ -1207,7 +1336,7 @@ try {
             $snap = [
                 'lojaId' => $lojaId,
                 'lojaNome' => lojaNomePush($p, $loja),
-                'pdvNome' => resolverPdvNome($p['pdvNome'], $loja),
+                'pdvNome' => resolverPdvNome($p['pdvNome'] ?? '', $loja),
                 'machineId' => trim((string) ($p['machineId'] ?? '')),
                 'data' => $data,
                 'totalVendido' => $totalVendido,
@@ -1472,7 +1601,8 @@ try {
 
     switch ($action) {
         case 'lojas.list': {
-            $lojas = db()['lojas'];
+            $db = db();
+            $lojas = $db['lojas'];
             $cx = conexaoPorLoja();
             foreach ($lojas as &$l) {
                 $id = (string) ($l['id'] ?? '');
@@ -1482,7 +1612,11 @@ try {
                 $l['online'] = $c['online'];
             }
             unset($l);
-            respond(['ok' => true, 'lojas' => array_values($lojas)]);
+            respond([
+                'ok' => true,
+                'lojas' => array_values($lojas),
+                'pendentes' => pendentesLista($db),
+            ]);
         }
 
         case 'lojas.save': {
@@ -1498,12 +1632,26 @@ try {
             // slug do nome (royal-plaza, royal-plaza-2...). O pareamento é
             // gravado agora — o PDV é autorizado sem esperar o próximo poll.
             if ($id === '' && $nome === '' && $kioskCode !== '') {
+                // Código já autorizado noutra loja (rascunho velho): autorizar
+                // aqui criaria uma segunda loja com o mesmo código e o PDV
+                // poderia parear na loja errada.
+                foreach ($db['lojas'] as $l) {
+                    if (in_array($kioskCode, lojaKioskCodes($l), true)) {
+                        fail('CODIGO_EM_USO — este código do kiosk já está em outra loja', 409);
+                    }
+                }
                 $pend = $db['pendentes'][$kioskCode] ?? null;
                 if (!is_array($pend) || empty($pend['nome'])) {
                     usleep(250000);
                     fail('RASCUNHO_NAO_ENCONTRADO: nenhum PDV registrou este código — cadastre a loja manualmente', 404);
                 }
                 $nome = trim((string) $pend['nome']);
+                // Modo "vincular a uma loja existente": o rascunho só tem o
+                // nome do PC, não o nome do local — não cria uma loja "PDV X";
+                // o admin deve autorizar numa loja existente (addKiosk).
+                if (empty($pend['lojaNome']) && preg_match('/^PDV\s/i', $nome)) {
+                    fail('RASCUNHO_SEM_LOJA: este PDV não informou o nome do local — autorize numa loja existente', 400);
+                }
                 $pdv = trim((string) ($pend['pdvNome'] ?? '')) ?: $pdv;
                 $id = slugLoja($nome);
                 $base = $id;
@@ -1531,6 +1679,9 @@ try {
                             }
                         }
                     }
+                    if (dispositivoDeOutraLoja($db, $machineId, $id) !== null) {
+                        fail('MAQUINA_JA_EMPARELHADA', 409);
+                    }
                     $pm = [
                         'pdvNome' => $pdv,
                         'machineId' => $machineId,
@@ -1541,6 +1692,9 @@ try {
                     $loja['pareamento'] = $pm;
                 }
                 $db['lojas'][] = $loja;
+                if ($machineId !== '') {
+                    registrarDispositivo($db, $machineId, $loja, $kioskCode, (string) $pdv);
+                }
                 unset($db['pendentes'][$kioskCode]);
                 saveDb($db);
                 respond(['ok' => true, 'loja' => $loja, 'criada' => true]);
@@ -1624,8 +1778,10 @@ try {
             respond(['ok' => true, 'loja' => $loja]);
         }
 
-        // Adiciona um PDV (código) à loja existente — o PDV se autoriza sozinho
-        // no próximo poll de 30s. Não substitui os códigos já cadastrados.
+        // Adiciona um PDV (código) à loja existente. Se houver rascunho do
+        // kiosk.seed, autoriza a máquina NA HORA (pareamento + registro
+        // permanente) sem esperar o poll de 30s. Não substitui os códigos já
+        // cadastrados.
         case 'lojas.addKiosk': {
             $db = db();
             $id = trim((string) ($p['id'] ?? ''));
@@ -1638,23 +1794,64 @@ try {
             if ($idx === null) fail('LOJA_NAO_ENCONTRADA', 404);
             $loja = $db['lojas'][$idx];
             $codes = lojaKioskCodes($loja);
-            if (in_array($code, $codes, true)) {
-                respond(['ok' => true, 'jaExistia' => true, 'loja' => $loja]);
-            }
-            foreach ($db['lojas'] as $j => $l) {
-                if ($j === $idx) continue;
-                if (in_array($code, lojaKioskCodes($l), true)) {
-                    fail('CODIGO_EM_USO — este código do kiosk já está em outra loja', 409);
+            $jaExistia = in_array($code, $codes, true);
+            if (!$jaExistia) {
+                foreach ($db['lojas'] as $j => $l) {
+                    if ($j === $idx) continue;
+                    if (in_array($code, lojaKioskCodes($l), true)) {
+                        fail('CODIGO_EM_USO — este código do kiosk já está em outra loja', 409);
+                    }
+                }
+                $codes[] = $code;
+                $db['lojas'][$idx]['kioskCodes'] = $codes;
+                if (normalizarKioskCode($db['lojas'][$idx]['kioskCode'] ?? '') === '') {
+                    $db['lojas'][$idx]['kioskCode'] = $code;
                 }
             }
-            $codes[] = $code;
-            $db['lojas'][$idx]['kioskCodes'] = $codes;
-            if (normalizarKioskCode($db['lojas'][$idx]['kioskCode'] ?? '') === '') {
-                $db['lojas'][$idx]['kioskCode'] = $code;
+
+            $pend = $db['pendentes'][$code] ?? null;
+            $machineId = is_array($pend) ? trim((string) ($pend['machineId'] ?? '')) : '';
+            $pareado = false;
+            if ($machineId !== '') {
+                // Mesma trava de clone do kiosk.pair: uma máquina só numa loja.
+                foreach ($db['lojas'] as $j => $l) {
+                    if ($j === $idx) continue;
+                    foreach (lojaPareamentos($l) as $pm) {
+                        if (hash_equals((string) ($pm['machineId'] ?? ''), $machineId)) {
+                            fail('MAQUINA_JA_EMPARELHADA', 409);
+                        }
+                    }
+                }
+                if (dispositivoDeOutraLoja($db, $machineId, $id) !== null) {
+                    fail('MAQUINA_JA_EMPARELHADA', 409);
+                }
+                $pdvNome = is_array($pend) ? trim((string) ($pend['pdvNome'] ?? '')) : '';
+                $pareamento = [
+                    'pdvNome' => resolverPdvNome($pdvNome, $loja),
+                    'machineId' => $machineId,
+                    'kioskCode' => $code,
+                    'emparelhadoEm' => gmdate('c'),
+                ];
+                aplicarPareamentoLoja($db, $id, $pareamento);
+                registrarDispositivo($db, $machineId, $db['lojas'][$idx], $code, (string) $pareamento['pdvNome']);
+                $pareado = true;
             }
             if (isset($db['pendentes'][$code])) unset($db['pendentes'][$code]);
             saveDb($db);
-            respond(['ok' => true, 'loja' => $db['lojas'][$idx]]);
+            respond(['ok' => true, 'jaExistia' => $jaExistia, 'pareado' => $pareado, 'loja' => $db['lojas'][$idx]]);
+        }
+
+        // Remove um rascunho de PDV que nunca foi autorizado.
+        case 'kiosk.descartar': {
+            $db = db();
+            $code = normalizarKioskCode($p['kioskCode'] ?? '');
+            if ($code === '') fail('DADOS_INCOMPLETOS: kioskCode é obrigatório');
+            if (!isset($db['pendentes'][$code])) {
+                respond(['ok' => true, 'removido' => false]);
+            }
+            unset($db['pendentes'][$code]);
+            saveDb($db);
+            respond(['ok' => true, 'removido' => true]);
         }
 
         // Remove um PDV da loja: apaga o código e o pareamento daquela máquina.
@@ -1678,14 +1875,23 @@ try {
 
             $legado = normalizarKioskCode($loja['kioskCode'] ?? '');
             $pms = [];
+            $maquinasRemovidas = [];
             foreach (lojaPareamentos($loja) as $pm) {
                 $pmCode = normalizarKioskCode($pm['kioskCode'] ?? '');
                 if ($pmCode !== '') {
                     if (in_array($pmCode, $codes, true)) $pms[] = $pm;
+                    else {
+                        $mid = trim((string) ($pm['machineId'] ?? ''));
+                        if ($mid !== '') $maquinasRemovidas[$mid] = true;
+                    }
                     continue;
                 }
                 // Pareamento antigo sem código: só remove se era o único código.
-                if ($legado === $code && count($codes) === 0) continue;
+                if ($legado === $code && count($codes) === 0) {
+                    $mid = trim((string) ($pm['machineId'] ?? ''));
+                    if ($mid !== '') $maquinasRemovidas[$mid] = true;
+                    continue;
+                }
                 $pms[] = $pm;
             }
 
@@ -1694,6 +1900,16 @@ try {
             $db['lojas'][$idx]['pareamentos'] = $pms;
             if ($pms) $db['lojas'][$idx]['pareamento'] = $pms[count($pms) - 1];
             else unset($db['lojas'][$idx]['pareamento']);
+
+            // Revogação explícita: remove também o registro permanente desta
+            // máquina/código (não adianta manter autorização órfã no devices).
+            if (isset($db['devices']) && is_array($db['devices'])) {
+                foreach ($db['devices'] as $mid => $dev) {
+                    if (normalizarKioskCode($dev['kioskCode'] ?? '') === $code || isset($maquinasRemovidas[$mid])) {
+                        unset($db['devices'][$mid]);
+                    }
+                }
+            }
             saveDb($db);
             respond(['ok' => true, 'removido' => true, 'loja' => $db['lojas'][$idx]]);
         }
@@ -1702,6 +1918,7 @@ try {
             $db = db();
             $id = trim((string) ($p['id'] ?? ''));
             if ($id === '') fail('DADOS_INCOMPLETOS: id é obrigatório');
+            $lojaExcluida = findLoja($db, $id);
             $before = count($db['lojas']);
             $db['lojas'] = array_values(array_filter($db['lojas'], function ($l) use ($id) {
                 return ($l['id'] ?? '') !== $id;
@@ -1723,6 +1940,23 @@ try {
                 $usuarios[] = $u;
             }
             $db['usuarios'] = $usuarios;
+            if (isset($db['devices']) && is_array($db['devices'])) {
+                foreach ($db['devices'] as $mid => $dev) {
+                    if ((string) ($dev['lojaId'] ?? '') === $id) unset($db['devices'][$mid]);
+                }
+            }
+            // Rascunhos que apontavam para a loja excluída não devem continuar
+            // em "PDVs aguardando" (o código pode até ter sido cadastrado nela).
+            if (is_array($lojaExcluida) && isset($db['pendentes']) && is_array($db['pendentes'])) {
+                $codesExcluidos = lojaKioskCodes($lojaExcluida);
+                foreach ($db['pendentes'] as $code => $pend) {
+                    $codeNorm = normalizarKioskCode($code);
+                    if (in_array($codeNorm, $codesExcluidos, true)
+                        || (string) ($pend['lojaId'] ?? '') === $id) {
+                        unset($db['pendentes'][$code]);
+                    }
+                }
+            }
             saveDb($db);
 
             // Histórico da loja excluída: apaga dos arquivos dos relatórios.

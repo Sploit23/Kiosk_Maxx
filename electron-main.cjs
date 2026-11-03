@@ -862,7 +862,7 @@ app.whenReady().then(() => {
 
 
 
-ipcMain.handle('natal:printBematech', async (_event, { texto, qr } = {}) => {
+ipcMain.handle('natal:printBematech', async (_event, { texto, qr, titulo, subtitulo } = {}) => {
   let qrPath = '';
   const limparQr = () => { if (qrPath) { try { fs.unlinkSync(qrPath); } catch(e){} qrPath = ''; } };
   try {
@@ -885,6 +885,8 @@ ipcMain.handle('natal:printBematech', async (_event, { texto, qr } = {}) => {
     const printer = 'MP-4200 TH';
     const safe = txt.replace(/\r/g, '').replace(/\n/g, '\r\n');
     const b64 = Buffer.from(safe + '\r\n\r\n\r\n', 'utf8').toString('base64');
+    const tituloB64 = Buffer.from(typeof titulo === 'string' ? titulo : '', 'utf8').toString('base64');
+    const subtituloB64 = Buffer.from(typeof subtitulo === 'string' ? subtitulo : '', 'utf8').toString('base64');
     const qrSafe = qrPath.replace(/'/g, "''");
     const ps = [
       "Add-Type -AssemblyName System.Drawing;",
@@ -893,6 +895,8 @@ ipcMain.handle('natal:printBematech', async (_event, { texto, qr } = {}) => {
       "$pd.PrinterSettings.PrinterName = '" + printer.replace(/'/g, "''") + "';",
       "$pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins -ArgumentList 0,0,0,0;",
       "$txt = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + b64 + "'));",
+      "$titulo = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + tituloB64 + "'));",
+      "$subtitulo = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + subtituloB64 + "'));",
       "$qrPath = '" + qrSafe + "';",
       "$pd.Add_PrintPage({ param($s,$ev);",
       "  $ev.Graphics.PageUnit = [System.Drawing.GraphicsUnit]::Pixel;",
@@ -901,27 +905,50 @@ ipcMain.handle('natal:printBematech', async (_event, { texto, qr } = {}) => {
       "  $widest = (($txt -split ([Environment]::NewLine)) | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum;",
       "  $sample = ('0' * [int]$widest);",
       "  $sz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $sample, $f0);",
-      "  $target = $ev.Graphics.VisibleClipBounds.Width * 0.98; if ($target -le 0) { $target = 576 };",
+      "  $visW = $ev.Graphics.VisibleClipBounds.Width;",
+      "  $target = $visW * 0.98; if ($target -le 0) { $target = 576 };",
       "  $scale = 1.0; if ($sz.Width -gt 0) { $scale = $target / $sz.Width };",
       "  $newSize = [float]([Math]::Max(8.0, [Math]::Min(30.0, $base * $scale)));",
       "  $f = New-Object System.Drawing.Font('Courier New', $newSize, [System.Drawing.FontStyle]::Bold);",
-      "  [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $txt, $f, (New-Object System.Drawing.Point 4,4), [System.Drawing.Color]::Black);",
+      "  $lineH = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, 'Ag', $f).Height;",
+      "  $y = 4.0;",
+      "  if ($titulo) {",
+      "    $hSize = [float]($newSize * 1.7);",
+      "    $hFont = New-Object System.Drawing.Font('Arial', $hSize, [System.Drawing.FontStyle]::Bold);",
+      "    $hSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $titulo, $hFont);",
+      "    if ($hSz.Width -gt $target) {",
+      "      $hSize = [float]($hSize * ($target / $hSz.Width));",
+      "      $hFont = New-Object System.Drawing.Font('Arial', $hSize, [System.Drawing.FontStyle]::Bold);",
+      "      $hSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $titulo, $hFont);",
+      "    }",
+      "    $hx = [Math]::Max(0, ($visW - $hSz.Width) / 2);",
+      "    [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $titulo, $hFont, ([System.Drawing.Point]::new([int]$hx, [int]$y)), [System.Drawing.Color]::Black);",
+      "    $y += $hSz.Height + 2;",
+      "    if ($subtitulo) {",
+      "      $sSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $subtitulo, $f);",
+      "      $sx = [Math]::Max(0, ($visW - $sSz.Width) / 2);",
+      "      [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $subtitulo, $f, ([System.Drawing.Point]::new([int]$sx, [int]$y)), [System.Drawing.Color]::Black);",
+      "      $y += $sSz.Height + 6;",
+      "    }",
+      "    $sepLine = ('-' * 32);",
+      "    [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $sepLine, $f, ([System.Drawing.Point]::new(4, [int]$y)), [System.Drawing.Color]::Black);",
+      "    $y += $lineH + 2;",
+      "  }",
+      "  [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $txt, $f, ([System.Drawing.Point]::new(4, [int]$y)), [System.Drawing.Color]::Black);",
       "  if ($qrPath -and (Test-Path -LiteralPath $qrPath)) {",
       "    try {",
       "      $img = [System.Drawing.Image]::FromFile($qrPath);",
-      "      $visW = $ev.Graphics.VisibleClipBounds.Width;",
-      "      $maxW = $visW * 0.92;",
+      "      $maxW = $visW * 0.8;",
       "      $iw = [double]$img.Width; $ih = [double]$img.Height;",
       "      if ($iw -gt $maxW) { $ih = $ih * ($maxW / $iw); $iw = $maxW };",
-      "      $lineH = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, 'Ag', $f).Height;",
-      "      $lines = ($txt -split ([Environment]::NewLine)).Count;",
-      "      $ty = 4 + ($lineH * $lines) + 24;",
+      "      $lines = ($txt.TrimEnd() -split ([Environment]::NewLine)).Count;",
+      "      $ty = $y + ($lineH * $lines) + 24;",
       "      $x = ($visW - $iw) / 2;",
       "      $ev.Graphics.DrawImage($img, [float]$x, [float]$ty, [float]$iw, [float]$ih);",
       "      $img.Dispose();",
       "    } catch { }",
       "  }",
-      "  [Console]::WriteLine('PRINT widest=' + $widest + ' measured=' + $sz.Width + ' target=' + [Math]::Round($target,1) + ' scale=' + [Math]::Round($scale,3) + ' size=' + [Math]::Round($newSize,2) + ' qrPath=' + $qrPath + ' visW=' + [Math]::Round($ev.Graphics.VisibleClipBounds.Width,1) + ' dpiY=' + $ev.Graphics.DpiY)",
+      "  [Console]::WriteLine('PRINT widest=' + $widest + ' measured=' + $sz.Width + ' target=' + [Math]::Round($target,1) + ' scale=' + [Math]::Round($scale,3) + ' size=' + [Math]::Round($newSize,2) + ' titulo=' + $titulo + ' qrPath=' + $qrPath + ' visW=' + [Math]::Round($visW,1) + ' dpiY=' + $ev.Graphics.DpiY)",
       "});",
       "$pd.Print();"
     ].join('\n');

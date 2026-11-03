@@ -327,11 +327,36 @@ function getFtpConfig() {
     galeriaUrl: String(machineConfig.galeriaUrl || FTP_DEFAULTS.galeriaUrl || '').trim(),
   };
 }
+// IP da rede local (para o admin identificar o PC na lista de pendentes).
+function ipLocal() {
+  try {
+    const nets = os.networkInterfaces();
+    let fallback = '';
+    for (const nome of Object.keys(nets)) {
+      for (const ni of nets[nome] || []) {
+        if (ni.family !== 'IPv4' || ni.internal) continue;
+        if (!fallback) fallback = ni.address;
+        if (/^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ni.address)) return ni.address;
+      }
+    }
+    return fallback;
+  } catch {
+    return '';
+  }
+}
+
 // Versão da config segura para o renderer (sem a senha do FTP).
 function configPublica() {
   const { ftpPass, ...resto } = machineConfig;
   void ftpPass;
-  return { ...resto, importFolder: getImportFolder(), importFolderCustom: String(machineConfig.importFolder || ''), ribbon: getRibbon() };
+  return {
+    ...resto,
+    machineName: String(process.env.COMPUTERNAME || os.hostname() || '').trim(),
+    localIp: ipLocal(),
+    importFolder: getImportFolder(),
+    importFolderCustom: String(machineConfig.importFolder || ''),
+    ribbon: getRibbon(),
+  };
 }
 
 // ─── Pasta dos lotes do cartao (importador embutido) ─────────

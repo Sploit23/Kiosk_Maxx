@@ -138,8 +138,8 @@ Autenticação pública por usuário; ações admin exigem header `X-Token` (ou 
 | `login` | `lojaId`, `usuario`, `senha` | Valida loja + usuário (usuário ou nome) + senha → `{ user, loja }` |
 | `equipe` | `lojaId` | Lista usuários ativos da loja: `{ loja, usuarios }` |
 | `precos` | `lojaId` | Catálogo + preços da loja (fonte de verdade do PDV): `{ ok, lojaId, precos, catalogo }` — `precos` = mapa chave→valor (compat. PDVs antigos), `catalogo` = `{ tamanhos, extras, combos }` já recortado para a loja (item com `lojas` só aparece nas lojas marcadas; sem `lojas` = todas). Usa o catálogo mestre `precos.json['__catalogo']`; sem ele, cai no catálogo antigo/default (`CATALOGO_DEFAULT`) |
-| `kiosk.seed` | `kioskCode`, `nome` (+ `pdvNome`, `machineId`) | Wizard de 1º uso: grava RASCUNHO do nome do local em `db.pendentes[kioskCode]` (não cria loja — senão o `kiosk.pair` casaria cedo demais) → `{ ok, pendente }`; loja já existente com o código → `{ ok, jaRegistrado }`; `DADOS_INCOMPLETOS`/`NOME_INVALIDO` |
-| `kiosk.pair` | `kioskCode` (+ `pdvNome`, `machineId`; legado `lojaId`+`pairingCode`) | Emparelha o kiosk com a loja: resolve a loja pelo código exibido NA TELA do PDV, registra `pareamento` e bloqueia máquina já usada por outra loja (`KIOSK_NAO_EMPARELELHADO`, `MAQUINA_JA_EMPARELHADA`) → `{ loja, pareamento }` |
+| `kiosk.seed` | `kioskCode`, `nome` (+ `pdvNome`, `machineId`, `machineName`, `lojaId`, `lojaNome`, `ip`) | Registra o PDV em `db.pendentes[kioskCode]` para o admin autorizar sem copiar código (não cria loja — senão o `kiosk.pair` casaria cedo demais) → `{ ok, pendente }`; loja já existente com o código (confere `kioskCodes`) → `{ ok, jaRegistrado }`; `DADOS_INCOMPLETOS`/`NOME_INVALIDO` |
+| `kiosk.pair` | `kioskCode` (+ `pdvNome`, `machineId`; legado `lojaId`+`pairingCode`) | Emparelha o kiosk com a loja. **Primeiro** resolve pelo registro permanente `devices[machineId]` (não depende mais do código local); senão resolve pelo código exibido NA TELA do PDV, grava `pareamento` + `devices`, e bloqueia máquina já usada por outra loja (`KIOSK_NAO_EMPARELELHADO`, `MAQUINA_JA_EMPARELHADA`) → `{ loja, pareamento }` |
 | `vendas.push` | `lojaId`, `machineId`, `data` (YYYY-MM-DD) + snapshot | PDV → portal: snapshot diário de vendas por loja. Exige `machineId` == `pareamento.machineId` da loja (`LOJA_NAO_EMPARELELHADA` 403, com delay anti-bruteforce). Upsert em `data/vendas.json` por loja+data: `lojaNome`, `pdvNome`, `totalVendido`, `pedidos`, `sessoesCriadas`, `sessoesVendidas`, `taxacombo`, `ribbonRestante`, `papel10x15`/`papel15x20` (papel REAL da impressora via checkPrinter, `null` se sem resposta), `meios {dinheiro,debito,credito,pix}`, `ultimaVenda`, `caixa {numero,aberto}`, `enviadoEm` |
 | `pedido.push` | `lojaId`, `machineId` + `pedido` (objeto) | PDV → portal: pedido completo, **idempotente pelo `pedido.id`** (reenvio só sobrescreve). Exige máquina pareada (mesmo bloqueio do `vendas.push`). Normaliza `itens [{tipo,produtoId,label,qtd,unidades,precoUnit,subtotal}]` — `precoUnit`/`subtotal` podem ser **negativos** (linha de ajuste de desconto/diferença) —, `pagamentos [{meio,forma,valor,parcelas}]`, `pagoEm` (hora real do pagamento), `sessoes`, `desconto`, `caixaId`, `origemPedidoId`, `guiaImpressa`, `unidadesTotal` (somada dos itens de tamanho). Alimenta Pedidos/Ranking/DRE. Persistido em `data/pedidos.json` |
 | `auditoria.push` | `lojaId`, `machineId` + `uso` (objeto) | PDV → portal: uso de senha master (perda, desconto/cancelamento, cobrança de diferença), **idempotente pelo `uso.id`**. Campos: `titulo`, `operador`, `motivo`, `data`, `criadoEm`, `pedidoContexto`, `pedidoGeradoId`. Persistido em `data/auditoria.json` (a aba "Auditoria" foi removida do admin; os dados continuam disponíveis via `auditoria.list`) |
@@ -149,13 +149,21 @@ Autenticação pública por usuário; ações admin exigem header `X-Token` (ou 
 `conexaoDelta` derivados do `enviadoEm` mais recente em `vendas.json`/
 `pedidos.json`/`auditoria.json` — ONLINE se última conexão ≤ 10 min,
 `ONLINE_JANELA_SEG` no `api.php`; o PDV manda snapshot a cada 5 min, então
-esse campo é o heartbeat do kiosk), `lojas.save` (**2 caminhos**: com
+esse campo é o heartbeat do kiosk; devolve também `pendentes` = rascunhos de
+`kiosk.seed` para a tela “PDVs aguardando”), `lojas.save` (**2 caminhos**: com
 `id`+`nome` = cadastro/edição manual normal; só `kioskCode` = wizard do PDV —
 resolve nome/pdv/máquina no rascunho `pendentes`, gera `id` por `slugLoja()`
 (com sufixo `-2`…), grava `pareamento` na hora e apaga o rascunho →
-`{ ok, loja, criada:true }`; sem rascunho → `RASCUNHO_NAO_ENCONTRADO` 404),
-`lojas.delete` (remove a loja e, em cascata, usuários/vendas/pedidos/auditoria/
-despesas daquela loja — **catálogo e preços NÃO são apagados**),
+`{ ok, loja, criada:true }`; sem rascunho → `RASCUNHO_NAO_ENCONTRADO` 404;
+rascunho só com nome de PC `PDV …` → `RASCUNHO_SEM_LOJA`), `lojas.addKiosk`
+(adiciona um código à loja e, se houver rascunho em `pendentes` com `machineId`,
+**autoriza na hora**: grava `pareamento` + `devices` e apaga o rascunho →
+`{ ok, pareado }`; trava de clone `MAQUINA_JA_EMPARELHADA` e
+`CODIGO_EM_USO`), `lojas.removeKiosk` (remove o código, o pareamento e o
+registro `devices` daquela máquina), `kiosk.descartar` (apaga um rascunho ainda
+não autorizado), `lojas.delete` (remove a loja e, em cascata, usuários/vendas/
+pedidos/auditoria/despesas e os `devices` daquela loja — **catálogo e preços
+NÃO são apagados**),
 `lojas.limparOrfaos` (remove os órfãos de lojas já excluídas; idempotente;
 preserva `precos.json`), `usuarios.list`, `usuarios.save`,
 `usuarios.delete`, `catalogo.get` (catálogo mestre para o editor: os itens vêm
@@ -300,15 +308,24 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 
 **Portal PHP — `backend/data/app.json`:**
 
-- **Loja:** `{ id, nome, pdv, ativo, kioskCode?, pairingCode?, pareamento? }` —
-  `pareamento = { pdvNome, machineId, emparelhadoEm }` gravado por `kiosk.pair`.
-  O `kioskCode` (8 chars, exibido na TELA do PDV) é digitado pelo admin na
-  loja — é o que ata a máquina física à loja; ele é único por loja
-  (`CODIGO_EM_USO`). `pairingCode` é o fluxo legado (código gerado no admin).
+- **Loja:** `{ id, nome, pdv, ativo, kioskCode?, kioskCodes?, pareamentos?,
+  pareamento?, pairingCode? }` — `pareamentos = [{ pdvNome, machineId,
+  kioskCode, emparelhadoEm }]` (1 máquina por item; `pareamento` é o legado =
+  última máquina) gravado por `kiosk.pair`/`lojas.addKiosk`. `kioskCodes` é a
+  lista de códigos autorizados (uma loja tem vários PDVs); `kioskCode` é o
+  principal (compat.). O código de 8 chars aparece NA TELA do PDV e é único
+  entre lojas (`CODIGO_EM_USO`). `pairingCode` é o fluxo legado.
+- **Registro permanente de dispositivo (`app.json` → `devices`):**
+  `devices[machineId] = { machineId, lojaId, lojaNome, pdvNome, kioskCode,
+  criadoEm, atualizadoEm }` — é o que garante que editar a loja ou perder o
+  código local **não** desemparelhe a máquina. Só `lojas.removeKiosk` (pelo
+  código) e `lojas.delete` (pela loja) removem.
 - **Rascunho do wizard (`app.json` → `pendentes`):** `pendentes[kioskCode] =
-  { kioskCode, nome, pdvNome, machineId, criadoEm, atualizadoEm }` — nome do
-  local enviado pelo PDV via `kiosk.seed` antes da loja existir; consumido
-  (apagado) pelo `lojas.save` só-com-código ou manual com o mesmo código.
+  { kioskCode, nome, pdvNome, machineId, machineName, lojaId, lojaNome, ip,
+  criadoEm, atualizadoEm }` — identidade enviada pelo PDV via `kiosk.seed`
+  antes de ser autorizado; consumido (apagado) pelo `lojas.addKiosk` (com
+  `machineId`) ou pelo `lojas.save` só-com-código, e removível por
+  `kiosk.descartar`.
 - **Usuário:** `{ id: 'u-*', lojaId, usuario, nome, funcao:
   vendedor|fotografo|admin|gerente, senha (texto puro no arquivo), ativo }`
 - **`admin.json`:** `{ hash }` (senha admin SHA-256, default = hash do valor em
@@ -418,16 +435,20 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `pareadoEm/pareadoLojaId`. No portal, `validarLojaPareada` resolve a loja
   pelo `machineId` enviado (compatível com lojaId divergente) e `lojaNomePush`
   usa o nome enviado pelo PDV.
-- **Emparelhamento (`kiosk.pair`)** — **zero config manual no kiosk.** No boot,
-  o PDV (`vendas.html`, React em `shared/api/kiosk.js`) garante que a config do
-  sidecar tem `machineId` + `kioskCode` (gerados no 1º boot, persistidos e
-  mostrados na tela de login e no modal ⚙). O admin digita esse código na loja
-  do portal; em loop de 30s o PDV chama `kiosk.pair({ kioskCode, pdvNome,
-  machineId })`, o portal devolve o `lojaId` canônico, que o PDV carimba na
-  config do sidecar e no `electron-config.json` (`window.kioskPair`). Depois de
-  emparelhado, `portalApi.login()/equipe()` usam o `lojaId` devolvido no lugar
-  do `config.lojaId`. Bloqueio de clone: `KIOSK_NAO_EMPARELELHADO`,
-  `MAQUINA_JA_EMPARELHADA`, `CODIGO_EM_USO`.
+- **Emparelhamento sem copiar código (`kiosk.seed`/`kiosk.pair`)** — no boot, o
+  PDV (`vendas.html`, React em `shared/api/kiosk.js`) garante que a config do
+  sidecar tem `machineId` + `kioskCode` (gerados no 1º boot) e envia
+  `kiosk.seed({ kioskCode, nome, pdvNome, machineId, machineName, lojaId,
+  lojaNome, ip })`. O admin vê o PC em **Lojas → PDVs aguardando** (nome do PC,
+  local, IP, ID curto) e clica em **Autorizar** → `lojas.addKiosk` grava o
+  pareamento + `devices[machineId]` na hora, sem digitar código. Em loop de
+  30s o PDV chama `kiosk.pair({ kioskCode, pdvNome, machineId })`; pelo
+  `devices` a máquina é reconhecida mesmo que o código local mude ou a loja
+  seja editada. O portal devolve o `lojaId` canônico, que o PDV carimba na
+  config (`window.kioskPair`). Depois de emparelhado, `portalApi.login()/equipe()`
+  usam o `lojaId` devolvido no lugar do `config.lojaId`. Bloqueio de clone:
+  `KIOSK_NAO_EMPARELELHADO`, `MAQUINA_JA_EMPARELHADA`, `CODIGO_EM_USO`. O
+  código de 8 chars continua na tela como fallback manual.
 - **Identidade resistente a perda de config (`natal-core.cjs`)** — `machineId`
   e `kioskCode` vivem no `config.json` da pasta de dados (dentro de
   `<photosFolder>\natal-app`), então apagar essa pasta/corromper o arquivo
@@ -445,19 +466,22 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   rename), evitando JSON truncado por queda de energia. Trocar de propósito
   continua sendo o botão "Gerar novo código" (`_forceIdentity`) ou o script
   `-Completo`. O portal autoriza push pelo `machineId` (o `kioskCode` é só a
-  chave do `kiosk.pair`), então perder só o código não bloqueia a fila local —
-  basta o admin colar o novo código na loja.
+  chave do `kiosk.pair`), então perder só o código não bloqueia a fila local:
+  o `devices[machineId]` mantém a autorização e o PDV se reemparelha sozinho;
+  o admin só precisa colar o novo código se a máquina for revogada.
 - **Wizard de 1º uso (PDV `vendas.html` + `admin.html`)** — assistente no
   overlay `#wizard-overlay` (funções `wz*`), mostrado **só quando a config não
   tem `lojaNome`** (e sem `window.kioskPair.ok`): 1) operador digita o **nome
   do local** (grava no sidecar e manda `kiosk.seed` → rascunho no portal,
-  flag `wzSeedOk` = 1 envio/boot); 2) mostra o **código de pareamento** e
-  espera o admin criar a loja em **Lojas → + Nova loja** (`modalNovaLoja`,
-  só-com-código → `lojas.save`), que grava o `pareamento` na hora; 3)
-  pareamento ok → avisa "cadastre os funcionários" (mensagem **também no
-  portal**: `modalPareamentoConcluido`); 4) equipe visível → login normal →
-  abertura de caixa. "Pular" fecha só nesta sessão; sem rascunho no portal o
-  admin cai no form manual (`RASCUNHO_NAO_ENCONTRADO` → `modalLoja(null)`).
+  flag `wzSeedOk` = 1 envio/boot; reenvia a cada 5 min enquanto não pareado);
+  2) mostra o **código de pareamento** e espera o admin criar a loja em
+  **Lojas → + Nova loja** (`modalNovaLoja`, só-com-código → `lojas.save`), que
+  grava o `pareamento` na hora; o caminho principal é **Lojas → PDVs
+  aguardando → Autorizar** (`lojas.addKiosk`), sem copiar código; 3) pareamento
+  ok → avisa "cadastre os funcionários" (mensagem **também no portal**:
+  `modalPareamentoConcluido`); 4) equipe visível → login normal → abertura de
+  caixa. "Pular" fecha só nesta sessão; sem rascunho no portal o admin cai no
+  form manual (`RASCUNHO_NAO_ENCONTRADO` → `modalLoja(null)`).
 - **Sync de vendas → portal (`vendas.html`)** — o PDV calcula o snapshot do dia
   (`enviarSnapshotVendas` em `vendas.html`; `portalApi.vendasPush` em
   `shared/api/portalApi.js`) e envia via `vendas.push`: 4s após o boot, 3s após

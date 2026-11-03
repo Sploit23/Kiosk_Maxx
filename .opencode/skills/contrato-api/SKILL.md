@@ -16,7 +16,10 @@ O PDV fala com **dois** backends: sidecar local (`sidecar/natal-core.cjs`, porta
   `%APPDATA%\natal-app\database\config.json` via `POST /api/config`). O portal
   **não define nem sobrescreve** a loja — ele só **autoriza a MÁQUINA**.
 - `machineId`/`kioskCode` são gerados no 1º boot e persistidos no sidecar
-  (`resolverIdentidade`, `vendas.html`); o admin digita o `kioskCode` no portal.
+  (`resolverIdentidade`, `vendas.html`). O caminho principal não copia código:
+  o PDV manda `kiosk.seed` e o admin clica em **Autorizar** em
+  Lojas → “PDVs aguardando” (`lojas.addKiosk`); o código de 8 chars fica como
+  fallback manual.
 - `identidadeSync()` (`vendas.html`) = `{machineId, lojaId, lojaNome, pdvNome}`
   a partir do sidecar (não depende de `window.kioskPair`, que é memória).
   `publicarIdentidade()` publica em `window.portalIdentidade`.
@@ -27,11 +30,14 @@ O PDV fala com **dois** backends: sidecar local (`sidecar/natal-core.cjs`, porta
   `machineId` no corpo.
 - Seed no pareamento: `emparelharKiosk` grava `pareadoEm`/`pareadoLojaId` e
   **só preenche** `lojaId`/`lojaNome` quando estão vazios (1º boot). Nunca
-  sobrescreve loja já definida no app.
-- Portal autoriza por **machineId**: `validarLojaPareada` (`api.php:271`)
-  procura a loja cujo `pareamento.machineId` casa com o enviado — o `lojaId`
-  do kiosk pode divergir (loja recriada no portal). `lojaNomePush()` usa o
-  nome enviado pelo PDV, senão o do cadastro.
+  sobrescreve loja já definida no app. `kiosk.seed` envia também `machineName`,
+  `localIp`, `lojaId` e `lojaNome` para o admin identificar o PC.
+- Portal autoriza por **machineId**: `validarLojaPareada` procura a loja cujo
+  `pareamentos[].machineId` casa com o enviado e, como fallback, o registro
+  permanente `db['devices'][machineId]` — o `lojaId` do kiosk pode divergir
+  (loja recriada no portal). `lojaNomePush()` usa o nome enviado pelo PDV,
+  senão o do cadastro. `devices` só é removido por `lojas.removeKiosk` ou
+  `lojas.delete`.
 - `machineId` vazio → `DADOS_INCOMPLETOS`; máquina sem loja pareada →
   `LOJA_NAO_EMPARELELHADA` (403, delay anti-bruteforce).
 
@@ -40,32 +46,34 @@ vinda só de `window.kioskPair` (`par()`), sem fila persistente — ver
 `sync-debug`. Erro de pair pode sobrescrever `window.kioskPair` mesmo com
 `res.ok === false` (`src/App.jsx:77`).
 
-## Wizard de 1º uso (`kiosk.seed` + `lojas.save` só-com-código)
+## Pareamento prático (`kiosk.seed` → “PDVs aguardando” → `lojas.addKiosk`)
 
-Fluxo de setup do kiosk novo (decisão: **gatilho = `cfg.lojaNome` vazio** no
-PDV; máquina já configurada nunca vê o wizard):
+Fluxo principal para 16+ PDVs, **sem copiar código** (o código de 8 chars é
+fallback manual). Gatilho do wizard = `cfg.lojaNome` vazio no PDV; máquina já
+configurada nunca vê o wizard.
 
 1. **PDV** (`vendas.html`, overlay `#wizard-overlay`, funções `wz*`): operador
    digita o **nome do local** → `natalApi.saveConfig({lojaNome})` + então
-   `portalApi.seed({kioskCode, nome, pdvNome, machineId})` →
-   `kiosk.seed` (pública) grava rascunho em `db['pendentes'][kioskCode]`
-   (`{kioskCode, nome, pdvNome, machineId, criadoEm, atualizadoEm}`).
+   `portalApi.seed({kioskCode, nome, pdvNome, machineId, machineName, lojaId,
+   lojaNome, ip})` → `kiosk.seed` (pública) grava rascunho em
+   `db['pendentes'][kioskCode]` com essa identidade.
    - Se a loja **já existe** com aquele código → `{ok, jaRegistrado:true}`
      (não cria rascunho; o pair normal resolve).
    - Não cria loja — senão o `kiosk.pair` casaria antes de o admin confirmar.
-   - Flag `wzSeedOk` (módulo `vendas.html`) garante **1 seed por boot** e é
-     também reenviada pelo hook de `KIOSK_NAO_EMPARELELHADO` em
-     `emparelharKiosk`.
-2. **Portal** (`admin.html`, `modalNovaLoja`): admin cola **só o código**
-   (`lojas.save {kioskCode}` sem `id`/`nome`) → caminho código-only do
-   `lojas.save` resolve nome/pdv/máquina no rascunho, gera
-   `id = slugLoja(nome)` (`royal-plaza`, `-2`, `-3`…), grava
-   `pareamento {pdvNome, machineId, emparelhadoEm}` na hora e **apaga o
-   rascunho** → `{ok, loja, criada:true}` → `modalPareamentoConcluido`.
+   - Flag `wzSeedOk` evita loop; o seed é reenviado a cada 5 min enquanto não
+     pareado (sobrevive ao “Ignorar” do admin).
+2. **Portal** (`admin.html`, card `#card-pendentes`): admin vê nome do PC,
+   local, IP e ID curto e clica em **Autorizar** → `lojas.addKiosk {id,
+   kioskCode}`. Se houver rascunho com `machineId`, o portal grava
+   `pareamento` + `devices[machineId]` **na hora** e apaga o rascunho
+   (`{ok, pareado:true}`). “Criar loja” (`lojas.save {kioskCode}` só) é o
+   caminho para local novo; recusa rascunho só com nome de PC
+   (`RASCUNHO_SEM_LOJA`).
    - Sem rascunho → `RASCUNHO_NAO_ENCONTRADO` (404) → admin cai no form
      completo (caminho manual ID+Nome, que também consome o rascunho se o
      código bater).
    - Máquina já pareada em outra loja → `MAQUINA_JA_EMPARELHADA` (409).
+   - `kiosk.descartar` apaga um rascunho ainda não autorizado.
 3. **PDV** vê o pair ok (hook em `emparelharKiosk`: `_wz.etapa===2 → 3`) e
    espera a equipe (`portalApi.equipe()` a cada 5s) → etapa 4 → login normal
    → abertura de caixa. Mensagem "Pareamento concluído — cadastre os
@@ -158,7 +166,8 @@ reenviado depois — é isso que faz a venda do dia sair quando a internet volta
 - `natalApi.api()` (`natalApi.js`) **ignora HTTP status** e não tem timeout/retry.
 - Ações do portal: públicas `health, login, equipe, precos, kiosk.seed,
   kiosk.pair, vendas.push, pedido.push, auditoria.push`; admin (token) as
-  demais (`api.php` — procurar `ACAO_DESCONHECIDA`).
+  demais (`lojas.addKiosk`, `lojas.removeKiosk`, `kiosk.descartar`, etc. —
+  procurar `ACAO_DESCONHECIDA`).
 - **O portal publicado (maxxfoto.com.br) pode estar defasado** em relação ao
   `backend/api.php` deste repo (ex.: autorização por machineId, `lojaNome`) —
   em produção de erro estranho, conferir a versão publicada antes de caçar bug
@@ -170,4 +179,6 @@ reenviado depois — é isso que faz a venda do dia sair quando a internet volta
    (injeção de identidade) e `backend/api.php` juntos.
 2. Conferir que `admin.html` lê o mesmo campo (ex.: id do pedido upsertado).
 3. Rodar o checklist da skill `sync-debug`.
-4. **`php` CLI não existe nesta máquina** → lint do `api.php` é manual/na web.
+4. **`php` CLI não está instalado nesta máquina** → validar o `api.php` com um
+   PHP portátil em `%TEMP%` (`php -l`/`php -S`) ou com `php-parser` via npm;
+   não deixar isso como bloqueio.

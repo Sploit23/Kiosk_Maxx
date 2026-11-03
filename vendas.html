@@ -2127,6 +2127,10 @@ async function resolverIdentidade(){
   _identidade = {
     machineId: cfg.machineId || '',
     kioskCode: cfg.kioskCode || '',
+    // Nome do PC e IP ajudam o admin a identificar o PDV certo na lista de
+    // "PDVs aguardando" (sem depender de copiar código).
+    machineName: cfg.machineName || '',
+    localIp: cfg.localIp || '',
     // Loja DEFINIDA NO APP (offline-first): o portal não sobrescreve esses
     // campos — ele só autoriza a máquina (pareamento).
     lojaId: cfg.lojaId || '',
@@ -2158,7 +2162,7 @@ function atualizarKioskUI(){
       const lojaPortal = (p.loja && (p.loja.nome + ' (' + p.loja.id + ')')) || '';
       st.innerHTML = '<span class="pair-ok">✔ Máquina autorizada no portal' + (lojaPortal ? ' — ' + lojaPortal : '') + '</span>';
     } else {
-      st.innerHTML = '<span class="pair-no">Aguardando autorizar esta máquina no portal — informe este código em Cadastros → Loja</span>';
+      st.innerHTML = '<span class="pair-no">Aguardando autorização no portal — abra <b>Lojas → PDVs aguardando</b> e clique em Autorizar. O código abaixo é só fallback.</span>';
     }
   }
   atualizarLojaHeader();
@@ -2220,7 +2224,7 @@ async function emparelharKiosk(){
       /* Portal acessível mas a loja ainda não existe: garante que o NOME
          digitado no 1º uso esteja registrado (rascunho) para o admin criar
          a loja colando só o código. Um envio por boot — wzSeedOk evita loop. */
-      if(!wzSeedOk && _identidade && _identidade.lojaNome) wzEnviarSeed();
+      if(_identidade && (!wzSeedOk || Date.now() - wzSeedEm > 300000)) wzEnviarSeed();
     }
   }catch(e){ console.warn('[pair]', e); }
   atualizarKioskUI();
@@ -2252,6 +2256,7 @@ garantirIdentidade().then(async () => {
    ═══════════════════════════════════════════════════════════════════════ */
 const _wz = { ativo: false, etapa: 0, tent: 0, timer: 0, modo: null };
 let wzSeedOk = false; // nome já aceito pelo portal (ou loja já existente)
+let wzSeedEm = 0;      // último seed aceito (re-registra a cada 5 min se seguir sem par)
 
 function wzStatus(html, cls){
   const el = document.getElementById('wz-status');
@@ -2297,7 +2302,6 @@ function wzRender(){
     document.getElementById('wz-escolhe-novo').addEventListener('click', () => { _wz.modo = 'novo'; wzIr(1); });
     document.getElementById('wz-escolhe-vincular').addEventListener('click', () => {
       _wz.modo = 'vincular';
-      wzSeedOk = true; // não cria rascunho de nome novo
       wzIr(2);
     });
   } else if(_wz.etapa === 1){
@@ -2313,16 +2317,17 @@ function wzRender(){
     setTimeout(() => inp.focus(), 80);
   } else if(_wz.etapa === 2){
     const id = _identidade || {};
+    const pc = id.machineName ? ('PC <b>' + id.machineName + '</b>' + (id.localIp ? ' (' + id.localIp + ')' : '')) : 'este PDV';
     if(_wz.modo === 'vincular'){
       box.innerHTML =
         '<h2>Vincular a uma loja existente</h2>' +
-        '<p class="wz-sub">Peça para o administrador <b>adicionar este PDV</b> à loja desejada no portal, usando o código abaixo. Quando ele salvar, esta tela avança sozinha e a loja do portal passa a valer aqui.</p>' +
+        '<p class="wz-sub">No portal, abra <b>Lojas → PDVs aguardando</b>, confira ' + pc + ' e clique em <b>Autorizar</b> na loja desejada. Se ele não aparecer, use o código abaixo em <b>+ PDV</b>.</p>' +
         '<div class="wz-code">' + (formatarCodigoKiosk(id.kioskCode) || '—') + '</div>' +
-        '<p class="wz-status" id="wz-status"><span class="spin"></span>Aguardando vinculação no portal…</p>';
+        '<p class="wz-status" id="wz-status"><span class="spin"></span>Aguardando autorização no portal…</p>';
     } else {
       box.innerHTML =
-        '<h2>Código de pareamento</h2>' +
-        '<p class="wz-sub">No portal, abra <b>Lojas → + Nova loja</b> e cole este código. A loja é criada com o nome que você digitou.</p>' +
+        '<h2>Autorizar este PDV</h2>' +
+        '<p class="wz-sub">No portal, abra <b>Lojas → PDVs aguardando</b>, confira ' + pc + ' e clique em <b>Autorizar</b>. A loja é criada com o nome que você digitou. Se ele não aparecer, use o código abaixo.</p>' +
         '<div class="wz-code">' + (formatarCodigoKiosk(id.kioskCode) || '—') + '</div>' +
         '<p class="wz-status" id="wz-status"><span class="spin"></span>Registrando o nome no portal…</p>';
     }
@@ -2358,16 +2363,25 @@ async function wzSalvarNome(){
 }
 async function wzEnviarSeed(){
   const id = _identidade || {};
-  if(!id.kioskCode || !id.lojaNome) return false;
+  if(!id.kioskCode) return false;
+  // No modo "vincular" o PDV ainda não tem nome de local; usa o nome do PC
+  // como identificação para aparecer em "PDVs aguardando" e o admin escolher
+  // a loja. No fluxo normal o nome digitado no wizard é a sugestão.
+  const nome = id.lojaNome || ('PDV ' + (id.machineName || id.pdvNome || id.kioskCode));
   try{
     const res = await portalApi.seed({
       kioskCode: id.kioskCode,
-      nome: id.lojaNome,
+      nome,
       pdvNome: id.pdvNome || '',
       machineId: id.machineId || '',
+      machineName: id.machineName || '',
+      lojaId: id.lojaId || '',
+      lojaNome: id.lojaNome || '',
+      ip: id.localIp || '',
     });
     if(res && res.ok){
       wzSeedOk = true;
+      wzSeedEm = Date.now();
       console.log('[wz] seed ok:', id.kioskCode, res.jaRegistrado ? '(loja já existe)' : '');
       return true;
     }
@@ -2396,13 +2410,14 @@ async function wzTick(){
   if(_wz.etapa === 2){
     if(window.kioskPair && window.kioskPair.ok){ wzIr(3); return; }
     if(_wz.modo === 'vincular'){
-      wzStatus('<span class="spin"></span>Aguardando o administrador adicionar este PDV a uma loja no portal…', 'warn');
+      if(!wzSeedOk || Date.now() - wzSeedEm > 300000) await wzEnviarSeed();
+      wzStatus('<span class="spin"></span>Aguardando o administrador autorizar este PDV em <b>Lojas → PDVs aguardando</b>…', 'warn');
       emparelharKiosk();
       return;
     }
-    if(!wzSeedOk) await wzEnviarSeed();
+    if(!wzSeedOk || Date.now() - wzSeedEm > 300000) await wzEnviarSeed();
     if(wzSeedOk){
-      wzStatus('<span class="spin"></span>Nome registrado — aguardando o admin criar a loja no portal com este código…', 'ok');
+      wzStatus('<span class="spin"></span>Nome registrado — aguardando autorização em <b>Lojas → PDVs aguardando</b>…', 'ok');
       emparelharKiosk();
     }
   } else if(_wz.etapa === 3){
@@ -3777,8 +3792,11 @@ async function finalizarVendaImpl(){
       const op = (typeof currentUser!=='undefined' && currentUser && currentUser.nome) || '';
       const dt = new Date().toLocaleString('pt-BR');
       const texto = cupomBematechTexto({ loja, pdv, operador: op, data: dt, pedidoId, itens: itensResumo, total, pagamentos, codigoDigital });
-      const qrImg = codigoDigital ? qrDataUrl(urlNatal(codigoDigital), { cellSize: 10, margin: 40 }) : null;
-      await imprimirBematechTexto(texto, codigoDigital ? 'Cupom digital enviado' : undefined, qrImg);
+      const qrImg = codigoDigital ? qrDataUrl(urlNatal(codigoDigital), { cellSize: 8, margin: 32 }) : null;
+      await imprimirBematechTexto(texto, codigoDigital ? 'Cupom digital enviado' : undefined, qrImg, {
+        titulo: 'MAXX FOTO LEMBRANÇA',
+        subtitulo: 'CNPJ 22.902.082/0001-00',
+      });
     }catch(e){ toast('⚠ Falha ao imprimir cupom'); }
   });
   if(temFoto) document.getElementById('btn-print-fotos').addEventListener('click', ()=>{
@@ -3862,37 +3880,63 @@ function thermalPrinterName(){
 function escHtml(v){
   return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
+function wrapCols(texto, W = 32){
+  const palavras = String(texto == null ? '' : texto).split(/\s+/).filter(Boolean);
+  if(!palavras.length) return [''];
+  const linhas = [];
+  let atual = '';
+  for(const p of palavras){
+    if(p.length > W){
+      if(atual){ linhas.push(atual); atual = ''; }
+      for(let i = 0; i < p.length; i += W) linhas.push(p.slice(i, i + W));
+      continue;
+    }
+    if(!atual) atual = p;
+    else if((atual + ' ' + p).length <= W) atual += ' ' + p;
+    else { linhas.push(atual); atual = p; }
+  }
+  if(atual) linhas.push(atual);
+  return linhas;
+}
 function cupomBematechTexto({ loja, pdv, operador, data, pedidoId, itens, total, pagamentos, codigoDigital }){
   const W = 32;
   const centro = (t) => { t = String(t); const pad = Math.max(0, Math.floor((W - t.length) / 2)); return ' '.repeat(pad) + t; };
   const linha = (esq, dir) => { esq = String(esq); dir = String(dir); const esp = Math.max(1, W - esq.length - dir.length); return esq + ' '.repeat(esp) + dir; };
   const sep = '-'.repeat(W);
   const out = [];
-  out.push(centro('MAX FOTO VENDAS'));
-  if(loja) out.push(centro(loja));
-  if(pdv || operador) out.push(centro([pdv, operador].filter(Boolean).join(' - ')));
+  const pushCentro = (t) => wrapCols(t, W).forEach(l => out.push(centro(l)));
+  const pushLinha = (esq, dir) => {
+    const totalLen = String(esq).length + String(dir).length;
+    if(totalLen + 1 <= W) out.push(linha(esq, dir));
+    else wrapCols(String(esq) + ' ' + String(dir), W).forEach(l => out.push(l));
+  };
+  if(loja) pushCentro(loja);
+  const operacao = [pdv, operador].filter(Boolean).join(' - ');
+  if(operacao) pushCentro(operacao);
   out.push(centro(data));
   out.push(sep);
-  out.push('Pedido: ' + pedidoId);
+  wrapCols('Pedido: ' + pedidoId, W).forEach(l => out.push(l));
   out.push(sep);
   itens.forEach(c => {
     const nome = String(c.label || '');
     const q = c.qtd > 1 ? c.qtd + 'x ' : '';
-    out.push(q + nome + ' #' + c.sessionSenha);
+    wrapCols(q + nome + ' #' + c.sessionSenha, W).forEach(l => out.push(l));
     out.push(linha('', fmt(c.preco)));
   });
   out.push(sep);
-  out.push(linha('TOTAL', fmt(total)));
-  out.push('Pago: ' + pagamentos);
+  pushLinha('TOTAL', fmt(total));
+  const pags = String(pagamentos || '').split(' · ').filter(Boolean);
+  if(!pags.length) out.push('Pago: -');
+  else pags.forEach((p, i) => pushLinha(i === 0 ? 'Pago' : '', p));
   out.push(sep);
-  out.push(centro('Obrigado pela preferencia!'));
+  pushCentro('Obrigado pela preferencia!');
   if(codigoDigital){
     const site = urlNatal('').replace(/^https?:\/\//, '').replace(/\/$/, '');
     out.push('');
-    out.push(centro('FOTO DIGITAL'));
-    out.push(centro('Escaneie o QR abaixo'));
-    out.push(centro('ou acesse ' + site));
-    out.push(centro('Codigo: ' + codigoDigital));
+    pushCentro('FOTO DIGITAL');
+    pushCentro('Escaneie o QR abaixo');
+    pushCentro('ou acesse ' + site);
+    pushCentro('Codigo: ' + codigoDigital);
   }
   out.push('');
   return out.join('\n');
@@ -3934,14 +3978,18 @@ async function imprimirThermal(conteudoHtml, rotulo, printerName){
     return false;
   }
 }
-async function imprimirBematechTexto(texto, rotulo, qrImg){
+async function imprimirBematechTexto(texto, rotulo, qrImg, cabecalho){
   if(!window.natal || typeof window.natal.ipcInvoke !== 'function'){
     toast('⚠ Impressora térmica só funciona dentro do app (Electron)');
     return false;
   }
   if(rotulo) toast('🧾 ' + rotulo);
   try{
-    const res = await window.natal.ipcInvoke('natal:printBematech', qrImg ? { texto, qr: qrImg } : { texto });
+    const payload = { texto };
+    if(qrImg) payload.qr = qrImg;
+    if(cabecalho && cabecalho.titulo) payload.titulo = cabecalho.titulo;
+    if(cabecalho && cabecalho.subtitulo) payload.subtitulo = cabecalho.subtitulo;
+    const res = await window.natal.ipcInvoke('natal:printBematech', payload);
     if(res && res.success){ toast('🧾 Cupom enviado para a Bematech'); return true; }
     toast('⚠ Falha ao imprimir cupom');
     return false;
@@ -6545,6 +6593,7 @@ async function showConfigModal(tabInicial){
       await natalApi.saveConfig({ kioskCode: novoCodigo, _forceIdentity: true });
       window.kioskPair = null;
       if(_identidade) _identidade.kioskCode = novoCodigo;
+      wzSeedOk = false; wzSeedEm = 0; // o código mudou: registra o novo rascunho no portal
       atualizarKioskUI();
       toast('Novo código gerado: ' + formatarCodigoKiosk(novoCodigo));
       closeModal();

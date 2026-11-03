@@ -52,6 +52,8 @@ async function resolverIdentidade() {
   _identidade = {
     machineId: cfg.machineId || '',
     kioskCode: cfg.kioskCode || '',
+    machineName: cfg.machineName || '',
+    localIp: cfg.localIp || '',
     // Loja DEFINIDA NO APP (offline-first): o pareamento só autoriza a máquina.
     lojaId: cfg.lojaId || '',
     lojaNome: cfg.lojaNome || '',
@@ -109,6 +111,21 @@ export async function emparelharKiosk() {
       try { if (window.natal?.saveConfig) await window.natal.saveConfig(autorizado); } catch { /* best-effort */ }
       Object.assign(ident, autorizado);
       publicarIdentidade(ident);
+    } else if (res && !res.offline && res.error === 'KIOSK_NAO_EMPARELELHADO') {
+      // A máquina ainda não foi autorizada: registra o rascunho para o admin
+      // ver o PC em "PDVs aguardando" e autorizar em 1 clique.
+      try {
+        await portalApi.seed({
+          kioskCode: ident.kioskCode,
+          nome: ident.lojaNome || ('PDV ' + (ident.machineName || ident.pdvNome || ident.kioskCode)),
+          pdvNome: ident.pdvNome || '',
+          machineId: ident.machineId || '',
+          machineName: ident.machineName || '',
+          lojaId: ident.lojaId || '',
+          lojaNome: ident.lojaNome || '',
+          ip: ident.localIp || '',
+        });
+      } catch { /* retry no próximo tick */ }
     }
     return res;
   } catch {

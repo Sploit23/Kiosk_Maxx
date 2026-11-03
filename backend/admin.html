@@ -600,6 +600,15 @@ select.form-input{appearance:none;}
           <button class="btn btn-primary" id="btn-nova-loja">+ Nova loja</button>
         </div>
       </div>
+      <div class="card" id="card-pendentes" style="display:none;">
+        <div class="section-head" style="margin-bottom:10px;">
+          <div>
+            <h3>PDVs aguardando autorização</h3>
+            <p>Confira o nome do PC e o local e clique em <b>Autorizar</b>. Sem copiar código.</p>
+          </div>
+        </div>
+        <div id="lista-pendentes"></div>
+      </div>
       <div class="card">
         <h3>Lojas cadastradas</h3>
         <table id="tabela-lojas"></table>
@@ -911,7 +920,7 @@ var FN_LABEL = { vendedor:'Vendedora', fotografo:'Fotógrafo', admin:'Administra
 var FN_ACESSO = { vendedor:'Kiosk', fotografo:'Kiosk', admin:'Total', gerente:'Regional' };
 
 var token = sessionStorage.getItem('nac_token') || '';
-var state = { currentUser:null, lojas:[], usuarios:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje' };
+var state = { currentUser:null, lojas:[], usuarios:[], pendentes:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje' };
 var notificacoes = [];
 var currentScreen = 'dashboard';
 
@@ -1019,9 +1028,13 @@ function goScreen(name){
 async function loadAll(){
   var [rl, ru] = await Promise.all([call('lojas.list'), call('usuarios.list', {})]);
   state.lojas = (rl && rl.ok && Array.isArray(rl.lojas)) ? rl.lojas : [];
+  state.pendentes = (rl && rl.ok && Array.isArray(rl.pendentes)) ? rl.pendentes : [];
   state.usuarios = (ru && ru.ok && Array.isArray(ru.usuarios)) ? ru.usuarios : [];
   var badge = $('#lojas-badge');
-  if(badge) badge.textContent = state.lojas.length;
+  if(badge){
+    badge.textContent = state.pendentes.length ? (state.lojas.length + '+' + state.pendentes.length) : state.lojas.length;
+    badge.title = state.pendentes.length ? (state.pendentes.length + ' PDV(s) aguardando autorização') : '';
+  }
 }
 
 // ——— LOGIN ———
@@ -2420,6 +2433,106 @@ function lojaPdvCell(l){
   html += '<button class="btn btn-ghost" style="padding:1px 6px;font-size:10px;margin-top:3px;" data-add-pdv="'+escAttr(l.id)+'">+ PDV</button>';
   return html;
 }
+function lojaSugeridaPendente(p){
+  if(!p) return '';
+  if(p.lojaId){
+    var porId = state.lojas.find(function(l){ return l.id === p.lojaId; });
+    if(porId) return porId.id;
+  }
+  var nome = String(p.lojaNome || p.nome || '').trim().toLowerCase();
+  if(nome){
+    var porNome = state.lojas.find(function(l){ return String(l.nome||'').trim().toLowerCase() === nome; });
+    if(porNome) return porNome.id;
+  }
+  return state.lojas.length ? state.lojas[0].id : '';
+}
+function renderPendentes(){
+  var card = $('#card-pendentes');
+  var box = $('#lista-pendentes');
+  if(!card || !box) return;
+  var lista = state.pendentes || [];
+  if(!lista.length){ card.style.display = 'none'; box.innerHTML = ''; return; }
+  card.style.display = '';
+  box.innerHTML = lista.map(function(p){
+    var code = normCode(p.kioskCode);
+    var sug = lojaSugeridaPendente(p);
+    var local = p.lojaNome || p.nome || 'Nome não informado';
+    var pc = p.machineName || 'PC sem nome';
+    var detalhe = [];
+    if(p.pdvNome) detalhe.push(p.pdvNome);
+    if(p.ip) detalhe.push(p.ip);
+    if(p.machineId) detalhe.push('ID '+String(p.machineId).slice(0,8));
+    var quando = p.atualizadoEm ? new Date(p.atualizadoEm).toLocaleString('pt-BR') : '';
+    var select = state.lojas.length
+      ? '<select class="form-input" id="pend-loja-'+escAttr(code)+'" style="width:190px;">'+
+          state.lojas.map(function(l){
+            return '<option value="'+escAttr(l.id)+'"'+(l.id===sug?' selected':'')+'>'+esc(l.nome||l.id)+'</option>';
+          }).join('')+
+        '</select>'
+      : '<span style="font-size:11px;color:var(--amber-500);">Cadastre uma loja primeiro</span>';
+    var nomeLocal = String(p.lojaNome || p.nome || '').trim().toLowerCase();
+    var jaTemLoja = !!nomeLocal && state.lojas.some(function(l){ return String(l.nome||'').trim().toLowerCase() === nomeLocal; });
+    var podeCriar = !jaTemLoja && !!(p.lojaNome || (p.nome && !/^PDV\s/i.test(p.nome)));
+    return '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:11px 0;border-top:1px solid var(--navy-line);">'+
+      '<div style="flex:1;min-width:220px;">'+
+        '<div style="font-weight:700;color:var(--cream-100);">'+esc(pc)+'</div>'+
+        '<div style="font-size:11.5px;color:var(--slate-400);">'+esc(local)+(detalhe.length?' · '+esc(detalhe.join(' · ')):'')+'</div>'+
+        '<div style="font-size:10.5px;color:var(--slate-500);font-family:ui-monospace,Consolas,monospace;">'+esc(fmtKiosk(code))+(quando?' · '+esc(quando):'')+'</div>'+
+      '</div>'+
+      select+
+      '<button class="btn btn-primary" style="padding:5px 10px;font-size:11px;" data-autorizar="'+escAttr(code)+'"'+(state.lojas.length?'':' disabled')+'>Autorizar</button>'+
+      (podeCriar ? '<button class="btn btn-ghost" style="padding:5px 10px;font-size:11px;" data-criar="'+escAttr(code)+'">Criar loja</button>' : '')+
+      '<button class="btn btn-ghost" style="padding:5px 8px;font-size:13px;color:var(--red-400);border-color:var(--red-400);" data-descartar="'+escAttr(code)+'" title="Ignorar este PDV">×</button>'+
+    '</div>';
+  }).join('');
+
+  box.querySelectorAll('[data-autorizar]').forEach(function(b){
+    b.addEventListener('click', function(){ autorizarPendente(b.dataset.autorizar); });
+  });
+  box.querySelectorAll('[data-criar]').forEach(function(b){
+    b.addEventListener('click', function(){ criarLojaPendente(b.dataset.criar); });
+  });
+  box.querySelectorAll('[data-descartar]').forEach(function(b){
+    b.addEventListener('click', function(){ descartarPendente(b.dataset.descartar); });
+  });
+}
+async function autorizarPendente(code){
+  var sel = $('#pend-loja-'+code);
+  var lojaId = sel ? sel.value : '';
+  if(!lojaId){ toast('Escolha a loja para autorizar este PDV', true); return; }
+  var p = (state.pendentes||[]).find(function(x){ return normCode(x.kioskCode)===code; });
+  if(p && p.machineId){
+    var outra = state.lojas.find(function(l){
+      return l.id !== lojaId && lojaPareamentos(l).some(function(pm){ return pm.machineId === p.machineId; });
+    });
+    if(outra){ toast('Este PC já está autorizado em '+outra.nome+' — revogue lá antes', true); return; }
+  }
+  var res = await call('lojas.addKiosk', { id:lojaId, kioskCode:code });
+  if(!res || !res.ok){ toast((res&&res.error)||'Falha ao autorizar', true); return; }
+  toast(res.pareado ? 'PDV autorizado — a máquina já pode sincronizar' : 'PDV adicionado — aguardando a máquina confirmar');
+  if(res.pareado) notif('✅','PDV autorizado', (p&&p.machineName)||fmtKiosk(code));
+  state._lojasAt = 0;
+  await loadAll();
+  renderLojas();
+}
+async function criarLojaPendente(code){
+  var p = (state.pendentes||[]).find(function(x){ return normCode(x.kioskCode)===code; });
+  var nome = p ? (p.lojaNome || p.nome || '') : '';
+  if(!nome || /^PDV\s/i.test(nome)){ toast('Este PDV não informou o nome do local — escolha uma loja existente', true); return; }
+  var res = await call('lojas.save', { kioskCode:code });
+  if(!res || !res.ok){ toast((res&&res.error)||'Falha ao criar loja', true); return; }
+  await loadAll();
+  renderLojas();
+  if(res.criada) modalPareamentoConcluido(res.loja);
+  else toast('Loja criada');
+}
+async function descartarPendente(code){
+  if(!window.confirm('Ignorar este PDV na lista de aguardando?\n\nEle volta a aparecer em até 5 min se continuar sem autorização.')) return;
+  var res = await call('kiosk.descartar', { kioskCode:code });
+  if(!res || !res.ok){ toast((res&&res.error)||'Falha ao ignorar', true); return; }
+  await loadAll();
+  renderLojas();
+}
 function renderLojas(){
   var t = $('#tabela-lojas');
   t.innerHTML = '<tr><th>ID (kiosk)</th><th>Nome</th><th>PDV</th><th>Operadores</th><th>PDVs / códigos</th><th>Conexão</th><th>Status</th><th></th></tr>' +
@@ -2454,12 +2567,13 @@ function renderLojas(){
       removerPdvLoja(parts[0], parts[1]);
     });
   });
+  renderPendentes();
 }
 function modalAddPdv(l){
   if(!l) return;
   openPortalModal(
     '<div class="modal-head"><h3>Adicionar PDV em '+esc(l.nome)+'</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
-    '<p style="font-size:12.5px;color:var(--slate-400);margin-bottom:14px;">Ligue o outro PC, abra o PDV e copie o <b>código do kiosk</b> que aparece na tela de login (ou no ⚙ Config). Cole abaixo — a máquina se autoriza sozinha em até 30s.</p>'+
+    '<p style="font-size:12.5px;color:var(--slate-400);margin-bottom:14px;">Se o PDV já aparece em <b>PDVs aguardando</b>, use o botão <b>Autorizar</b> lá. Este campo é o fallback manual: copie o <b>código do kiosk</b> da tela de login (ou do ⚙ Config) e cole abaixo.</p>'+
     '<div class="form-row"><label class="form-label">Código do kiosk</label>'+
     '<input class="form-input" id="f-pdv-code" placeholder="ex.: K8XQ-4B9D" style="letter-spacing:2px;text-transform:uppercase;font-family:ui-monospace,Consolas,monospace;"></div>'+
     '<div class="modal-actions"><button class="btn btn-primary" id="pdv-add">Adicionar PDV</button>'+
@@ -2535,7 +2649,7 @@ function modalNovaLoja(){
   openPortalModal(
     '<div class="modal-head"><h3>Nova loja</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
     '<div class="nw-passos">1) No PDV, digite o <b>nome do local</b> no assistente de 1º uso · '+
-    '2) copie o <b>código</b> que aparece na tela dele · 3) cole aqui e salve.</div>'+
+    '2) prefira autorizar em <b>Lojas → PDVs aguardando</b> · 3) se ele não aparecer, cole o <b>código</b> abaixo.</div>'+
     '<div class="form-row"><label class="form-label">Código do kiosk (aparece na tela do PDV)</label>'+
     '<input class="form-input" id="f-nw-kiosk" placeholder="ex.: K8XQ-4B9D" autocomplete="off" '+
     'style="letter-spacing:3px;text-transform:uppercase;font-family:ui-monospace,Consolas,monospace;font-size:17px;text-align:center;"></div>'+
@@ -3437,6 +3551,7 @@ setInterval(function(){
   call('lojas.list', {}).then(function(res){
     if(!res || !res.ok) return;
     state.lojas = Array.isArray(res.lojas) ? res.lojas : [];
+    state.pendentes = Array.isArray(res.pendentes) ? res.pendentes : [];
     if(currentScreen==='lojas') renderLojas();
     else if(currentScreen==='dashboard') renderDashboard();
   }).catch(function(){});
