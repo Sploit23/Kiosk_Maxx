@@ -2045,6 +2045,10 @@ const FUNCAO_EXIBICAO = {
 };
 
 async function carregarEquipe(){
+  // No boot, a identidade do sidecar pode ainda não ter chegado. Sem isso o
+  // primeiro fetch poderia pedir a equipe da loja default ("teste") e gravar
+  // esse cache na máquina de produção.
+  try{ await garantirIdentidade(); }catch{}
   const lojaAtual = portalApi.lojaIdAtivo();
   try{
     const res = await portalApi.equipe();
@@ -3070,6 +3074,7 @@ async function sincronizarComPortal(){
   if(_sincronizando) return { ok: 0, pendentes: _sync.pendentes };
   _sincronizando = true;
   try{
+    await garantirIdentidade().catch(()=>null);
     await enfileirarPendentesPortal();
     await drenarFilaPortal();
   }catch(e){ console.warn('[sync] falha na sincronização:', e); }
@@ -3352,6 +3357,7 @@ function rerenderCatalogoPortal(){
   renderGlobalCart();
 }
 async function carregarPrecosPortal(){
+  try{ await garantirIdentidade(); }catch{}
   try{
     const res = await portalApi.precos();
     if(res && res.ok && (res.catalogo || (res.precos && Object.keys(res.precos).length))){
@@ -3392,6 +3398,7 @@ async function carregarPrecosPortal(){
 
 /* ---------------- LOGIN (portal com fallback offline) ---------------- */
 async function tentarLogin(getSelecionado){
+  await garantirIdentidade().catch(()=>null);
   const u = getSelecionado();
   const senha = document.getElementById('login-senha').value;
   if(!u){ document.getElementById('login-error').textContent = 'Selecione um usuário.'; return; }
