@@ -12,3 +12,11 @@ export function qrSvgTag(texto, { cellSize = 6, margin = 8, errorLevel = 'M' } =
   qr.make();
   return qr.createSvgTag({ cellSize, margin });
 }
+
+// GIF base64 (data URL) do QR — usado para desenhar o código na Bematech via GDI.
+export function qrDataUrl(texto, { cellSize = 10, margin = 40, errorLevel = 'M' } = {}) {
+  const qr = qrcode(0, errorLevel);
+  qr.addData(String(texto), 'Byte');
+  qr.make();
+  return qr.createDataURL(cellSize, margin);
+}
