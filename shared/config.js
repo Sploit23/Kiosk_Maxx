@@ -163,9 +163,8 @@ const PRICING = {
   ima: { base: 7.0, bulk: null, bulkThreshold: null },
   'item-encarte': { base: 15.0, bulk: null, bulkThreshold: null },
   'porta-cartao-postal': { base: 10.0, bulk: null, bulkThreshold: null },
+  // envio digital (produto): a foto escolhida vai para a galeria /natal por código
   'foto-digital': { base: 25.0, bulk: null, bulkThreshold: null },
-    // envio digital (produto): a foto escolhida vai para a galeria /natal por código
-    'foto-digital': { base: 10.0, bulk: null, bulkThreshold: null },
   // combos
   combo1: { base: 45.0, bulk: null, bulkThreshold: null },
   combo2: { base: 65.0, bulk: null, bulkThreshold: null },

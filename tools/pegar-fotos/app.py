@@ -152,15 +152,24 @@ class PhotoHTTPHandler(SimpleHTTPRequestHandler):
     def get_root(self):
         return getattr(self.server, "server_root", "")
 
+    def _safe_path(self, *parts):
+        root = os.path.realpath(self.get_root())
+        target = os.path.realpath(os.path.join(root, *parts))
+        try:
+            if os.path.commonpath([root, target]) != root:
+                return None
+        except ValueError:
+            return None
+        return target
+
     def translate_path(self, path):
         path = unquote(path.split("?")[0].split("#")[0])
         path = path.lstrip("/")
-        return os.path.join(self.get_root(), path)
+        return self._safe_path(path) or self.get_root()
 
     def _json(self, payload, code=200):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(json.dumps(payload).encode())
 
@@ -213,7 +222,11 @@ class PhotoHTTPHandler(SimpleHTTPRequestHandler):
 
         if self.path.startswith("/api/batches/") and self.path.endswith("/files"):
             batch_name = unquote(self.path.split("/")[3])
-            batch_path = os.path.join(self.get_root(), batch_name)
+            batch_path = self._safe_path(batch_name)
+            if not batch_path:
+                self.send_response(404)
+                self.end_headers()
+                return
             known = marker_files(batch_path)
             files = []
             if os.path.isdir(batch_path):
@@ -235,14 +248,13 @@ class PhotoHTTPHandler(SimpleHTTPRequestHandler):
             if len(parts) >= 4:
                 batch_name = unquote(parts[2])
                 file_name = unquote("/".join(parts[3:]))
-                file_path = os.path.join(self.get_root(), batch_name, file_name)
-                if os.path.isfile(file_path):
+                file_path = self._safe_path(batch_name, file_name)
+                if file_path and os.path.isfile(file_path):
                     self.send_response(200)
                     mime, _ = mimetypes.guess_type(file_path)
                     self.send_header("Content-Type", mime or "application/octet-stream")
                     self.send_header("Content-Length", str(os.path.getsize(file_path)))
                     self.send_header("Content-Disposition", f'attachment; filename="{os.path.basename(file_path)}"')
-                    self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     with open(file_path, "rb") as f:
                         shutil.copyfileobj(f, self.wfile)

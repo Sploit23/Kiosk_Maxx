@@ -1532,6 +1532,7 @@ let saldoEsperadoProximoCaixa = null; // saldo travado herdado do fechamento ant
 let abrirNovoAposFechar = false; // encadeia fechamento+conciliação → abertura do próximo caixa
 let caixasHoje = []; // {numero, abertoEm, fechadoEm, fundoTroco, aberto} — mais de uma pessoa pode abrir caixa no mesmo dia
 let conciliacoesCaixa = []; // histórico de todas as conciliações, dia a dia, pra consulta posterior
+const caixasPortalMap = new Map(); // id CX-* → caixa cru do sidecar (aberto/fechado) para a outbox do portal
 const HORARIO_FECHAMENTO_QUIOSQUE = 22; // hora cheia, mock — regra 3.1 do documento (horário por data)
 
 
@@ -1545,7 +1546,7 @@ const EXTRAS = [
   {id:'porta-retrato-10x15', label:'Porta-retrato 10x15', preco:35},
   {id:'porta-retrato-15x20', label:'Porta-retrato 15x20', preco:50},
   {id:'ima', label:'Ímã de geladeira', preco:10, nota:'adicional a uma foto 10x15'},
-  {id:'foto-digital', label:'📲 Envio digital (foto)', preco:10, digital:true, nota:'a foto escolhida vai para o celular por código'},
+  {id:'foto-digital', label:'📲 Envio digital (foto)', preco:25, digital:true, nota:'a foto escolhida vai para o celular por código'},
 ];
 // "Item Encarte" e "Porta-cartão postal" são produtos físicos com estoque próprio (regra 3.2 do documento) —
 // nunca aparecem na fileira de extras, só existem dentro dos combos abaixo.
@@ -1583,6 +1584,22 @@ function saldoFisico(produtoId){ const k=chaveFisica(produtoId); return k ? (est
 function temEstoqueFisico(produtoId, qtd=1){ const s=saldoFisico(produtoId); return s===null || s>=qtd; }
 function baixarEstoqueFisico(produtoId, qtd=1){ const k=chaveFisica(produtoId); if(k) estoqueFisico[k]-=qtd; }
 function devolverEstoqueFisico(produtoId, qtd=1){ const k=chaveFisica(produtoId); if(k) estoqueFisico[k]+=qtd; }
+
+const ESTOQUE_FISICO_KEY = 'natal-estoque-fisico-v1';
+function carregarEstoqueFisico(){
+  try{
+    const raw = JSON.parse(localStorage.getItem(ESTOQUE_FISICO_KEY) || 'null');
+    if(!raw || typeof raw !== 'object') return;
+    Object.keys(estoqueFisico).forEach(k=>{
+      const v = Number(raw[k]);
+      if(Number.isFinite(v) && v >= 0) estoqueFisico[k] = Math.floor(v);
+    });
+  }catch{}
+}
+function salvarEstoqueFisico(){
+  try{ localStorage.setItem(ESTOQUE_FISICO_KEY, JSON.stringify(estoqueFisico)); }catch{}
+}
+carregarEstoqueFisico();
 
 // Catálogo de combos cadastrado pela loja (regra 3.2 do documento de negócio) —
 // cada combo soma um preço fechado, sempre menor que a soma dos itens avulsos.
@@ -1888,7 +1905,7 @@ function mapearPedido(p){
         sessionId: itemSessao, sessionSenha: itemSenha,
         fotoSeed: it.filename ? (itemSessao ? itemSessao + '/' + it.filename : it.filename) : (it.key || null),
         tipo: 'tamanho', produtoId: it.key, label: labelProduto(it.key, 'tamanho'),
-        qtd: it.qty || 1, precoUnit: it.unitPrice || 0, preco: it.subtotal || 0,
+        modelo, qtd: it.qty || 1, precoUnit: it.unitPrice || 0, preco: it.subtotal || 0,
         zoom: it.scale || 100, offX: it.diffx || 0, offY: it.diffy || 0,
         orientation: it.orientation || 'retrato',
         overlayVariant: variant || undefined,
@@ -1954,6 +1971,7 @@ async function carregarCaixa(){
     const res = await natalApi.caixaEstado();
     if(!res || !res.success){ caixaReal = null; return; }
     caixaReal = res.caixa || null;
+    if(caixaReal && caixaReal.id) caixasPortalMap.set(String(caixaReal.id), caixaReal);
     if(caixaReal && caixaReal.abertoEm && !caixaReal.fechadoEm){
       caixaAberto = true;
       caixaAbertoEm = new Date(caixaReal.abertoEm);
@@ -1973,6 +1991,7 @@ async function carregarCaixasHistorico(){
   try{
     const res = await natalApi.caixasHistorico();
     if(!res || !res.success || !Array.isArray(res.caixas)) return;
+    res.caixas.forEach(c => { if(c && c.id) caixasPortalMap.set(String(c.id), c); });
     const servidor = res.caixas.map(c => ({
       id: c.id,
       numero: c.numero,
@@ -1984,7 +2003,7 @@ async function carregarCaixasHistorico(){
       saldoRestante: c.saldoRestante !== undefined ? c.saldoRestante : undefined,
       diferencaTotal: c.diferenca ?? 0,
       porForma: Object.keys({ ...(c.totalPorMeio||{}), ...(c.meiosDeclarados||{}) }).map(m => {
-        const sistema = +(c.totalPorMeio?.[m] || 0);
+        const sistema = +((c.totalPorMeio?.[m] || 0) + (m === 'dinheiro' ? (c.valorInicial || 0) : 0));
         const real = +(c.meiosDeclarados?.[m] || 0);
         return { forma: formaDeMeio(m), sistema, real, diferenca: +(real-sistema).toFixed(2) };
       }),
@@ -2742,6 +2761,23 @@ async function enfileirarPortal(tipo, chave, payload){
   }catch(e){ console.warn('[sync] não consegui enfileirar', tipo, chave, e); return false; }
 }
 
+/* Guarda o caixa cru do sidecar (quem abriu, fundo, quem fechou, diferença)
+   e enfileira para o portal. Dedup por id CX-*: o fechamento atualiza o
+   mesmo item que a abertura criou. */
+async function enfileirarCaixaPortal(cx){
+  if(!cx || !cx.id) return false;
+  caixasPortalMap.set(String(cx.id), cx);
+  const iso = v => {
+    if(v == null || v === '') return '';
+    if(typeof v === 'number' || /^\d+$/.test(String(v))) return new Date(Number(v)).toISOString();
+    return String(v);
+  };
+  const abertoEm = iso(cx.abertoEm);
+  const fechadoEm = iso(cx.fechadoEm);
+  const data = abertoEm ? isoDataLocal(new Date(abertoEm)) : '';
+  return enfileirarPortal('caixa', String(cx.id), { ...cx, abertoEm, fechadoEm, data: cx.data || data });
+}
+
 /* Monta o snapshot (vendas.push) de UM dia. `dataIso` = YYYY-MM-DD.
    O dia de um pedido é o dia da CRIAÇÃO (mesmo critério do pedido.push),
    para o portal conseguir reconciliar snapshot × pedidos. Ribbon/papel são
@@ -2755,7 +2791,18 @@ function montarSnapshotDia(dataIso){
     if(meios[m] != null) meios[m] += (+pg.valor || 0);
   }));
   const sessoesDia = sessions.filter(s => s.data === dataIso);
-  const comCombo = pagos.filter(p => p.desconto && p.desconto.tipo === 'combo').length;
+  const comCombo = pagos.filter(p =>
+    (p.desconto && p.desconto.tipo === 'combo') ||
+    (p.itens || []).some(it => it.tipo === 'combo-desconto')).length;
+  let descontos = 0, descontoPedidos = 0, fotos10x15 = 0, fotos15x20 = 0, unidadesRibbon = 0;
+  pagos.forEach(p => {
+    const d = descontoTotalPedido(p);
+    if(d > 0.004){ descontos += d; descontoPedidos++; }
+    const u = resumoUnidadesPedido(p);
+    fotos10x15 += u.fotos10x15;
+    fotos15x20 += u.fotos15x20;
+    unidadesRibbon += u.unidadesRibbon;
+  });
   // Última venda do dia usa a hora REAL do pagamento (pagoEm); o horario
   // (criação) só serve de fallback quando o sidecar ainda não gravou o pagoEm.
   const instantePagamento = p => (p.pagoEm instanceof Date && !isNaN(p.pagoEm)) ? p.pagoEm : p.horario;
@@ -2768,6 +2815,13 @@ function montarSnapshotDia(dataIso){
     sessoesCriadas: sessoesDia.length,
     sessoesVendidas: sessoesDia.filter(s => ['VENDIDA', 'FINALIZADA'].includes(s.estado)).length,
     taxacombo: pagos.length ? +((100 * comCombo) / pagos.length).toFixed(1) : 0,
+    descontos: +descontos.toFixed(2),
+    descontoPedidos,
+    // 10x15 e 15x20 físicos; bolinha/polaroide contam como 10x15.
+    // unidadesRibbon = 10x15 + 2×15x20 (é o que consome o ribbon).
+    fotos10x15,
+    fotos15x20,
+    unidadesRibbon,
     meios,
     // null quando o contador de ribbon não está disponível (portal não força 0)
     ribbonRestante: Number.isFinite(+ribbonBalanceBase) ? +ribbonBalanceBase : null,
@@ -2780,7 +2834,7 @@ function montarSnapshotDia(dataIso){
 }
 
 /* Garante que tudo que precisa ir ao portal está NA FILA (e não só enviado).
-   Pedidos e auditoria: 1 item por registro. Snapshots: 1 item por dia.
+   Pedidos, caixas e auditoria: 1 item por registro. Snapshots: 1 item por dia.
    O sidecar guarda o registro do que JÁ foi confirmado pelo portal
    (enviados-portal.json, com hash do payload) para não reenviar o histórico
    a cada boot — mas reenvia quando o conteúdo mudou (ex.: cancelamento). */
@@ -2804,7 +2858,15 @@ async function enfileirarPendentesPortal(){
     if(await enfileirarPortal('pedido', id, montarPedidoPortal(p))) novos++;
   }
 
-  // 2) auditoria (uso de senha master)
+  // 2) caixas: abertura e fechamento (quem abriu, fundo, quem fechou, diferença)
+  for(const cx of caixasPortalMap.values()){
+    if(!cx || !cx.id) continue;
+    const k = 'caixa:' + cx.id;
+    if(naFila.has(k)) continue;
+    if(await enfileirarCaixaPortal(cx)) novos++;
+  }
+
+  // 3) auditoria (uso de senha master)
   for(const u of usosSenhaLog){
     const k = 'auditoria:' + u.id;
     if(naFila.has(k) || enviados.has(k)) continue;
@@ -2821,7 +2883,7 @@ async function enfileirarPendentesPortal(){
     })) novos++;
   }
 
-  // 3) snapshots: 1 por dia. Hoje sobe sempre; dias antigos só quando ainda
+  // 4) snapshots: 1 por dia. Hoje sobe sempre; dias antigos só quando ainda
   //    não subiram ou quando um pedido daquele dia foi cancelado DEPOIS do
   //    envio (senão o portal continuaria contando a venda cancelada).
   const dias = new Set(pedidosRealizados
@@ -2854,9 +2916,11 @@ async function enviarItemFila(item, ident){
     if(item.tipo === 'vendas'){
       res = await portalApi.vendasPush({ ...base, ...payload, pdvNome: payload.pdvNome || ident.pdvNome });
     } else if(item.tipo === 'pedido'){
-      res = await portalApi.pedidoPush({ ...base, pedido: { ...payload, pdvNome: payload.pdvNome || ident.pdvNome } });
+      res = await portalApi.pedidoPush({ ...payload, pdvNome: payload.pdvNome || ident.pdvNome });
+    } else if(item.tipo === 'caixa'){
+      res = await portalApi.caixaPush({ ...payload, pdvNome: payload.pdvNome || ident.pdvNome });
     } else if(item.tipo === 'auditoria'){
-      res = await portalApi.auditoriaPush({ ...base, uso: { ...payload, pdvNome: payload.pdvNome || ident.pdvNome } });
+      res = await portalApi.auditoriaPush({ ...payload, pdvNome: payload.pdvNome || ident.pdvNome });
     } else {
       await natalApi.filaPortalConfirmar({ id: item.id }); // tipo desconhecido → descarta
       return true;
@@ -2938,10 +3002,44 @@ function enviarSnapshotVendas(){ return sincronizarComPortal(); }
 function agendarPedidosPortal(msec = 800){ agendarSincronizacao(msec); }
 function enviarPedidosDia(){ return sincronizarComPortal(); }
 
-function unidadesItemPortal(item){
-  if(item.tipo !== 'tamanho') return 0;
+/* Modelo físico de impressão: 10x15 e 15x20 são os papéis base; bolinha e
+   polaroide saem no molde 10x15. 15x20 consome 2 unidades de ribbon. */
+function modeloImpressaoItem(item){
+  if(item && item.modelo) return item.modelo === '15x20' ? '15x20' : '10x15';
+  const id = String((item && item.produtoId) || '').toLowerCase();
+  if(id.includes('15x20')) return '15x20';
+  const t = TAMANHOS.find(x => x.id === (item && item.produtoId));
+  if(t && t.modelo === '15x20') return '15x20';
+  return '10x15';
+}
+function unidadesRibbonItem(item){
+  if(!item || item.tipo !== 'tamanho') return 0;
+  const qtd = item.qtd || 1;
   const t = TAMANHOS.find(x => x.id === item.produtoId);
-  return t ? (t.unidades || 0) * (item.qtd || 1) : 0;
+  const un = t ? Number(t.unidades) : 0;
+  if(Number.isFinite(un) && un > 0) return un * qtd;
+  return (modeloImpressaoItem(item) === '15x20' ? 2 : 1) * qtd;
+}
+function resumoUnidadesPedido(p){
+  let fotos10x15 = 0, fotos15x20 = 0, unidadesRibbon = 0;
+  (p.itens || []).forEach(it => {
+    if(it.tipo !== 'tamanho') return;
+    const qtd = it.qtd || 1;
+    if(modeloImpressaoItem(it) === '15x20') fotos15x20 += qtd;
+    else fotos10x15 += qtd;
+    unidadesRibbon += unidadesRibbonItem(it);
+  });
+  return { fotos10x15, fotos15x20, unidadesRibbon };
+}
+/* Desconto total do pedido: usa o campo `desconto` quando existe e também as
+   linhas negativas do carrinho (combo, catálogo, senha master, etc.). */
+function descontoTotalPedido(p){
+  const doCampo = Number(p && p.desconto && p.desconto.valor) || 0;
+  const dasLinhas = (p && p.itens || []).reduce((s, it) => {
+    if(!(it.tipo === 'ajuste' || TIPOS_DESCONTO_CARRINHO.has(it.tipo) || +it.preco < 0)) return s;
+    return s + Math.abs(Number(it.preco) || 0);
+  }, 0);
+  return +Math.max(doCampo, dasLinhas).toFixed(2);
 }
 
 // Tipos que representam desconto/ajuste no carrinho (nunca contam como tamanho).
@@ -2962,19 +3060,44 @@ function montarPedidoPortal(p){
     else if (it.tipo === 'ajuste' || TIPOS_DESCONTO_CARRINHO.has(it.tipo)) tipo = 'ajuste';
     return {
       tipo, produtoId: it.produtoId || '', label: it.label || '',
-      qtd: it.qtd || 1, unidades: unidadesItemPortal(it),
+      qtd: it.qtd || 1,
+      // unidades de ribbon: 15x20 = 2, 10x15/bolinha/polaroide = 1
+      unidades: tipo === 'tamanho' ? unidadesRibbonItem(it) : 0,
+      modelo: tipo === 'tamanho' ? modeloImpressaoItem(it) : '',
       precoUnit: +(it.precoUnit || 0), subtotal: +(it.preco || 0),
     };
   });
   // Desconto (combo/falha/comercial) vem separado no pedido — manda como linha
   // de ajuste negativa para a soma dos itens fechar com o total (base do DRE).
-  const descontoValor = p.desconto ? +(Number(p.desconto.valor) || 0).toFixed(2) : 0;
-  if(descontoValor > 0.004 && !(p.itens || []).some(it => it.preco < 0)){
+  const descontoValor = descontoTotalPedido(p);
+  const descontoItens = (p.itens || [])
+    .filter(it => it.tipo === 'ajuste' || TIPOS_DESCONTO_CARRINHO.has(it.tipo) || +it.preco < 0)
+    .map(it => ({
+      tipo: it.tipo || 'ajuste',
+      label: it.label || 'Desconto',
+      valor: +Math.abs(Number(it.preco) || 0).toFixed(2),
+    }));
+  const negativoNosItens = +itens
+    .filter(it => +it.subtotal < 0)
+    .reduce((s, it) => s + Math.abs(Number(it.subtotal) || 0), 0)
+    .toFixed(2);
+  const faltaNosItens = +(descontoValor - negativoNosItens).toFixed(2);
+  if(faltaNosItens > 0.004){
     itens.push({
-      tipo: 'ajuste', produtoId: '', label: p.desconto.nome || 'Desconto',
-      qtd: 1, unidades: 0, precoUnit: -descontoValor, subtotal: -descontoValor,
+      tipo: 'ajuste', produtoId: '', label: (p.desconto && p.desconto.nome) || 'Desconto',
+      qtd: 1, unidades: 0, modelo: '', precoUnit: -faltaNosItens, subtotal: -faltaNosItens,
     });
   }
+  const detalhado = +descontoItens.reduce((s, d) => s + d.valor, 0).toFixed(2);
+  const faltaDetalhar = +(descontoValor - detalhado).toFixed(2);
+  if(faltaDetalhar > 0.004){
+    descontoItens.push({
+      tipo: (p.desconto && p.desconto.tipo) || 'desconto',
+      label: (p.desconto && p.desconto.nome) || 'Desconto',
+      valor: faltaDetalhar,
+    });
+  }
+  const resumoUnidades = resumoUnidadesPedido(p);
   const horario = p.horario instanceof Date ? p.horario : new Date(p.horario);
   const pagoAt = (p.pagoEm instanceof Date && !isNaN(p.pagoEm)) ? p.pagoEm : horario;
   return {
@@ -2993,6 +3116,10 @@ function montarPedidoPortal(p){
     pagamentos,
     sessoes: (p.sessoes || []).map(s => ({ id: s.id, senha: s.senha })),
     desconto: +descontoValor.toFixed(2),
+    descontoItens,
+    fotos10x15: resumoUnidades.fotos10x15,
+    fotos15x20: resumoUnidades.fotos15x20,
+    unidadesRibbon: resumoUnidades.unidadesRibbon,
     caixaId: p.caixaId || (typeof caixaReal === 'object' && caixaReal && caixaReal.id ? caixaReal.id : ''),
     origemPedidoId: p.origemPedidoId || null,
     guiaImpressa: !!p.guiaImpressa,
@@ -3570,6 +3697,7 @@ async function finalizarVendaImpl(){
   cart.forEach(c => { const s = sessions.find(x => x.id === c.sessionId); if(s){ s.temVenda = true; s.status = 'vendida'; } });
   ribbonBalanceBase -= unidadesNoCarrinho();
   pedidosRealizados.push(novoPedido);
+  salvarEstoqueFisico();
   agendarPedidosPortal(600); // sobe o pedido completo ao portal
   // O snapshot diário (vendas.push) também sai aqui, sem esperar o SSE de
   // pedido:pago: se o stream cair, a venda aparecia no portal só 5 min depois.
@@ -3613,7 +3741,7 @@ async function finalizarVendaImpl(){
 
   cart = [];
   const linhasResumo = itensResumo.map(c => `
-    <div class="rc-line"><span>${c.qtd > 1 ? c.qtd + 'x ' : ''}${c.label} · #${c.sessionSenha}</span><span>${fmt(c.preco)}</span></div>
+    <div class="rc-line"><span>${c.qtd > 1 ? c.qtd + 'x ' : ''}${escHtml(c.label)} · #${c.sessionSenha}</span><span>${fmt(c.preco)}</span></div>
   `).join('');
   const temFoto = itensResumo.some(c => c.tipo === 'tamanho' && c.fotoSeed);
 
@@ -3927,7 +4055,7 @@ function renderPainel(){
           <div class="sc-senha">#${s.senha}</div>
           <div class="sc-hora">gravada às ${s.hora}</div>
         </div>
-        <div class="sc-tag ${t.cls}">${t.label}</div>
+        <div class="sc-tag ${t.cls}">${escHtml(t.label)}</div>
       </div>
       <div class="sc-bottom">
         <div class="sc-fotos">${s.fotos.length} fotos</div>
@@ -4104,15 +4232,15 @@ function renderThumbs(){
 /* miniaturas dos produtos nos botões da coluna da direita (mockups montados em CSS) */
 function miniThumb(cls='', styleAttr=''){
   const src = currentFoto ? img(currentFoto.seed) : PLACEHOLDER_BLANK;
-  return `<span class="oc-thumb ${cls}" ${styleAttr}><img src="${src}" alt=""></span>`;
+  return `<span class="oc-thumb ${cls}" ${styleAttr}><img src="${escHtml(src)}" alt=""></span>`;
 }
 function miniThumbTamanho(t){
   const modelo = modeloDe(t);
   if(modelo==='bolinha') return miniThumb('oc-round');
   if(modelo==='polaroide') return miniThumb('oc-polaroid');
   // 10x15 e 15x20: papel em paisagem (proporção trocada na miniatura)
-  const [w,h] = String(t.ratio).split('/');
-  return miniThumb('', `style="aspect-ratio:${h}/${w}"`);
+  const [w,h] = String(t.ratio || '3/2').split('/');
+  return miniThumb('', `style="aspect-ratio:${escHtml(h)}/${escHtml(w)}"`);
 }
 
 function renderOptions(){
@@ -4129,7 +4257,7 @@ function renderOptions(){
     card.innerHTML = `
       <button class="oc-main" type="button">
         ${miniThumbTamanho(t)}
-        <span class="oc-left"><span class="oc-name">${t.label}</span><span class="oc-price">${fmt(t.preco)}</span></span>
+        <span class="oc-left"><span class="oc-name">${escHtml(t.label)}</span><span class="oc-price">${fmt(t.preco)}</span></span>
         <span class="oc-check">✓</span>
       </button>
     `;
@@ -4158,7 +4286,7 @@ function renderOptions(){
     card.className='option-card';
     card.innerHTML = `
       <button class="oc-main" type="button">
-        <span class="oc-left"><span class="oc-name">${ex.label}</span><span class="oc-price">${fmt(ex.preco)}</span></span>
+        <span class="oc-left"><span class="oc-name">${escHtml(ex.label)}</span><span class="oc-price">${fmt(ex.preco)}</span></span>
         <span class="oc-plus">+</span>
       </button>
     `;
@@ -4192,7 +4320,7 @@ function abrirQtdModal(t){
   let qtd = 1;
   openModal(`
     <div class="modal-head">
-      <div><div class="modal-step-label">Quantidade</div><h3>${t.label}</h3></div>
+      <div><div class="modal-step-label">Quantidade</div><h3>${escHtml(t.label)}</h3></div>
       <button class="modal-close" onclick="closeModal()">×</button>
     </div>
     <p class="modal-sub">Quantas cópias deste tamanho você quer?</p>
@@ -4442,15 +4570,15 @@ function renderCombos(){
     const card = document.createElement('div');
     card.className='combo-card'+(pendente?' pending':'');
     card.innerHTML = `
-      <div class="oc-name">${combo.nome}</div>
-      <div class="combo-itens">${descricao}${ehEncarteLegado?` · estoque do Item Encarte: ${saldoFisico('item-encarte')}`:''}</div>
+      <div class="oc-name">${escHtml(combo.nome)}</div>
+      <div class="combo-itens">${escHtml(descricao)}${ehEncarteLegado?` · estoque do Item Encarte: ${saldoFisico('item-encarte')}`:''}</div>
       ${ehEncarteLegado ? `<div class="combo-itens" style="color:var(--gold-300)">⚠ Seleciona 2 fotos 15x20 ao montar o combo</div>` : (multiFotos ? `<div class="combo-itens" style="color:var(--gold-300)">Monte foto por foto: escolha e ajuste cada uma</div>` : '')}
       <div class="combo-bottom">
         <div class="combo-precos">
           ${somaIndividual>combo.valorCombo?`<span class="combo-de">${fmt(somaIndividual)}</span>`:''}
           <span class="combo-por">${fmt(combo.valorCombo)}</span>
         </div>
-        <button class="oc-add-btn" ${bloqueado?'disabled':''}>${labelBtn}</button>
+        <button class="oc-add-btn" ${bloqueado?'disabled':''}>${escHtml(labelBtn)}</button>
       </div>
     `;
     if(!bloqueado) card.querySelector('button').addEventListener('click', ()=>{
@@ -4494,7 +4622,7 @@ function abrirComboSlots(combo){
   if(!currentFoto) currentFoto = currentSession.fotos[0];
   openModal(`
     <div class="modal-head">
-      <div><div class="modal-step-label">Montar combo</div><h3>${combo.nome}</h3></div>
+      <div><div class="modal-step-label">Montar combo</div><h3>${escHtml(combo.nome)}</h3></div>
       <button class="modal-close" onclick="closeModal()">×</button>
     </div>
     <p class="modal-sub">Selecione as fotos para cada slot. Valor do combo: ${fmt(combo.valorCombo)}</p>
@@ -5464,7 +5592,7 @@ function showDescontoVendaModal(){
     const elegivel = total >= (d.minimo||0) && !jaTemDesconto;
     const valorCalc = d.tipo==='percentual' ? +(total*d.valor/100).toFixed(2) : d.valor;
     return `<div class="option-card">
-      <div class="oc-left"><div class="oc-name">${d.nome}</div><div class="oc-price">${fmt(valorCalc)} de desconto</div></div>
+      <div class="oc-left"><div class="oc-name">${escHtml(d.nome)}</div><div class="oc-price">${fmt(valorCalc)} de desconto</div></div>
       <button class="oc-add-btn" data-id="${d.id}" ${elegivel?'':'disabled'}>${!elegivel && jaTemDesconto ? 'Já aplicado' : (elegivel?'Aplicar':'Abaixo do mínimo')}</button>
     </div>`;
   }).join('');
@@ -5518,7 +5646,7 @@ function showItemReviewModal(cartId){
   const ehFoto = c.tipo==='tamanho';
   openModal(`
     <div class="modal-head">
-      <div><div class="modal-step-label">Conferência do item</div><h3>${c.label}</h3></div>
+      <div><div class="modal-step-label">Conferência do item</div><h3>${escHtml(c.label)}</h3></div>
       <button class="modal-close" onclick="closeModal()">×</button>
     </div>
     <div style="display:flex;justify-content:center;margin-bottom:16px;" id="item-review-frame-wrap"></div>
@@ -5654,7 +5782,7 @@ function renderCart(){
     wrap.innerHTML = '<div class="cart-empty">Nenhum item ainda.<br>Selecione fotos e tamanhos ao lado.</div>';
   } else {
     cart.forEach(c=>{
-      const isComboDesconto = c.tipo==='combo-desconto' || c.tipo==='desconto-catalogo' || c.tipo==='desconto-senha-master';
+      const isComboDesconto = ['combo-desconto','desconto-catalogo','desconto-senha-master','desconto-falha-operacional','desconto-comercial'].includes(c.tipo);
       const isZeradoPorCombo = !!c.zeradoPorCombo;
       const semStepper = isComboDesconto || isZeradoPorCombo || c.produtoId==='foto-digital';
       const variantLabel = c.tipo==='tamanho' && config.getOverlayVariants(modeloProduto(c.produtoId)).length
@@ -5665,7 +5793,7 @@ function renderCart(){
         <div class="ci-top">
           <img loading="lazy" decoding="async">
           <div class="ci-info">
-            <div class="ci-label">${c.label}${variantLabel} · #${c.sessionSenha}</div>
+            <div class="ci-label">${escHtml(c.label)}${variantLabel} · #${c.sessionSenha}</div>
             <div class="ci-price">${isZeradoPorCombo
               ? `<span style="text-decoration:line-through;color:var(--slate-500);">${fmt(c.precoOriginal)}</span> incluída no encarte`
               : (c.qtd>1 ? c.qtd+' × '+fmt(c.precoUnit)+' = ' : '')+fmt(c.preco)}</div>
@@ -5784,7 +5912,7 @@ function buildUpsellOptions(){
 function showUpsellModal(opcoes, next){
   const cardsHtml = opcoes.map((o,i)=>`
     <div class="option-card">
-      <div class="oc-left"><div class="oc-name">${o.label}</div><div class="oc-price">${fmt(o.preco)}${o.tipo==='extra'?' cada':''}</div></div>
+      <div class="oc-left"><div class="oc-name">${escHtml(o.label)}</div><div class="oc-price">${fmt(o.preco)}${o.tipo==='extra'?' cada':''}</div></div>
       ${o.tipo==='combo'
         ? `<button class="oc-add-btn" data-i="${i}" data-qtd="1">+ Adicionar</button>`
         : `<div style="display:flex;gap:6px;">
@@ -5829,10 +5957,10 @@ function showUpsellModal(opcoes, next){
 
 function showConferenceModal(){
   const linhas = cart.map(c=>`
-    <div class="conf-item" data-cartid="${c.cartId}" ondblclick="showItemReviewModal('${c.cartId}')">
+    <div class="conf-item" data-cartid="${c.cartId}">
       <img loading="lazy" decoding="async" class="conf-img">
       <div class="conf-info">
-        <div class="conf-label">${c.qtd>1?c.qtd+'x ':''}${c.label}</div>
+        <div class="conf-label">${c.qtd>1?c.qtd+'x ':''}${escHtml(c.label)}</div>
         <div class="conf-sub">Sessão #${c.sessionSenha} · duplo clique para conferir</div>
       </div>
       <div class="conf-price">${fmt(c.preco)}</div>
@@ -5853,6 +5981,9 @@ function showConferenceModal(){
   document.querySelectorAll('.conf-img').forEach((gi, i)=>{
     const c = cart[i];
     if(gi && c && c.fotoSeed) photoInto(gi, 'thumb', { seed: c.fotoSeed });
+  });
+  document.querySelectorAll('.conf-item[data-cartid]').forEach(el=>{
+    el.addEventListener('dblclick', ()=> showItemReviewModal(el.dataset.cartid));
   });
   document.getElementById('btn-conf-continuar').addEventListener('click', ()=>{
     closeModal();
@@ -5910,6 +6041,7 @@ const _npTitles = {
   '#lm-senha': 'Senha de manutenção',
   '#st-senha': 'Senha de autorização',
   '#av-valor': 'Informe o valor',
+  '#dd-valor': 'Valor do desconto',
 };
 function numpadLimite(el){
   return (el && el.maxLength && el.maxLength > 0) ? el.maxLength : Infinity;
@@ -6019,7 +6151,7 @@ function numpadEnter(){
   const el = numpadTarget;
   fecharNumpad(false);
   if(!el) return;
-  const map = { '#login-senha': 'login-entrar', '#ac-fundo': 'ac-confirmar', '#fc-envelope': 'fc-confirmar' };
+  const map = { '#login-senha': 'login-entrar', '#ac-fundo': 'ac-confirmar', '#fc-envelope': 'fc-confirmar', '#dd-valor': 'dd-confirmar' };
   const btnId = map['#' + el.id] || (el.classList.contains('fc-real') ? 'fc-confirmar' : null);
   if(btnId){
     const btn = document.getElementById(btnId);
@@ -6775,6 +6907,21 @@ function openCheckoutPretendido(){
   renderCheckoutStep(total);
 }
 
+function ajustarPagamentosAoTotal(rows, total){
+  if(!rows.length){ rows.push({forma:'Crédito à vista', valor:total}); return; }
+  let diff = +(total - rows.reduce((s,r)=>s+(+r.valor||0),0)).toFixed(2);
+  for(let i=rows.length-1; i>=0 && Math.abs(diff)>0.004; i--){
+    const atual = +rows[i].valor || 0;
+    const novo = Math.max(0, +(atual + diff).toFixed(2));
+    diff = +(diff - (novo - atual)).toFixed(2);
+    rows[i].valor = novo;
+  }
+  if(Math.abs(diff)>0.004){
+    const atual = +rows[0].valor || 0;
+    rows[0].valor = Math.max(0, +(atual + diff).toFixed(2));
+  }
+}
+
 function renderCheckoutStep(total){
   const totalValido = Number.isFinite(total) && total > 0;
   const rows = pretendidoRows;
@@ -6782,6 +6929,16 @@ function renderCheckoutStep(total){
   const restante = +(total - alocado).toFixed(2);
   const formasList = formasDisponiveis(total);
   const parcelamentoLiberado = total >= LOJA_PARCELAMENTO.valorMinimo;
+  const descontoManual = cart.find(c=>TIPOS_DESCONTO_MANUAL.includes(c.tipo));
+  const descontoHtml = descontoManual
+    ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--gold-500);border-radius:10px;background:rgba(212,162,76,.08);">
+        <div style="min-width:0;">
+          <div style="font-size:12px;color:var(--gold-300);font-weight:700;">Desconto aplicado: ${fmt(-descontoManual.preco)}</div>
+          <div style="font-size:12px;color:var(--slate-300);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(descontoManual.label || 'Desconto')}</div>
+        </div>
+        <button class="fc-btn" id="btn-remover-desconto" style="white-space:nowrap;">Remover</button>
+      </div>`
+    : `<button class="fc-btn" id="btn-desconto-checkout">🏷 Aplicar desconto</button>`;
 
   openModal(`
     <div class="modal-head">
@@ -6793,10 +6950,7 @@ function renderCheckoutStep(total){
     </div>
     <p class="modal-sub">Selecione uma ou mais formas de pagamento. É possível dividir o valor (multipagamento).</p>
     ${!parcelamentoLiberado ? `<p class="modal-sub" style="color:var(--slate-500)">Parcelamento disponível a partir de ${fmt(LOJA_PARCELAMENTO.valorMinimo)} (regra desta loja) — este pedido está abaixo do mínimo.</p>` : ''}
-    <div class="reopen-actions" style="margin-bottom:16px;">
-      <button class="fc-btn" id="btn-desc-falha">🛠 Desconto por falha operacional</button>
-      <button class="fc-btn" id="btn-desc-comercial">🤝 Desconto comercial</button>
-    </div>
+    <div class="reopen-actions" style="margin-bottom:16px;">${descontoHtml}</div>
     <div class="pay-rows" id="pay-rows">${paymentRowsHTML(rows, true, formasList)}</div>
     <button class="add-pay-row" id="add-row">+ Adicionar forma de pagamento (multipagamento)</button>
     <div class="restante-banner ${totalValido && restante===0?'ok':''}" id="restante-banner">
@@ -6806,26 +6960,36 @@ function renderCheckoutStep(total){
     <button class="btn-primary" id="btn-confirm-step" ${(!totalValido || restante!==0)?'disabled':''}>Confirmar pedido</button>
   `);
 
-  const aplicarDesconto = (tipo, titulo)=>{
+  const btnAplicar = document.getElementById('btn-desconto-checkout');
+  if(btnAplicar) btnAplicar.addEventListener('click', ()=>{
     if(temDescontoManual()){ toast('⚠ Já existe um desconto neste pedido'); return; }
-    askSenhaMotivo(titulo, `Código e motivo ficam registrados nesse pedido.`, (senha,motivo)=>{
-      askValor('Valor do desconto', 'Informe o valor do desconto em reais (ex: 15,00).', (valorStr)=>{
-        const valor = parseFloat((valorStr||'0').replace(',','.'));
-        if(!valor || valor<=0){ toast('Valor inválido — desconto não aplicado'); return; }
-        if(temDescontoManual()){ toast('⚠ Já existe um desconto neste pedido'); return; }
-        cart.push({
-          cartId:'desc-'+tipo+'-'+Date.now(), tipo, produtoId:tipo, label:titulo,
-          qtd:1, precoUnit:-valor, preco:-valor,
-          sessionId: currentSession.id, sessionSenha: currentSession.senha, fotoSeed: currentFoto ? currentFoto.seed : currentSession.fotos[0].seed
-        });
-        const novoTotal = cartTotal();
-        toast(`${titulo}: ${fmt(valor)} aplicado — motivo registrado`);
-        renderCheckoutStep(novoTotal);
+    askDescontoDescricaoValor((descricao, valor)=>{
+      if(temDescontoManual()){ toast('⚠ Já existe um desconto neste pedido'); return; }
+      cart.push({
+        cartId:'desc-'+Date.now(), tipo:'desconto-comercial', produtoId:'desconto-comercial',
+        label:`Desconto: ${descricao}`,
+        qtd:1, precoUnit:-valor, preco:-valor,
+        sessionId: currentSession.id, sessionSenha: currentSession.senha, fotoSeed: currentFoto ? currentFoto.seed : currentSession.fotos[0].seed
       });
-    });
-  };
-  document.getElementById('btn-desc-falha').addEventListener('click', ()=>aplicarDesconto('desconto-falha-operacional','Desconto por falha operacional'));
-  document.getElementById('btn-desc-comercial').addEventListener('click', ()=>aplicarDesconto('desconto-comercial','Desconto comercial'));
+      const novoTotal = cartTotal();
+      ajustarPagamentosAoTotal(pretendidoRows, novoTotal);
+      renderCart();
+      toast(`Desconto de ${fmt(valor)} aplicado`);
+      renderCheckoutStep(novoTotal);
+    }, total);
+  });
+
+  const btnRemover = document.getElementById('btn-remover-desconto');
+  if(btnRemover) btnRemover.addEventListener('click', ()=>{
+    const d = cart.find(c=>TIPOS_DESCONTO_MANUAL.includes(c.tipo));
+    if(!d) return;
+    cart = cart.filter(c=>c.cartId !== d.cartId);
+    const novoTotal = cartTotal();
+    ajustarPagamentosAoTotal(pretendidoRows, novoTotal);
+    renderCart();
+    toast('Desconto removido');
+    renderCheckoutStep(novoTotal);
+  });
 
   wirePaymentRows(rows, 'pay-rows', total, (removed)=>{
     if(removed) renderCheckoutStep(total);
@@ -6968,10 +7132,10 @@ function renderLoginUsers(){
   const wrap = document.getElementById('login-users');
   wrap.innerHTML = USERS.map(u=>`
     <div class="login-user-card" data-id="${u.id}">
-      <div class="login-user-avatar">${u.nome.charAt(0)}</div>
+      <div class="login-user-avatar">${escHtml(u.nome.charAt(0))}</div>
       <div>
-        <div class="login-user-nome">${u.nome}</div>
-        <div class="login-user-funcao">${u.funcao}</div>
+        <div class="login-user-nome">${escHtml(u.nome)}</div>
+        <div class="login-user-funcao">${escHtml(u.funcao)}</div>
       </div>
     </div>
   `).join('');
@@ -7042,7 +7206,7 @@ document.getElementById('user-chip').addEventListener('click', ()=>{
   if(!currentUser) return;
   openModal(`
     <div class="modal-head"><div><h3>Sair do sistema?</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
-    <p class="modal-sub">${currentUser.nome} (${currentUser.funcao}) — o caixa da loja continua aberto, é só o seu login que encerra.</p>
+    <p class="modal-sub">${escHtml(currentUser.nome)} (${escHtml(currentUser.funcao)}) — o caixa da loja continua aberto, é só o seu login que encerra.</p>
     <button class="btn-primary" id="btn-confirmar-logout">Sair</button>
   `);
   document.getElementById('btn-confirmar-logout').addEventListener('click', ()=>{
@@ -7312,6 +7476,84 @@ function askSenhaTexto(titulo, subtitulo, onConfirm){
   input.addEventListener('keydown', (e)=>{ if(e.key === 'Enter'){ e.preventDefault(); confirmar(); } });
 }
 
+function askDescontoDescricaoValor(onConfirm, totalMax){
+  const motivos = ['Cliente do shopping','Falha operacional','Cortesia','Promoção'];
+  const totalMaxNum = Number.isFinite(totalMax) ? totalMax : null;
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">Antes de finalizar</div><h3>Aplicar desconto</h3></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <p class="modal-sub">Toque em um motivo (ou digite) e informe o valor.</p>
+    <div id="dd-motivo-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+      ${motivos.map(m=>`<button type="button" class="fc-btn" data-motivo="${m}" style="padding:7px 10px;font-size:12px;">${m}</button>`).join('')}
+    </div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:14px;">
+      <div style="flex:1 1 300px;min-width:0;">
+        <textarea id="dd-descricao" maxlength="160" rows="2" placeholder="Descrição do desconto"
+          style="width:100%;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:10px;"></textarea>
+        <div style="font-size:12px;color:var(--slate-400);margin-bottom:6px;">Valor do desconto</div>
+        <input type="text" id="dd-valor" inputmode="decimal" placeholder="0,00"
+          style="width:100%;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:14px;">
+        <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Use o teclado ao lado para digitar outro motivo.</div>
+      </div>
+      <div class="eq-kb" id="dd-teclado">${eqKbTecladoHtml('Confirmar')}</div>
+    </div>
+    <button class="btn-primary" id="dd-confirmar" disabled>Confirmar</button>
+  `);
+  document.getElementById('modal-box').classList.add('wide');
+  const descInput = document.getElementById('dd-descricao');
+  const valorInput = document.getElementById('dd-valor');
+  const btn = document.getElementById('dd-confirmar');
+  const teclado = document.getElementById('dd-teclado');
+  const checar = ()=>{
+    const valor = numpadDinheiroNumero(valorInput.value);
+    const excede = totalMaxNum !== null && valor >= totalMaxNum;
+    btn.disabled = !(descInput.value.trim().length>0 && Number.isFinite(valor) && valor>0 && !excede);
+  };
+  descInput.addEventListener('input', checar);
+  valorInput.addEventListener('input', checar);
+  document.querySelectorAll('#dd-motivo-chips [data-motivo]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      descInput.value = b.getAttribute('data-motivo');
+      checar();
+      try{ valorInput.focus(); }catch{}
+    });
+  });
+  const inserirDescricao = (ch)=>{
+    const atual = descInput.value;
+    const inicioFrase = atual.length === 0;
+    let c = ch;
+    if(ch !== ' ' && ch !== '-' && ch !== "'") c = inicioFrase ? ch.toUpperCase() : ch.toLowerCase();
+    descInput.value = atual + c;
+    descInput.focus();
+    try{ descInput.setSelectionRange(descInput.value.length, descInput.value.length); }catch{}
+    checar();
+  };
+  teclado.querySelectorAll('[data-ch]').forEach(b=>{
+    b.addEventListener('click', ()=> inserirDescricao(b.getAttribute('data-ch')));
+  });
+  teclado.querySelectorAll('[data-k]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const k = b.getAttribute('data-k');
+      if(k === 'space') inserirDescricao(' ');
+      else if(k === 'back'){ descInput.value = descInput.value.slice(0,-1); descInput.focus(); checar(); }
+      else if(k === 'clear'){ descInput.value = ''; descInput.focus(); checar(); }
+      else if(k === 'add' && !btn.disabled) btn.click();
+    });
+  });
+  btn.addEventListener('click', ()=>{
+    const descricao = descInput.value.trim();
+    const valor = numpadDinheiroNumero(valorInput.value);
+    if(!descricao){ toast('Informe a descrição do desconto'); try{ descInput.focus(); }catch{} return; }
+    if(!Number.isFinite(valor) || valor<=0){ toast('Valor inválido — desconto não aplicado'); try{ valorInput.focus(); }catch{} return; }
+    if(totalMaxNum !== null && valor >= totalMaxNum){ toast(`Desconto deve ser menor que o total (${fmt(totalMaxNum)})`); try{ valorInput.focus(); }catch{} return; }
+    closeModal();
+    onConfirm(descricao, valor);
+  });
+  setTimeout(()=>{ try{ descInput.focus(); }catch{} }, 30);
+}
+
 function askSenhaMotivo(titulo, subtitulo, onConfirm, pedidoContexto){
   openModal(`
     <div class="modal-head">
@@ -7319,20 +7561,50 @@ function askSenhaMotivo(titulo, subtitulo, onConfirm, pedidoContexto){
       <button class="modal-close" onclick="closeModal()">×</button>
     </div>
     <p class="modal-sub">${subtitulo}</p>
-    <div class="pay-rows" style="margin-bottom:10px;">
-      <input type="password" id="sm-senha" maxlength="4" placeholder="Senha master (4 dígitos)" inputmode="numeric"
-        style="background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:14px;letter-spacing:3px;text-align:center;width:100%;">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:14px;">
+      <div style="flex:1 1 300px;min-width:0;">
+        <div class="pay-rows" style="margin-bottom:10px;">
+          <input type="password" id="sm-senha" maxlength="4" placeholder="Senha master (4 dígitos)" inputmode="numeric"
+            style="background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:14px;letter-spacing:3px;text-align:center;width:100%;">
+        </div>
+        <textarea id="sm-motivo" placeholder="Motivo (obrigatório)" rows="4"
+          style="width:100%;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;"></textarea>
+        <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Use o teclado ao lado para escrever o motivo.</div>
+      </div>
+      <div class="eq-kb" id="sm-teclado">${eqKbTecladoHtml('Confirmar')}</div>
     </div>
-    <textarea id="sm-motivo" placeholder="Motivo (obrigatório)" rows="3"
-      style="width:100%;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;margin-bottom:14px;"></textarea>
     <button class="btn-primary" id="sm-confirmar" disabled>Confirmar</button>
   `);
+  document.getElementById('modal-box').classList.add('wide');
   const senhaInput = document.getElementById('sm-senha');
   const motivoInput = document.getElementById('sm-motivo');
   const btn = document.getElementById('sm-confirmar');
+  const teclado = document.getElementById('sm-teclado');
   const checar = ()=>{ btn.disabled = !(senhaInput.value.length===4 && motivoInput.value.trim().length>0); };
   senhaInput.addEventListener('input', checar);
   motivoInput.addEventListener('input', checar);
+  const inserirMotivo = (ch)=>{
+    const atual = motivoInput.value;
+    const inicioFrase = atual.length === 0;
+    let c = ch;
+    if(ch !== ' ' && ch !== '-' && ch !== "'") c = inicioFrase ? ch.toUpperCase() : ch.toLowerCase();
+    motivoInput.value = atual + c;
+    motivoInput.focus();
+    try{ motivoInput.setSelectionRange(motivoInput.value.length, motivoInput.value.length); }catch{}
+    checar();
+  };
+  teclado.querySelectorAll('[data-ch]').forEach(b=>{
+    b.addEventListener('click', ()=> inserirMotivo(b.getAttribute('data-ch')));
+  });
+  teclado.querySelectorAll('[data-k]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      const k = b.getAttribute('data-k');
+      if(k === 'space') inserirMotivo(' ');
+      else if(k === 'back'){ motivoInput.value = motivoInput.value.slice(0,-1); motivoInput.focus(); checar(); }
+      else if(k === 'clear'){ motivoInput.value = ''; motivoInput.focus(); checar(); }
+      else if(k === 'add' && !btn.disabled) btn.click();
+    });
+  });
   setTimeout(()=>{ try{ senhaInput.focus(); }catch{} }, 30);
   btn.addEventListener('click', ()=>{
     const senha = senhaInput.value, motivo = motivoInput.value.trim();
@@ -7414,10 +7686,10 @@ function showReopenOrder(pedidoId){
   });
 
   const itensHtml = p.itens.filter(it=>it.tipo!=='combo-desconto').map(it=>
-    `<div class="rc-line"><span>${it.qtd>1?it.qtd+'x ':''}${it.label} · #${it.sessionSenha}</span><span>${fmt(it.preco)}</span></div>`
+    `<div class="rc-line"><span>${it.qtd>1?it.qtd+'x ':''}${escHtml(it.label)} · #${it.sessionSenha}</span><span>${fmt(it.preco)}</span></div>`
   ).join('');
   const descontosHtml = p.itens.filter(it=>it.tipo==='combo-desconto').map(it=>
-    `<div class="rc-line"><span>${it.label}</span><span>${fmt(it.preco)}</span></div>`
+    `<div class="rc-line"><span>${escHtml(it.label)}</span><span>${fmt(it.preco)}</span></div>`
   ).join('');
 
   openModal(`
@@ -7546,7 +7818,7 @@ function showReprintModal(p){
       <input type="checkbox" class="rp-check">
       <img src="${img(it.fotoSeed)}" loading="lazy" alt="">
       <div class="rp-info">
-        <strong>${it.label || labelProduto(it.produtoId, 'tamanho')}${variantLabel}</strong>
+        <strong>${escHtml(it.label || labelProduto(it.produtoId, 'tamanho'))}${variantLabel}</strong>
         <span>#${it.sessionSenha || '—'} · compradas: ${it.qtd}</span>
       </div>
       <select class="rp-qty" disabled>${opcoes}</select>
@@ -7648,7 +7920,7 @@ function askCancelarPedido(p){
       <div class="cnc-row" data-i="${i}">
         <img src="${img(it.fotoSeed,60,75)}" alt="">
         <div class="cnc-info">
-          <div class="cnc-name">${qtdTxt}${it.label}</div>
+          <div class="cnc-name">${qtdTxt}${escHtml(it.label)}</div>
           <div class="cnc-meta">${fmt(it.preco)}${sessTxt}</div>
         </div>
         <div class="cnc-decisao">
@@ -7665,7 +7937,7 @@ function askCancelarPedido(p){
       <input type="checkbox" class="cnc-check" data-i="${i}" checked>
       <img src="${img(it.fotoSeed,60,75)}" alt="">
       <div class="cnc-info">
-        <div class="cnc-name">${qtdTxt}${it.label}</div>
+        <div class="cnc-name">${qtdTxt}${escHtml(it.label)}</div>
         <div class="cnc-meta">${fmt(it.preco)} · <span class="cnc-fisico-estado">volta ao estoque</span></div>
       </div>
     </label>`;
@@ -7753,6 +8025,7 @@ function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perd
       devolverEstoqueFisico(it.produtoId, it.qtd||1);
     }
   });
+  salvarEstoqueFisico();
   const itensPerdidos = itensReais.filter(it=>!itensQueVoltam.includes(it));
 
   p.status = 'cancelado';
@@ -7785,10 +8058,10 @@ function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, motivo, perdaIn
   const linhasPerdidos = itensPerdidos.map(it=>{
     const motivoPerda = (perdaInfo && perdaInfo.get(it)) === 'impresso' ? 'impresso — perdido' : 'não devolvido — perdido';
     const sessTxt = it.tipo==='tamanho' && it.sessionSenha ? ` · #${it.sessionSenha}` : '';
-    return `<div class="rc-line"><span>${it.qtd>1?it.qtd+'x ':''}${it.label}${sessTxt} · ${motivoPerda}</span><span>${fmt(it.preco)}</span></div>`;
+    return `<div class="rc-line"><span>${it.qtd>1?it.qtd+'x ':''}${escHtml(it.label)}${sessTxt} · ${motivoPerda}</span><span>${fmt(it.preco)}</span></div>`;
   }).join('');
   const linhasDevolvidos = itensQueVoltam.length
-    ? itensQueVoltam.map(it=>`<div class="rc-line"><span>${it.qtd>1?it.qtd+'x ':''}${it.label}</span><span style="color:var(--green-500);">voltou ao estoque</span></div>`).join('')
+    ? itensQueVoltam.map(it=>`<div class="rc-line"><span>${it.qtd>1?it.qtd+'x ':''}${escHtml(it.label)}</span><span style="color:var(--green-500);">voltou ao estoque</span></div>`).join('')
     : '<div class="rc-line"><span style="color:var(--slate-500);">nenhum</span><span></span></div>';
   openModal(`
     <div class="modal-head"><div><div class="modal-step-label">Relatório de perda — imprimir e anexar ao material</div><h3>Pedido ${p.id}</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
@@ -7930,6 +8203,7 @@ function askAbrirCaixa(){
       return;
     }
     caixaReal = res.caixa || null;
+    enfileirarCaixaPortal(caixaReal);
     fundoTrocoCaixa = fundo;
     caixaAberto = true;
     caixaAbertoEm = new Date((caixaReal && caixaReal.abertoEm) || Date.now());
@@ -7960,7 +8234,7 @@ const EQ_KB_ROWS = [
   ['Z','X','C','V','B','N','M','Ç'],
   ['Á','É','Í','Ó','Ú','Ã','Õ','Â','Ê','Ô'],
 ];
-function eqKbTecladoHtml(){
+function eqKbTecladoHtml(addLabel='Adicionar'){
   const linhas = EQ_KB_ROWS.map(linha=>`
     <div class="eq-kb-row">
       ${linha.map(ch=>`<button type="button" class="eq-kb-key" data-ch="${ch}">${ch}</button>`).join('')}
@@ -7970,7 +8244,7 @@ function eqKbTecladoHtml(){
       <button type="button" class="eq-kb-key space" data-k="space">Espaço</button>
       <button type="button" class="eq-kb-key del" data-k="back">Apagar</button>
       <button type="button" class="eq-kb-key clr" data-k="clear">Limpar</button>
-      <button type="button" class="eq-kb-key add" data-k="add">Adicionar</button>
+      <button type="button" class="eq-kb-key add" data-k="add">${addLabel}</button>
     </div>`;
 }
 
@@ -7979,8 +8253,8 @@ function renderEquipeModal(numeroCaixa, equipeJaSalva){
     const marcado = equipeJaSalva.includes(u.nome) || (equipeJaSalva.length===0 && currentUser && u.id===currentUser.id);
     return `
     <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--navy-850);border:1px solid var(--navy-line);border-radius:8px;margin-bottom:8px;cursor:pointer;">
-      <input type="checkbox" class="eq-check" value="${u.id}" ${marcado?'checked':''} style="accent-color:var(--gold-500);width:16px;height:16px;">
-      <span>${u.nome} <span style="color:var(--slate-400);font-size:11px;">(${u.funcao})</span></span>
+      <input type="checkbox" class="eq-check" value="${escHtml(u.id)}" ${marcado?'checked':''} style="accent-color:var(--gold-500);width:16px;height:16px;">
+      <span>${escHtml(u.nome)} <span style="color:var(--slate-400);font-size:11px;">(${escHtml(u.funcao)})</span></span>
     </label>`;
   }).join('');
 
@@ -8344,6 +8618,7 @@ function abrirTelaFechamento(){
       return;
     }
     caixaReal = fechado.caixa || null;
+    enfileirarCaixaPortal(caixaReal);
     const diferencaTotal = +porFormaResultado.reduce((s,r)=>s+r.diferenca,0).toFixed(2);
     const valorEnvelope = parseFloat(document.getElementById('fc-envelope').value)||0;
     const dinheiroReal = porFormaResultado.find(r=>r.forma==='Dinheiro')?.real || 0;
@@ -8430,7 +8705,7 @@ function abrirTesteEscolherSessao(){
     return `<div class="conf-item" data-id="${s.id}" style="cursor:pointer;">
       <div class="conf-info">
         <div class="conf-label">Sessão #${s.senha}</div>
-        <div class="conf-sub">${fmtDateLabel(s.data, TODAY_ISO)} às ${s.hora} · ${s.fotos.length} fotos · <span class="sc-tag ${t.cls}" style="margin-left:4px;">${t.label}</span></div>
+        <div class="conf-sub">${fmtDateLabel(s.data, TODAY_ISO)} às ${s.hora} · ${s.fotos.length} fotos · <span class="sc-tag ${t.cls}" style="margin-left:4px;">${escHtml(t.label)}</span></div>
       </div>
       <div class="combo-por" style="font-size:14px;">→</div>
     </div>`;
@@ -8470,7 +8745,7 @@ function abrirTesteEscolherTamanho(sessao, fotoSeed){
   const cardsHtml = TAMANHOS.map(t=>{
     const usado = !!testesImpressaoHoje[t.id];
     return `<div class="option-card">
-      <div class="oc-left"><div class="oc-name">${t.label}</div><div class="oc-price">${usado?`já usado hoje · #${testesImpressaoHoje[t.id].sessaoSenha}`:'1 disponível hoje'}</div></div>
+      <div class="oc-left"><div class="oc-name">${escHtml(t.label)}</div><div class="oc-price">${usado?`já usado hoje · #${testesImpressaoHoje[t.id].sessaoSenha}`:'1 disponível hoje'}</div></div>
       <button class="oc-add-btn" data-t="${t.id}" ${usado?'disabled':''}>${usado?'Usado':'Imprimir teste'}</button>
     </div>`;
   }).join('');
@@ -8585,7 +8860,7 @@ async function INIT(){
     renderLoginUsers();
     document.getElementById('user-chip').textContent = '👤 Selecione seu usuário';
   });
-  try{ await Promise.all([carregarSessoes(), carregarPedidos(), carregarCaixa(), carregarRibbon(), carregarAuditoria()]); }
+  try{ await Promise.all([carregarSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon(), carregarAuditoria()]); }
   catch{ /* logs no console do sidecar */ }
   try{ await _sincronizarEstadoFila(); }catch{} // fila persistida de boot anterior → chip correto
   agendarSnapshotVendas(4000); // snapshot inicial após o boot (se já emparelhado)

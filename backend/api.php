@@ -394,7 +394,7 @@ const ONLINE_JANELA_SEG = 600;
 function conexaoPorLoja(): array
 {
     $ult = [];
-    foreach (['vendas.json', 'pedidos.json', 'auditoria.json'] as $f) {
+    foreach (['vendas.json', 'pedidos.json', 'auditoria.json', 'caixas.json'] as $f) {
         $rows = loadJson($f, []);
         if (!is_array($rows)) continue;
         foreach ($rows as $r) {
@@ -890,6 +890,17 @@ function normalizarMeioPagamento($meio, $forma, &$parcelas = null): string
     return $m;
 }
 
+// Modelo físico de impressão de um item. 15x20 é o único que consome 2
+// unidades de ribbon; bolinha e polaroide saem no molde 10x15 (1 unidade).
+function modeloImpressaoItemPortal($produtoId, $modelo = ''): string
+{
+    $m = strtolower(trim((string) $modelo));
+    if ($m === '15x20') return '15x20';
+    if ($m !== '') return '10x15';
+    $pid = strtolower(trim((string) $produtoId));
+    return strpos($pid, '15x20') !== false ? '15x20' : '10x15';
+}
+
 // Soma os meios já classificados de um conjunto de pagamentos.
 function somaMeios(array $pagamentos): array
 {
@@ -1204,6 +1215,11 @@ try {
                 'sessoesCriadas' => max(0, (int) ($p['sessoesCriadas'] ?? 0)),
                 'sessoesVendidas' => max(0, (int) ($p['sessoesVendidas'] ?? 0)),
                 'taxacombo' => round(min(100, max(0, (float) ($p['taxacombo'] ?? 0))), 1),
+                'descontos' => round(max(0, (float) ($p['descontos'] ?? 0)), 2),
+                'descontoPedidos' => max(0, (int) ($p['descontoPedidos'] ?? 0)),
+                'fotos10x15' => max(0, (int) ($p['fotos10x15'] ?? 0)),
+                'fotos15x20' => max(0, (int) ($p['fotos15x20'] ?? 0)),
+                'unidadesRibbon' => max(0, (int) ($p['unidadesRibbon'] ?? 0)),
                 'ribbonRestante' => (isset($p['ribbonRestante']) && $p['ribbonRestante'] !== '' && $p['ribbonRestante'] !== null)
                     ? max(0, (int) $p['ribbonRestante']) : null,
                 'papel10x15' => (isset($p['papel10x15']) && $p['papel10x15'] !== '' && $p['papel10x15'] !== null)
@@ -1248,18 +1264,49 @@ try {
             if ($id === '') fail('DADOS_INCOMPLETOS: pedido.id é obrigatório');
 
             $itens = [];
+            $fotos10x15 = 0;
+            $fotos15x20 = 0;
+            $unidadesRibbon = 0;
             foreach ((array) ($pd['itens'] ?? []) as $it) {
                 if (!is_array($it)) continue;
+                $tipo = trim((string) ($it['tipo'] ?? 'tamanho'));
+                $produtoId = trim((string) ($it['produtoId'] ?? ''));
+                $qtd = max(0, (int) ($it['qtd'] ?? 1));
+                $modelo = $tipo === 'tamanho' ? modeloImpressaoItemPortal($produtoId, $it['modelo'] ?? '') : '';
+                $unidades = max(0, (int) ($it['unidades'] ?? 0));
+                if ($tipo === 'tamanho') {
+                    if ($unidades <= 0) $unidades = ($modelo === '15x20' ? 2 : 1) * $qtd;
+                    if ($modelo === '15x20') $fotos15x20 += $qtd; else $fotos10x15 += $qtd;
+                    $unidadesRibbon += $unidades;
+                }
                 $itens[] = [
-                    'tipo' => trim((string) ($it['tipo'] ?? 'tamanho')),
-                    'produtoId' => trim((string) ($it['produtoId'] ?? '')),
+                    'tipo' => $tipo,
+                    'produtoId' => $produtoId,
                     'label' => trim((string) ($it['label'] ?? '')),
-                    'qtd' => max(0, (int) ($it['qtd'] ?? 1)),
-                    'unidades' => max(0, (int) ($it['unidades'] ?? 0)),
+                    'qtd' => $qtd,
+                    'unidades' => $unidades,
+                    'modelo' => $modelo,
                     // preço/subtotal podem ser negativos (desconto de combo, ajustes)
                     'precoUnit' => round((float) ($it['precoUnit'] ?? 0), 2),
                     'subtotal' => round((float) ($it['subtotal'] ?? 0), 2),
                 ];
+            }
+            $descontoItens = [];
+            foreach ((array) ($pd['descontoItens'] ?? []) as $di) {
+                if (!is_array($di)) continue;
+                $valorDi = round(abs((float) ($di['valor'] ?? 0)), 2);
+                if ($valorDi <= 0.004) continue;
+                $descontoItens[] = [
+                    'tipo' => trim((string) ($di['tipo'] ?? 'ajuste')),
+                    'label' => trim((string) ($di['label'] ?? 'Desconto')),
+                    'valor' => $valorDi,
+                ];
+            }
+            // Compatibilidade com PDVs antigos: só mandavam o valor numérico.
+            // Garante que TODO desconto chegue detalhado ao portal.
+            $descontoValor = round(max(0, (float) ($pd['desconto'] ?? 0)), 2);
+            if (!$descontoItens && $descontoValor > 0.004) {
+                $descontoItens[] = ['tipo' => 'desconto', 'label' => 'Desconto', 'valor' => $descontoValor];
             }
             $pagamentos = [];
             foreach ((array) ($pd['pagamentos'] ?? []) as $pg) {
@@ -1289,11 +1336,15 @@ try {
                 'total' => round(max(0, (float) ($pd['total'] ?? 0)), 2),
                 'status' => trim((string) ($pd['status'] ?? 'pago')),
                 'operador' => trim((string) ($pd['operador'] ?? '—')),
-                'unidadesTotal' => array_sum(array_column($itens, 'unidades')),
+                'unidadesTotal' => $unidadesRibbon,
+                'fotos10x15' => $fotos10x15,
+                'fotos15x20' => $fotos15x20,
+                'unidadesRibbon' => $unidadesRibbon,
                 'itens' => $itens,
                 'pagamentos' => $pagamentos,
                 'sessoes' => is_array($pd['sessoes'] ?? null) ? array_values($pd['sessoes']) : [],
-                'desconto' => round(max(0, (float) ($pd['desconto'] ?? 0)), 2),
+                'desconto' => $descontoValor,
+                'descontoItens' => $descontoItens,
                 'caixaId' => (string) ($pd['caixaId'] ?? ''),
                 'origemPedidoId' => (string) ($pd['origemPedidoId'] ?? ''),
                 'guiaImpressa' => !empty($pd['guiaImpressa']),
@@ -1309,6 +1360,62 @@ try {
             if ($found !== null) $todos[$found] = $registro; else $todos[] = $registro;
             saveJson('pedidos.json', $todos);
             respond(['ok' => true, 'pedido' => $registro]);
+        }
+
+        // Caixa (PDV → portal), idempotente pelo id CX-*. A abertura cria o
+        // registro (operador/fundo) e o fechamento atualiza o MESMO id com a
+        // conciliação (quem fechou, meios, diferença, envelope).
+        case 'caixa.push': {
+            [$db, $loja] = validarLojaPareada($p);
+            $c = $p['caixa'] ?? null;
+            if (!is_array($c)) fail('DADOS_INCOMPLETOS: caixa é obrigatório');
+            $id = trim((string) ($c['id'] ?? ''));
+            if ($id === '') fail('DADOS_INCOMPLETOS: caixa.id é obrigatório');
+
+            $numMap = function ($arr): array {
+                $out = [];
+                if (!is_array($arr)) return $out;
+                foreach ($arr as $k => $v) {
+                    if (!is_scalar($v)) continue;
+                    $out[trim((string) $k)] = round((float) $v, 2);
+                }
+                return $out;
+            };
+            $fechadoEm = trim((string) ($c['fechadoEm'] ?? ''));
+            $registro = [
+                'id' => $id,
+                'numero' => (string) ($c['numero'] ?? ''),
+                'lojaId' => $loja['id'],
+                'lojaNome' => lojaNomePush($p, $loja),
+                'pdvNome' => resolverPdvNome($c['pdvNome'] ?? '', $loja),
+                'machineId' => trim((string) ($p['machineId'] ?? '')),
+                'status' => $fechadoEm !== '' ? 'fechado' : 'aberto',
+                'data' => trim((string) ($c['data'] ?? substr((string) ($c['abertoEm'] ?? ''), 0, 10))),
+                'operador' => trim((string) ($c['operador'] ?? '')),
+                'abertoEm' => trim((string) ($c['abertoEm'] ?? '')),
+                'valorInicial' => round((float) ($c['valorInicial'] ?? 0), 2),
+                'fechadoEm' => $fechadoEm,
+                'fechadoPor' => trim((string) ($c['fechadoPor'] ?? '')),
+                'totalVendido' => round((float) ($c['totalVendido'] ?? 0), 2),
+                'totalPorMeio' => $numMap($c['totalPorMeio'] ?? []),
+                'meiosDeclarados' => $numMap($c['meiosDeclarados'] ?? []),
+                'totalRecebido' => round((float) ($c['totalRecebido'] ?? 0), 2),
+                'diferenca' => round((float) ($c['diferenca'] ?? 0), 2),
+                'valorEnvelope' => round((float) ($c['valorEnvelope'] ?? 0), 2),
+                'saldoRestante' => round((float) ($c['saldoRestante'] ?? 0), 2),
+                'observacoes' => trim((string) ($c['observacoes'] ?? '')),
+                'enviadoEm' => gmdate('c'),
+            ];
+
+            $caixas = loadJson('caixas.json', []);
+            if (!is_array($caixas)) $caixas = [];
+            $found = null;
+            foreach ($caixas as $i => $r) {
+                if (($r['id'] ?? '') === $id) { $found = $i; break; }
+            }
+            if ($found !== null) $caixas[$found] = $registro; else $caixas[] = $registro;
+            saveJson('caixas.json', $caixas);
+            respond(['ok' => true, 'caixa' => $registro]);
         }
 
         // Uso de senha master (PDV → portal), idempotente pelo id. Alimenta a
@@ -1619,12 +1726,13 @@ try {
             saveDb($db);
 
             // Histórico da loja excluída: apaga dos arquivos dos relatórios.
-            $removidos = ['usuarios' => $usuariosRemovidos, 'vendas' => 0, 'pedidos' => 0, 'auditoria' => 0, 'despesas' => 0];
+            $removidos = ['usuarios' => $usuariosRemovidos, 'vendas' => 0, 'pedidos' => 0, 'auditoria' => 0, 'despesas' => 0, 'caixas' => 0];
             $arquivos = [
                 'vendas.json' => 'vendas',
                 'pedidos.json' => 'pedidos',
                 'auditoria.json' => 'auditoria',
                 'despesas.json' => 'despesas',
+                'caixas.json' => 'caixas',
             ];
             foreach ($arquivos as $arquivo => $chave) {
                 $linhas = loadJson($arquivo, null);
@@ -1647,7 +1755,7 @@ try {
             $db = db();
             $ids = lojaIdsExistentes($db);
             if (count($ids) === 0) fail('SEM_LOJAS: cadastre uma loja antes de limpar os dados');
-            $removidos = ['usuarios' => 0, 'vendas' => 0, 'pedidos' => 0, 'auditoria' => 0, 'despesas' => 0];
+            $removidos = ['usuarios' => 0, 'vendas' => 0, 'pedidos' => 0, 'auditoria' => 0, 'despesas' => 0, 'caixas' => 0];
 
             $mudouUsuarios = false;
             $usuarios = [];
@@ -1667,6 +1775,7 @@ try {
                 'pedidos.json' => 'pedidos',
                 'auditoria.json' => 'auditoria',
                 'despesas.json' => 'despesas',
+                'caixas.json' => 'caixas',
             ];
             foreach ($arquivos as $arquivo => $chave) {
                 $linhas = loadJson($arquivo, null);
@@ -1814,6 +1923,30 @@ try {
                 if (!in_array($r['status'] ?? '', ['cancelado', 'CANCELADO'], true)) $totalLiquido += (float) ($r['total'] ?? 0);
             }
             respond(['ok' => true, 'pedidos' => array_values($out), 'total' => count($out), 'totalLiquido' => round($totalLiquido, 2)]);
+        }
+
+        // Caixas de todas as lojas (abertura + fechamento) — Fluxo de Caixa.
+        case 'caixa.list': {
+            $todos = loadJson('caixas.json', []);
+            if (!is_array($todos)) $todos = [];
+            $lojaId = trim((string) ($p['lojaId'] ?? ''));
+            $dataIni = trim((string) ($p['dataIni'] ?? ''));
+            $dataFim = trim((string) ($p['dataFim'] ?? ''));
+            $ids = lojaIdsExistentes(db());
+            $out = [];
+            foreach ($todos as $r) {
+                if (!registroDeLojaExistente($ids, $r)) continue;
+                if ($lojaId !== '' && ($r['lojaId'] ?? '') !== $lojaId) continue;
+                $data = (string) ($r['data'] ?? '');
+                if ($data === '') $data = substr((string) ($r['abertoEm'] ?? ''), 0, 10);
+                if ($dataIni !== '' && $data < $dataIni) continue;
+                if ($dataFim !== '' && $data > $dataFim) continue;
+                $out[] = $r;
+            }
+            usort($out, function ($a, $b) {
+                return strcmp((string) ($b['abertoEm'] ?? ''), (string) ($a['abertoEm'] ?? '')) ?: 0;
+            });
+            respond(['ok' => true, 'caixas' => array_values($out), 'total' => count($out)]);
         }
 
         // Usos de senha master de todas as lojas — tela "Auditoria".

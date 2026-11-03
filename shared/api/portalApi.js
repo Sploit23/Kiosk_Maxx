@@ -131,6 +131,18 @@ const portalApi = {
     });
   },
 
+  // Sobe um caixa completo (abertura e/ou fechamento). Idempotente pelo id:
+  // a abertura cria o registro e o fechamento atualiza o mesmo CX-*.
+  caixaPush(caixa = {}) {
+    const ident = portalApi.identidadeAtiva();
+    return post('caixa.push', {
+      lojaId: ident.lojaId,
+      lojaNome: ident.lojaNome,
+      machineId: ident.machineId,
+      caixa,
+    });
+  },
+
   // Sobe um uso de senha master (auditoria.push). Idempotente pelo id.
   auditoriaPush(uso = {}) {
     const ident = portalApi.identidadeAtiva();

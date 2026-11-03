@@ -794,6 +794,10 @@ select.form-input{appearance:none;}
         <h3>Detalhamento dia × loja</h3>
         <table id="fluxo-tabela"></table>
       </div>
+      <div class="card">
+        <h3>Abertura e fechamento de caixa <em style="color:var(--slate-400);font-size:11px;font-weight:400;">(quem abriu/fechou, fundo, conferência e diferença)</em></h3>
+        <table id="fluxo-caixas"></table>
+      </div>
     </div>
 
     <!-- ====== ESTOQUE ====== -->
@@ -1014,8 +1018,8 @@ function goScreen(name){
 // ——— DADOS ———
 async function loadAll(){
   var [rl, ru] = await Promise.all([call('lojas.list'), call('usuarios.list', {})]);
-  state.lojas = rl.ok ? rl.lojas : [];
-  state.usuarios = ru.ok ? ru.usuarios : [];
+  state.lojas = (rl && rl.ok && Array.isArray(rl.lojas)) ? rl.lojas : [];
+  state.usuarios = (ru && ru.ok && Array.isArray(ru.usuarios)) ? ru.usuarios : [];
   var badge = $('#lojas-badge');
   if(badge) badge.textContent = state.lojas.length;
 }
@@ -1126,8 +1130,8 @@ window.nacCloseModal = closePortalModal;
 
 // ——— DASHBOARD ———
 function renderDashboard(){
-  var lojas = state.lojas;
-  var users = state.usuarios;
+  var lojas = state.lojas || [];
+  var users = state.usuarios || [];
   var ativas = lojas.filter(function(l){ return l.ativo; });
   var onlineCount = ativas.filter(function(l){ return l.online; }).length;
   var porFuncao = function(f){ return users.filter(function(u){ return u.funcao===f && u.ativo; }).length; };
@@ -1148,7 +1152,9 @@ function renderDashboard(){
   renderDashSales();
 }
 function baseKpisHTML(lojas, users, ativas, onlineCount, porFuncao){
-  return kpi('Lojas cadastradas', state.lojas.length, ativas.length+' ativas · '+onlineCount+' online', onlineCount?'ok':'alert') +
+  lojas = lojas || [];
+  users = users || [];
+  return kpi('Lojas cadastradas', lojas.length, ativas.length+' ativas · '+onlineCount+' online', onlineCount?'ok':'alert') +
     kpi('Operadores', users.filter(function(u){return u.ativo;}).length, users.length+' cadastrados', 'ok') +
     kpi('Vendedoras', porFuncao('vendedor'), 'logam no kiosk', 'ok') +
     kpi('Fotógrafos', porFuncao('fotografo'), 'equipe de produção', 'ok') +
@@ -1289,8 +1295,8 @@ function typeVal(v, period){
 function renderDashSales(){
   var el = $('#dash-kpis');
   if(!el) return;
-  var lojas = state.lojas;
-  var users = state.usuarios;
+  var lojas = state.lojas || [];
+  var users = state.usuarios || [];
   var ativas = lojas.filter(function(l){ return l.ativo; });
   var onlineCount = ativas.filter(function(l){ return l.online; }).length;
   var porFuncao = function(f){ return users.filter(function(u){ return u.funcao===f && u.ativo; }).length; };
@@ -1365,13 +1371,13 @@ function renderDashSales(){
       var uv = v.ultimaVenda || v.enviadoEm;
       if(uv && (!L.ultima || uv > L.ultima)) L.ultima = uv;
     });
-    var lojas = Object.keys(porLoja).map(function(k){ return porLoja[k]; })
+    var lojasVenda = Object.keys(porLoja).map(function(k){ return porLoja[k]; })
       .sort(function(x,y){ return y.total - x.total; });
     var tb = $('#dash-tabela-vendas');
-    if(lojas.length){
+    if(lojasVenda.length){
       tb.innerHTML =
         '<tr><th>Loja</th><th>PDV</th><th>Receita</th><th>Pedidos</th><th>Ticket médio</th><th>Taxa combo</th><th>Conv. sessão</th><th>Última atividade</th></tr>' +
-        lojas.map(function(l){
+        lojasVenda.map(function(l){
           var tic = l.pedidos ? l.total/l.pedidos : 0;
           var cv = l.sc ? (l.sv/l.sc*100).toFixed(0)+'%' : '—';
           var tc = l.tcn ? (l.tc/l.tcn).toFixed(0)+'%' : '—';
@@ -2068,6 +2074,34 @@ async function renderFluxo(){
   } else {
     tb.innerHTML = '<tr><td class="empty" colspan="12">Sem snapshots no período.</td></tr>';
   }
+
+  var caixas = [];
+  try {
+    var rc = await call('caixa.list', cut ? { dataIni: dayStr(cut) } : {});
+    caixas = (rc && rc.ok && Array.isArray(rc.caixas)) ? rc.caixas : [];
+  } catch(e) { caixas = []; }
+  var tbc = $('#fluxo-caixas');
+  if(caixas.length){
+    tbc.innerHTML = '<tr><th>Abertura</th><th>Loja</th><th>Operador</th><th>Fundo</th><th>Fechamento</th><th>Fechado por</th><th>Vendido</th><th>Dinheiro</th><th>Débito</th><th>Crédito</th><th>PIX</th><th>Recebido</th><th>Declarado</th><th>Diferença</th><th>Envelope</th><th>Status</th></tr>' +
+      caixas.map(function(c){
+        var m = c.totalPorMeio || {}, d = c.meiosDeclarados || {};
+        var declarado = Object.keys(d).reduce(function(s,k){ return s + toNum(d[k]); }, 0);
+        var dif = toNum(c.diferenca);
+        return '<tr><td style="white-space:nowrap;">'+esc(fmtDt(c.abertoEm))+'</td>'+
+          '<td><b>'+esc(c.lojaNome||c.lojaId)+'</b></td><td>'+esc(c.operador||'—')+'</td>'+
+          '<td>'+fmtBRL(toNum(c.valorInicial))+'</td>'+
+          '<td style="white-space:nowrap;">'+esc(fmtDt(c.fechadoEm))+'</td><td>'+esc(c.fechadoPor||'—')+'</td>'+
+          '<td>'+fmtBRL(toNum(c.totalVendido))+'</td>'+
+          '<td>'+fmtBRL(toNum(m.dinheiro))+'</td><td>'+fmtBRL(toNum(m.debito))+'</td>'+
+          '<td>'+fmtBRL(toNum(m.credito))+'</td><td>'+fmtBRL(toNum(m.pix))+'</td>'+
+          '<td>'+fmtBRL(toNum(c.totalRecebido))+'</td><td>'+fmtBRL(declarado)+'</td>'+
+          '<td style="color:'+(Math.abs(dif)>0.009?'var(--red,#dc2626)':'inherit')+'">'+fmtBRL(dif)+'</td>'+
+          '<td>'+fmtBRL(toNum(c.valorEnvelope))+'</td>'+
+          '<td>'+(c.status==='aberto'?'<span class="pill pill-green">aberto</span>':'<span class="pill">fechado</span>')+'</td></tr>';
+      }).join('');
+  } else {
+    tbc.innerHTML = '<tr><td class="empty" colspan="16">Nenhum caixa recebido no período.</td></tr>';
+  }
 }
 
 // ——— TABs de período (Financeiro / Fluxo) ———
@@ -2264,9 +2298,16 @@ function modalPedido(p){
     return '<div class="mf-line"><span>'+esc(MEIO_LABEL[m]||m)+'</span><span>'+(toNum(x.valor)?fmtBRL(toNum(x.valor)):'')+(toNum(x.parcelas)?' · '+toNum(x.parcelas)+'x':'')+'</span></div>';
   }).join('') || '<div class="mf-line"><span>Sem pagamentos</span></div>';
   var itens = (p.itens||[]).map(function(it){
-    return '<div class="mf-line"><span>'+(it.qtd>1?it.qtd+'x ':'')+esc(it.label||it.produtoId||'?')+'</span>'+
+    var nome = (it.qtd>1?it.qtd+'x ':'') + (it.label||it.produtoId||'?') + (it.modelo?' · '+it.modelo:'');
+    return '<div class="mf-line"><span>'+esc(nome)+'</span>'+
       '<span>'+(toNum(it.subtotal)?fmtBRL(toNum(it.subtotal)):'')+'</span></div>';
   }).join('') || '<div class="mf-line"><span>Sem itens</span></div>';
+  var descItens = (p.descontoItens||[]).map(function(d){
+    return '<div class="mf-line"><span>'+esc(d.label||d.tipo||'Desconto')+'</span><span>−'+fmtBRL(toNum(d.valor))+'</span></div>';
+  }).join('');
+  if(!descItens && toNum(p.desconto)>0){
+    descItens = '<div class="mf-line"><span>Desconto</span><span>−'+fmtBRL(toNum(p.desconto))+'</span></div>';
+  }
   openPortalModal(
     '<div class="modal-head"><h3>Pedido '+esc(p.numero||pedId(p))+'</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
     '<div class="mf-grid"><div class="mf-box"><div class="mf-key">Status</div><div><span class="pill '+pedStatusPill(p.status)+'">'+esc(p.status||'—')+'</span></div></div>'+
@@ -2277,10 +2318,13 @@ function modalPedido(p){
     '<div class="mf-box"><div class="mf-key">Loja / PDV</div><div>'+esc(p.lojaNome||p.lojaId||'—')+' · '+esc(p.pdvNome||'—')+'</div></div>'+
     '<div class="mf-box"><div class="mf-key">Caixa</div><div>'+(p.caixaId?esc(p.caixaId):(p.caixa&&p.caixa.numero?esc(p.caixa.numero):'—'))+'</div></div>'+
     (p.desconto?('<div class="mf-box"><div class="mf-key">Desconto</div><div>−'+fmtBRL(toNum(p.desconto))+'</div></div>'):'')+
-    '<div class="mf-box"><div class="mf-key">Unidades de ribbon</div><div>'+fmtInt(toNum(p.unidadesTotal))+'</div></div>'+
+    '<div class="mf-box"><div class="mf-key">Fotos 10x15</div><div>'+fmtInt(toNum(p.fotos10x15))+'</div></div>'+
+    '<div class="mf-box"><div class="mf-key">Fotos 15x20</div><div>'+fmtInt(toNum(p.fotos15x20))+'</div></div>'+
+    '<div class="mf-box"><div class="mf-key">Unidades de ribbon</div><div>'+fmtInt(toNum(p.unidadesRibbon != null ? p.unidadesRibbon : p.unidadesTotal))+'</div></div>'+
     (p.origemPedidoId?('<div class="mf-box"><div class="mf-key">Pedido de origem</div><div>'+esc(p.origemPedidoId)+'</div></div>'):'')+
     '</div>'+
     '<div class="mf-col"><div class="mf-label">Itens</div>'+itens+'</div>'+
+    (descItens?('<div class="mf-col"><div class="mf-label">Descontos aplicados</div>'+descItens+'</div>'):'')+
     '<div class="mf-col"><div class="mf-label">Pagamentos</div>'+pg+'</div>'+
     '<button class="btn btn-ghost" style="width:100%;" onclick="nacCloseModal()">Fechar</button>'
   );
@@ -3392,7 +3436,7 @@ setInterval(function(){
   if(currentScreen!=='lojas' && currentScreen!=='dashboard') return;
   call('lojas.list', {}).then(function(res){
     if(!res || !res.ok) return;
-    state.lojas = res.lojas;
+    state.lojas = Array.isArray(res.lojas) ? res.lojas : [];
     if(currentScreen==='lojas') renderLojas();
     else if(currentScreen==='dashboard') renderDashboard();
   }).catch(function(){});
@@ -3418,8 +3462,8 @@ async function boot(){
     renderDashboard();
     return;
   }
-  // Sem token: carrega usuários p/ login e monta cards
-  try { await loadAll(); } catch(e) { state.lojas=[]; state.usuarios=[]; }
+  // Sem token: não chama endpoints admin (retornam 401); monta o card padrão.
+  state.lojas=[]; state.usuarios=[];
   renderLoginUsers();
 }
 boot();

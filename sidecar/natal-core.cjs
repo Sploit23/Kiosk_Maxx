@@ -649,14 +649,14 @@ function arquivarCaixa(fechada) {
 
 // ─── Outbox para o portal (fila durável de envio) ─────────────
 // O PDV funciona OFFLINE: nada é enviado direto do balcão. Tudo que o
-// portal precisa registrar (snapshot do dia, pedido a pedido, uso de
-// senha master) é gravado AQUI primeiro e fica no arquivo até a
+// portal precisa registrar (snapshot do dia, pedido a pedido, caixa e uso
+// de senha master) é gravado AQUI primeiro e fica no arquivo até a
 // internet voltar. O portal é idempotente (pedido por pedido.id,
 // snapshot por loja+data, auditoria por uso.id), então reenviar é seguro.
 //
 // item = { id, tipo, chave, payload, criadoEm, atualizadoEm,
 //          tentativas, ultimoErro, ultimoEnvioEm }
-//   tipo  = 'vendas' | 'pedido' | 'auditoria'
+//   tipo  = 'vendas' | 'pedido' | 'caixa' | 'auditoria'
 //   chave = identificador do registro no portal (data | pedidoId | usoId)
 let filaPortal = readJson(FILA_PORTAL_FILE, []);
 if (!Array.isArray(filaPortal)) filaPortal = [];
@@ -1087,7 +1087,7 @@ async function sincronizarGaleria(codigo, { forcar = false } = {}) {
   let falhou = false;
   let ultimoErro = '';
   try {
-    if (!ftp.host || !ftp.user) throw new Error('Envio digital não configurado (FTP)');
+    if (!ftp.host || !ftp.user || !ftp.pass) throw new Error('Envio digital não configurado (FTP)');
     meta = lerGaleriaMeta(c); // relê (pode ter recebido foto nova enquanto esperava)
     for (const foto of meta.fotos || []) {
       if (foto.enviadoEm) continue;
@@ -1173,6 +1173,8 @@ function galeriaReceberFoto(codigo, seq, buffer) {
   if (!galeriaCodigoValido(c)) return { error: 'Código inválido' };
   if (!Number.isFinite(seq) || seq < 1 || seq > 50) return { error: 'Sequência inválida' };
   if (!buffer || !buffer.length) return { error: 'Imagem vazia' };
+  if (buffer.length > 16 * 1024 * 1024) return { error: 'Imagem muito grande' };
+  if (buffer[0] !== 0xFF || buffer[1] !== 0xD8 || buffer[2] !== 0xFF) return { error: 'Formato inválido (JPEG)' };
   const dir = galeriaCodigoDir(c);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${seq}.jpg`), buffer);
@@ -1740,7 +1742,7 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST' && galeriaUpload) {
       const codigo = String(galeriaUpload[1] || '').toUpperCase();
       const seq = parseInt(galeriaUpload[2], 10);
-      const buffer = await readBody(req);
+      const buffer = await readBody(req, 16 * 1024 * 1024);
       const r = galeriaReceberFoto(codigo, seq, buffer);
       if (r.error) return sendJson(res, 400, { success: false, error: r.error });
       const sync = await sincronizarGaleria(codigo);
@@ -2159,6 +2161,16 @@ const server = http.createServer(async (req, res) => {
         }
       }
       const totalRecebido = Object.values(meios).reduce((a, b) => a + Number(b || 0), 0);
+      // O dinheiro declarado inclui o fundo de troco; o totalPorMeio só tem
+      // vendas. Soma o fundo no lado do sistema para a diferença não acusar
+      // o fundo inteiro como sobra.
+      const sistemaPorMeio = { ...totalPorMeio };
+      sistemaPorMeio.dinheiro = Number(sistemaPorMeio.dinheiro || 0) + Number(caixa.valorInicial || 0);
+      const formasConferidas = new Set([...Object.keys(meios), ...Object.keys(sistemaPorMeio)]);
+      let diferencaCaixa = 0;
+      for (const forma of formasConferidas) {
+        diferencaCaixa += Number(meios[forma] || 0) - Number(sistemaPorMeio[forma] || 0);
+      }
       const valorEnvelope = Number(body.valorEnvelope || 0);
       const fechadoPor = String(body.fechadoPor || caixa.operador || '');
       caixa = {
@@ -2169,7 +2181,7 @@ const server = http.createServer(async (req, res) => {
         totalPorMeio,
         meiosDeclarados: meios,
         totalRecebido,
-        diferenca: Number((totalRecebido - totalVendido).toFixed(2)),
+        diferenca: Number(diferencaCaixa.toFixed(2)),
         valorEnvelope,
         saldoRestante: Number(((meios['dinheiro'] || 0) - valorEnvelope).toFixed(2)),
         fechadoPor,
