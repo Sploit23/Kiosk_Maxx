@@ -658,11 +658,14 @@
     position:relative;
     background:#000;
     border-radius:4px;
-    overflow:hidden;
+    overflow:visible; /* handles ficam logo abaixo da foto, sem corte */
     box-shadow:var(--shadow-lift);
     cursor:grab;
     max-height:64vh;
   }
+  /* recorta a foto/moldes no tamanho exato do quadro (o box fica visível
+     para os handles aparecerem embaixo) */
+  .frame-clip{position:absolute;inset:0;overflow:hidden;border-radius:4px;}
   .frame-box:active{cursor:grabbing;}
   .frame-box.no-frame{background:transparent;box-shadow:none;cursor:default;
     width:100%;height:100%;max-height:none;border-radius:0;}
@@ -725,10 +728,28 @@
     background:var(--gold-500);border:2px solid var(--navy-950);border-radius:4px;
     z-index:5;box-shadow:0 2px 6px rgba(0,0,0,.5);
   }
-  .resize-handle.br{right:-8px;bottom:-8px;cursor:nwse-resize;}
+  .resize-handle.br{right:-8px;bottom:-10px;cursor:nwse-resize;}
   .resize-handle.tl{left:-8px;top:-8px;cursor:nwse-resize;}
   .resize-handle.tr{right:-8px;top:-8px;cursor:nesw-resize;}
   .resize-handle.bl{left:-8px;bottom:-8px;cursor:nesw-resize;}
+
+  /* handle de inclinação — arrastar para girar a foto em graus finos */
+  .rotate-handle{
+    position:absolute;right:14px;bottom:-12px;
+    width:22px;height:22px;border-radius:50%;
+    background:var(--gold-500);border:2px solid var(--navy-950);
+    color:var(--navy-950);font-size:14px;font-weight:700;line-height:18px;text-align:center;
+    z-index:6;cursor:ew-resize;box-shadow:0 2px 6px rgba(0,0,0,.5);
+    user-select:none;-webkit-user-select:none;
+  }
+  .rotate-handle:active{background:var(--gold-300);}
+  .rotate-val{
+    position:absolute;right:40px;bottom:-10px;
+    background:rgba(10,22,38,.82);border:1px solid var(--gold-500);
+    color:var(--gold-300);font-size:10px;font-weight:700;
+    padding:2px 7px;border-radius:10px;white-space:nowrap;
+    z-index:6;pointer-events:none;
+  }
 
   /* logo do shopping (overlay fixo na moldura, fora do zoom/pan da foto) */
   .shop-logo{
@@ -1546,6 +1567,7 @@ import portalApi from './shared/api/portalApi.js';
 import { connectSSE } from './shared/api/sse.js';
 import { numeroSessao } from './src/catalog.js';
 import { composePrintImage } from './shared/utils/printUtils.js';
+import { coverScaleForAngle } from './shared/utils/imageUtils.js';
 import { qrSvgTag, qrDataUrl } from './shared/utils/qr.js';
 import config from './shared/config.js';
 
@@ -1740,7 +1762,7 @@ let includeLogo = true;
 let overlayVariant = '1';
 let logoTexto = 'SHOPPING PALLADIUM'; // texto da logo do shopping (configurável nas Configurações ⚙)
 let zoom = 100, offX = 0, offY = 0;
-let rotation = 0; // giro da foto dentro da moldura: 0 | 90 | 180 | 270 (graus, sentido horário)
+let rotation = 0; // giro da foto dentro da moldura em graus (sentido horário); "Girar" anda de 90 em 90, o handle de inclinação ajusta fino
 let dragging=false, dragStart={x:0,y:0}, offStart={x:0,y:0};
 let resizing=false, resizeStart={dist:0,zoom:100};
 let cart = []; // {cartId, sessionId, fotoSeed, tipo, produtoId, label, preco, zoom, offX, offY, orientation, logo}
@@ -5461,6 +5483,14 @@ function resetCrop(){
 }
 
 let baseScale = 1; // escala exata que cobre a moldura por completo (equivalente ao "cover"), calculada a partir do pixel real da foto
+let _coverCtx = null; // { tw, th, nw, nh } do último setupCover — p/ recalcular o cover ao inclinar
+
+// Recalcula o cover com o ângulo atual (inclusive inclinação fina). Sem isso,
+// girar a foto alguns graus deixaria os cantos da moldura sem imagem.
+function recomputeBaseScale(){
+  if(!_coverCtx) return;
+  baseScale = coverScaleForAngle(_coverCtx.tw, _coverCtx.th, _coverCtx.nw, _coverCtx.nh, rotation);
+}
 
 function applyTransform(){
   const im = document.getElementById('crop-img');
@@ -5482,12 +5512,10 @@ function setupCover(im, boxW, boxH, target){
     if(!nw || !nh) return;
     const tw = target ? target.w : boxW;
     const th = target ? target.h : boxH;
-    // Com a foto girada 90°/270°, a caixa que ela ocupa na tela tem largura e
-    // altura trocadas — então o cover precisa usar as dimensões trocadas.
-    const swap = (rotation === 90 || rotation === 270);
-    const cw = swap ? nh : nw;
-    const ch = swap ? nw : nh;
-    baseScale = Math.max(tw/cw, th/ch); // cover da janela (ou do box inteiro)
+    _coverCtx = { tw, th, nw, nh };
+    // Cover exato para o ângulo atual: cobre a janela (ou o box inteiro) mesmo
+    // com inclinação fina, sem cantos vazios.
+    baseScale = coverScaleForAngle(tw, th, nw, nh, rotation);
     if(target){
       // `applyTransform` posiciona a foto a partir do CENTRO do box
       // (top/left:50% + translate(-50%,-50%)) e soma offX/offY. Então o
@@ -5611,9 +5639,16 @@ function renderFrame(){
   box.style.flexDirection = '';
   box.style.paddingTop = '';
 
+  // camada que recorta a foto/moldes no tamanho exato do quadro. O `.frame-box`
+  // fica com overflow visível para os handles (zoom/inclinação) aparecerem
+  // logo abaixo da foto, sem serem cortados.
+  const clip = document.createElement('div');
+  clip.className = 'frame-clip';
+  box.appendChild(clip);
+
   im = document.createElement('img');
   im.id='crop-img';
-  box.appendChild(im);
+  clip.appendChild(im);
   photoInto(im, 'medium', currentFoto);
   // com molde de célula, o alvo do cover é a JANELA da foto (não o cartão todo)
   setupCover(im, W, H, temMoldeCelula ? config.windowInBox(modeloDe(t), overlayVariant) : null);
@@ -5625,13 +5660,13 @@ function renderFrame(){
       const grid = document.createElement('div');
       grid.className = 'polaroid-grid'+(showOverlay?'':' hidden');
       grid.innerHTML = '<i class="gl gv1"></i><i class="gl gv2"></i><i class="gl gh1"></i><i class="gl gh2"></i>';
-      box.appendChild(grid);
+      clip.appendChild(grid);
     }
   } else {
     const vf=document.createElement('div');
     vf.className='viewfinder'+(showOverlay?'':' hidden');
     vf.innerHTML='<i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i>';
-    box.appendChild(vf);
+    clip.appendChild(vf);
 
     // máscara nas 4 bordas (10x15/15x20): cobre a sobra de foto que fica
     // além dos cantos dourados, então a foto parece terminar exatamente no limite
@@ -5640,7 +5675,7 @@ function renderFrame(){
     if(showOverlay){
       const mask=document.createElement('div');
       mask.className='frame-margin-mask';
-      box.appendChild(mask);
+      clip.appendChild(mask);
     }
   }
 
@@ -5651,7 +5686,7 @@ function renderFrame(){
     moldImg.className = 'mold-overlay';
     moldImg.src = moldCelula.image;
     moldImg.alt = '';
-    box.appendChild(moldImg);
+    clip.appendChild(moldImg);
   }
 
   // a logo do shopping só nos formatos que a aceitam (10x15/15x20) — mesma
@@ -5660,7 +5695,7 @@ function renderFrame(){
     const logo=document.createElement('div');
     logo.className='shop-logo';
     logo.textContent=logoTexto;
-    box.appendChild(logo);
+    clip.appendChild(logo);
   }
 
   // handle de canto — arrasta para dar zoom mantendo proporção (uso com mouse)
@@ -5689,6 +5724,46 @@ function renderFrame(){
     applyTransform();
   });
   handle.addEventListener('pointerup', ()=>resizing=false);
+
+  // handle de inclinação — arrastar na horizontal gira a foto em graus finos
+  // (0,5° por pixel). O valor exibido é a inclinação em relação ao giro base
+  // (0/90/180/270); "Girar" continua sendo o ajuste grosso.
+  const rotHandle=document.createElement('div');
+  rotHandle.className='rotate-handle';
+  rotHandle.textContent='↻';
+  rotHandle.title='Arraste para inclinar a foto';
+  cropContainer.appendChild(rotHandle);
+  const rotVal=document.createElement('div');
+  rotVal.className='rotate-val';
+  cropContainer.appendChild(rotVal);
+  const tiltLabel = ()=>{
+    let tilt = ((rotation % 90) + 90) % 90;
+    if(tilt > 45) tilt -= 90;
+    rotVal.textContent = (Math.abs(tilt) < 0.05 ? '0' : tilt.toFixed(1)) + '°';
+  };
+  tiltLabel();
+  let rotating=false, rotateStart={x:0, angle:0, base:0};
+  rotHandle.addEventListener('pointerdown', e=>{
+    e.stopPropagation();
+    rotating=true;
+    rotateStart.x=e.clientX;
+    rotateStart.angle=rotation;
+    let tilt = ((rotation % 90) + 90) % 90;
+    if(tilt > 45) tilt -= 90;
+    rotateStart.base = rotation - tilt;
+    rotHandle.setPointerCapture(e.pointerId);
+  });
+  rotHandle.addEventListener('pointermove', e=>{
+    if(!rotating) return;
+    const delta=(e.clientX-rotateStart.x)*0.5;
+    const min=rotateStart.base-45, max=rotateStart.base+45;
+    rotation=Math.max(min, Math.min(max, rotateStart.angle+delta));
+    recomputeBaseScale();
+    applyTransform();
+    tiltLabel();
+  });
+  rotHandle.addEventListener('pointerup', ()=>rotating=false);
+  rotHandle.addEventListener('pointercancel', ()=>rotating=false);
 
   im.addEventListener('pointerdown', e=>{
     dragging=true; dragStart={x:e.clientX,y:e.clientY}; offStart={x:offX,y:offY};
@@ -5725,7 +5800,7 @@ document.getElementById('btn-orientacao').addEventListener('click', ()=>{
   renderFrame();
 });
 document.getElementById('btn-girar').addEventListener('click', ()=>{
-  rotation = (rotation + 90) % 360;
+  rotation = ((rotation + 90) % 360 + 360) % 360;
   offX=0; offY=0; // re-centraliza ao girar, mantém zoom
   renderFrame();
 });
@@ -6139,10 +6214,7 @@ function renderEnquadramentoEstatico(wrap, c){
     const nw=im.naturalWidth, nh=im.naturalHeight;
     if(!nw||!nh) return;
     const rot = ((c.rotation||0) % 360 + 360) % 360;
-    const swap = rot === 90 || rot === 270;
-    const cw = swap ? nh : nw;
-    const ch = swap ? nw : nh;
-    const base = Math.max(tw/cw, th/ch);
+    const base = coverScaleForAngle(tw, th, nw, nh, rot);
     im.style.width=nw+'px'; im.style.height=nh+'px';
     const scale = base * ((c.zoom||100)/100);
     const rotCss = rot ? ` rotate(${rot}deg)` : '';

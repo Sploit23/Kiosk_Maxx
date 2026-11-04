@@ -4,7 +4,7 @@
 // de cada foto (com molde se houver) pronto para a ASK-400.
 // ─────────────────────────────────────────────────────────────
 import config from '../config';
-import { computeAutoFit, loadImage } from './imageUtils';
+import { computeAutoFit, coverScaleForAngle, loadImage } from './imageUtils';
 import { overlayRect } from './overlayCalibration';
 
 // Converte um canvas em Blob JPEG na qualidade configurada.
@@ -130,13 +130,10 @@ export async function composePrintImage(photo) {
     // célula inteira quando não há janela medida (10x15/15x20), o que preserva
     // o comportamento antigo sem nenhum desvio.
     const win = config.getOverlayWindow(photo.key, photo.overlayVariant);
-    // Giro de 90°/270° troca a largura/altura que a foto ocupa — o cover tem
-    // de usar as dimensões efetivas (trocadas), igual ao setupCover da tela.
-    const angPdv = ((photo.angle ?? 0) % 360 + 360) % 360;
-    const swapPdv = angPdv === 90 || angPdv === 270;
-    const effW = swapPdv ? origH : origW;
-    const effH = swapPdv ? origW : origH;
-    const cover = Math.max(win.w / effW, win.h / effH) * 100;
+    // O cover é calculado com o MESMO ângulo usado na tela (inclusive
+    // inclinação fina): assim a foto cobre a janela sem deixar canto vazio,
+    // idêntico ao setupCover do editor.
+    const cover = coverScaleForAngle(win.w, win.h, origW, origH, photo.angle ?? 0) * 100;
     const sd = cover * ((photo.scale ?? 100) / 100);
     const dw = (origW * sd) / 100;
     const dh = (origH * sd) / 100;

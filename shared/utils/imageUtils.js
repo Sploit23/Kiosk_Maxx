@@ -7,6 +7,26 @@ export function findBestScale(frameW, frameH, imgW, imgH) {
   return Math.max((frameW / imgW) * 100, (frameH / imgH) * 100);
 }
 
+// Escala (multiplicador, 1 = tamanho natural) necessária para a imagem
+// `cw x ch` girar `angleDeg` em torno do centro e ainda cobrir o retângulo
+// `tw x th`. Para ângulos múltiplos de 90° dá exatamente o cover antigo
+// (max(tw/cw, th/ch) com as dimensões trocadas quando preciso); para ângulos
+// finos compensa os cantos que apareceriam ao inclinar a foto.
+export function coverScaleForAngle(tw, th, cw, ch, angleDeg) {
+  if (!tw || !th || !cw || !ch) return 1;
+  const rad = ((angleDeg || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const hx = tw / 2, hy = th / 2;
+  let scale = 0;
+  for (const [x, y] of [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]]) {
+    // canto do alvo levado para o sistema da imagem (gira -ângulo)
+    const lx = x * cos + y * sin;
+    const ly = -x * sin + y * cos;
+    scale = Math.max(scale, Math.abs(lx) / (cw / 2), Math.abs(ly) / (ch / 2));
+  }
+  return scale || 1;
+}
+
 // Auto-fit: calcula escala, centralização e rotação automáticas para encaixar a
 // foto no quadro sem deixar áreas vazias (cover). Usada pelo editor, previews e impressão.
 export function computeAutoFit(naturalW, naturalH, frameW, frameH) {
