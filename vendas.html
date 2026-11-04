@@ -881,8 +881,18 @@
   .combo-card .combo-precos{display:flex;flex-direction:column;}
   .combo-card .combo-de{font-size:10px;color:var(--slate-500);text-decoration:line-through;}
   .combo-card .combo-por{font-family:Arial,sans-serif;font-size:15px;color:var(--gold-300);}
-  .combo-card .oc-add-btn{font-size:10.5px;padding:6px 9px;white-space:nowrap;}
-  .combo-card .oc-add-btn:disabled{opacity:.4;}
+  .combo-card .oc-add-btn{
+    font-size:12px;padding:9px 14px;white-space:nowrap;border:none;border-radius:8px;
+    background:linear-gradient(135deg,var(--gold-500),#c78f38);
+    color:var(--navy-950);font-weight:800;
+  }
+  .combo-card .oc-add-btn:hover{filter:brightness(1.08);color:var(--navy-950);}
+  .combo-card .oc-add-btn.is-pending{
+    background:linear-gradient(135deg,#22c55e,#15803d);
+    color:#fff;box-shadow:0 2px 10px rgba(34,197,94,.4);
+  }
+  .combo-card .oc-add-btn.is-pending:hover{filter:brightness(1.08);color:#fff;}
+  .combo-card .oc-add-btn:disabled{opacity:.4;filter:none;}
 
   .qty-controls{display:flex;align-items:center;gap:12px;}
   .qty-controls button{
@@ -4111,22 +4121,11 @@ async function finalizarVendaImpl(){
     <button class="btn-primary resumo-action" id="btn-ir-painel">Voltar para o painel de sessões</button>
   `);
 
-  document.getElementById('btn-print-summary').addEventListener('click', async ()=>{
-    try {
-      const loja = (_identidade && _identidade.lojaNome) || (typeof config!=='undefined'?config.lojaNome:'') || '';
-      const pdv = (_identidade && _identidade.pdvNome) || (typeof config!=='undefined'?config.pdvNome:'') || '';
-      const op = (typeof currentUser!=='undefined' && currentUser && currentUser.nome) || '';
-      const dt = new Date().toLocaleString('pt-BR');
-      const texto = cupomBematechTexto({ loja, pdv, operador: op, data: dt, pedidoId, itens: itensResumo, total, pagamentos, codigoDigital });
-      const qrImg = codigoDigital ? qrDataUrl(urlNatal(codigoDigital), { cellSize: 8, margin: 32 }) : null;
-      await imprimirBematechTexto(texto, codigoDigital ? 'Cupom digital enviado' : undefined, qrImg, {
-        titulo: 'MAXX FOTO LEMBRANÇA',
-        subtitulo: 'CNPJ 22.902.082/0001-00',
-        telefone: 'Tel: (41) 99655-2801',
-        codigo: codigoDigital,
-      });
-    }catch(e){ toast('⚠ Falha ao imprimir cupom'); }
+  document.getElementById('btn-print-summary').addEventListener('click', ()=>{
+    imprimirCupomVenda({ pedidoId, itensResumo, senhasResumo, total, pagamentos, codigoDigital });
   });
+  // Cupom sai automático ao confirmar o pedido; o botão acima fica como 2ª via.
+  imprimirCupomVenda({ pedidoId, itensResumo, senhasResumo, total, pagamentos, codigoDigital });
   if(temFoto) document.getElementById('btn-print-fotos').addEventListener('click', ()=>{
     if(printando){ toast('🖨️ Impressão já em andamento — aguarde...'); return; }
     toast('🖨️ Reenviando fotos para a impressora...');
@@ -4226,7 +4225,7 @@ function wrapCols(texto, W = 32){
   if(atual) linhas.push(atual);
   return linhas;
 }
-function cupomBematechTexto({ loja, pdv, operador, data, pedidoId, itens, total, pagamentos, codigoDigital }){
+function cupomBematechTexto({ loja, pdv, operador, data, pedidoId, senhas, itens, total, pagamentos, codigoDigital }){
   const W = 32;
   const centro = (t) => { t = String(t); const pad = Math.max(0, Math.floor((W - t.length) / 2)); return ' '.repeat(pad) + t; };
   const linha = (esq, dir) => { esq = String(esq); dir = String(dir); const esp = Math.max(1, W - esq.length - dir.length); return esq + ' '.repeat(esp) + dir; };
@@ -4244,11 +4243,13 @@ function cupomBematechTexto({ loja, pdv, operador, data, pedidoId, itens, total,
   out.push(centro(data));
   out.push(sep);
   wrapCols('Pedido: ' + pedidoId, W).forEach(l => out.push(l));
+  const senhasTxt = (senhas || []).filter(Boolean).join(', ');
+  if(senhasTxt) wrapCols('Sessão: ' + senhasTxt, W).forEach(l => out.push(l));
   out.push(sep);
   itens.forEach(c => {
     const nome = String(c.label || '');
     const q = c.qtd > 1 ? c.qtd + 'x ' : '';
-    wrapCols(q + nome + ' #' + c.sessionSenha, W).forEach(l => out.push(l));
+    wrapCols(q + nome, W).forEach(l => out.push(l));
     out.push(linha('', fmt(c.preco)));
   });
   out.push(sep);
@@ -4335,6 +4336,23 @@ async function imprimirBematechTexto(texto, rotulo, qrImg, cabecalho){
     toast('⚠ Falha ao imprimir cupom');
     return false;
   }
+}
+// Monta e imprime o cupom da venda (auto ao confirmar + 2ª via pelo botão).
+async function imprimirCupomVenda({ pedidoId, itensResumo, senhasResumo, total, pagamentos, codigoDigital }){
+  try {
+    const loja = (_identidade && _identidade.lojaNome) || (typeof config!=='undefined'?config.lojaNome:'') || '';
+    const pdv = (_identidade && _identidade.pdvNome) || (typeof config!=='undefined'?config.pdvNome:'') || '';
+    const op = (typeof currentUser!=='undefined' && currentUser && currentUser.nome) || '';
+    const dt = new Date().toLocaleString('pt-BR');
+    const texto = cupomBematechTexto({ loja, pdv, operador: op, data: dt, pedidoId, senhas: senhasResumo, itens: itensResumo, total, pagamentos, codigoDigital });
+    const qrImg = codigoDigital ? qrDataUrl(urlNatal(codigoDigital), { cellSize: 8, margin: 32 }) : null;
+    await imprimirBematechTexto(texto, codigoDigital ? 'Cupom digital enviado' : undefined, qrImg, {
+      titulo: 'MAXX FOTO LEMBRANÇA',
+      subtitulo: 'CNPJ 22.902.082/0001-00',
+      telefone: 'Tel: (41) 99655-2801',
+      codigo: codigoDigital,
+    });
+  }catch(e){ toast('⚠ Falha ao imprimir cupom'); }
 }
 function receiptHtmlAtivo(){ return document.querySelector('#modal-box .receipt'); }
 
@@ -4937,7 +4955,7 @@ function renderCombos(){
           ${somaIndividual>combo.valorCombo?`<span class="combo-de">${fmt(somaIndividual)}</span>`:''}
           <span class="combo-por">${fmt(combo.valorCombo)}</span>
         </div>
-        <button class="oc-add-btn" ${bloqueado?'disabled':''}>${escHtml(labelBtn)}</button>
+        <button class="oc-add-btn${pendente?' is-pending':''}" ${bloqueado?'disabled':''}>${escHtml(labelBtn)}</button>
       </div>
     `;
     if(!bloqueado) card.querySelector('button').addEventListener('click', ()=>{
@@ -7401,7 +7419,7 @@ function renderCheckoutStep(total){
       toast('⚠ Nenhum caixa aberto no momento — não é possível confirmar a venda');
       return;
     }
-    // Nada é impresso automaticamente. Cupom só no botão do resumo; fotos só na ASK-400.
+    // Cupom da venda sai automático no resumo; fotos só na ASK-400 (botão manual).
     efetivoRows = pretendidoRows.map(r=>({...r}));
     finalizarVenda();
   });
