@@ -10,4 +10,5 @@ jre8/
 __pycache__/
 *.pyc
 tools/pegar-fotos/build/
+tools/pegar-fotos/config.json
 

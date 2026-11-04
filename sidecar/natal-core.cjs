@@ -1761,6 +1761,70 @@ const server = http.createServer(async (req, res) => {
       }
       return sendJson(res, ok ? 200 : 502, { success: ok, error: erro });
     }
+    // Camera USB (WPD/MTP): lista as fotos novas e dispara a captura manual
+    // (o fotografo escolhe quando fechar a sessao).
+    if (method === 'POST' && p === '/api/import/camera/scan') {
+      let data = null;
+      let erro = null;
+      try {
+        const resp = await fetch('http://127.0.0.1:8099/api/camera/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(120000),
+        });
+        data = await resp.json().catch(() => null);
+        if (!resp.ok) erro = (data && data.error) || ('HTTP ' + resp.status);
+      } catch (e) {
+        erro = e.message || String(e);
+      }
+      return sendJson(res, data ? 200 : 502, {
+        success: !!(data && data.ok),
+        camera: data || null,
+        error: erro || (data && data.error) || null,
+      });
+    }
+    if (method === 'POST' && p === '/api/import/camera/capture') {
+      let data = null;
+      let erro = null;
+      try {
+        const resp = await fetch('http://127.0.0.1:8099/api/camera/capture', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(15000),
+        });
+        data = await resp.json().catch(() => null);
+        if (!resp.ok) erro = (data && data.error) || ('HTTP ' + resp.status);
+      } catch (e) {
+        erro = e.message || String(e);
+      }
+      return sendJson(res, data ? 200 : 502, {
+        success: !!(data && data.ok),
+        camera: data || null,
+        error: erro || (data && data.error) || null,
+      });
+    }
+    if (method === 'POST' && p === '/api/import/camera/settings') {
+      let data = null;
+      let erro = null;
+      try {
+        const body = JSON.parse((await readBody(req, 64 * 1024)).toString() || '{}');
+        const resp = await fetch('http://127.0.0.1:8099/api/camera/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(5000),
+        });
+        data = await resp.json().catch(() => null);
+        if (!resp.ok) erro = (data && data.error) || ('HTTP ' + resp.status);
+      } catch (e) {
+        erro = e.message || String(e);
+      }
+      return sendJson(res, data ? 200 : 502, {
+        success: !!(data && data.ok),
+        settings: (data && data.settings) || null,
+        error: erro || (data && data.error) || null,
+      });
+    }
 
     // ── Outbox do portal (fila durável de envio) ──────────────
     // O PDV enfileira aqui tudo que precisa registrar no portal e só

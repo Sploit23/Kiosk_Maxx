@@ -9,7 +9,7 @@
  * Ações admin    : exigem X-Token (header) ou campo "token":
  *   admin.login, lojas.list, lojas.save, lojas.addKiosk, lojas.removeKiosk,
  *   lojas.delete, kiosk.descartar, usuarios.list, usuarios.save,
- *   usuarios.delete, admin.changePassword,
+ *   usuarios.delete, admin.changePassword, admin.limparDados,
  *   catalogo.get, precos.save, precos.list, vendas.resumo, pedido.list, auditoria.list,
  *   despesas.list, despesas.save, despesas.delete,
  *   estoque.list, estoque.save, parametros.get, parametros.save
@@ -2485,6 +2485,32 @@ try {
             if (count($db['usuarios']) === $before) fail('USUARIO_NAO_ENCONTRADO', 404);
             saveDb($db);
             respond(['ok' => true]);
+        }
+
+        case 'admin.limparDados': {
+            $senha = (string) ($p['senha'] ?? '');
+            $confirmacao = strtoupper(trim((string) ($p['confirmacao'] ?? '')));
+            if ($confirmacao !== 'LIMPAR') fail('CONFIRMACAO_INVALIDA');
+            if (!hash_equals(adminHash(), sha256($senha))) {
+                usleep(250000);
+                fail('SENHA_INVALIDA', 401);
+            }
+
+            // Dados de movimento/teste. Configuracao (app.json, precos.json,
+            // parametros.json, admin.json/tokens.json) e preservada.
+            $arquivos = ['vendas.json', 'pedidos.json', 'caixas.json', 'auditoria.json', 'despesas.json', 'estoque.json'];
+            $bkp = 'limpeza-' . date('Ymd-His') . '-' . substr(uniqid(), -4);
+            if (!ensureBkpDir($bkp)) fail('BACKUP_FALHOU', 500);
+            foreach ($arquivos as $f) {
+                $src = dataFile($f);
+                if (!is_file($src)) continue;
+                if (!@copy($src, bkpBase() . '/' . $bkp . '/' . $f)) fail('BACKUP_FALHOU', 500);
+            }
+            foreach ($arquivos as $f) {
+                if (!saveJson($f, [])) fail('FALHA_AO_LIMPAR', 500);
+            }
+            error_log('[natalcontroler] dados de teste limpos; backup=' . $bkp);
+            respond(['ok' => true, 'backup' => $bkp, 'arquivos' => $arquivos]);
         }
 
         case 'admin.changePassword': {

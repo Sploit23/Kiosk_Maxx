@@ -28,6 +28,7 @@ from shared import (
 )
 from peer import PeerListener, PeerSync
 import notify
+import camera
 
 _single_instance_handle = None
 
@@ -173,6 +174,17 @@ class PhotoHTTPHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(payload).encode())
 
+    def _read_json(self):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0:
+                return {}
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8") or "{}")
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
     def _list_dirs(self):
         return list_batch_dirs(self.get_root())
 
@@ -187,11 +199,53 @@ class PhotoHTTPHandler(SimpleHTTPRequestHandler):
                 app.peer_sync.wake.set()
             self._json({"ok": True})
             return
+        if self.path == "/api/camera/scan":
+            app = getattr(self.server, "app", None)
+            try:
+                payload = app.camera_scan() if app is not None else {"ok": False}
+            except Exception as e:
+                payload = {"ok": False, "connected": False, "newCount": 0, "error": str(e)}
+            self._json(payload)
+            return
+        if self.path == "/api/camera/capture":
+            app = getattr(self.server, "app", None)
+            try:
+                payload = app.start_camera_capture() if app is not None else {"ok": False}
+            except Exception as e:
+                payload = {"ok": False, "error": str(e)}
+            self._json(payload, 200 if payload.get("ok") else 409)
+            return
+        if self.path == "/api/camera/settings":
+            app = getattr(self.server, "app", None)
+            try:
+                payload = app.set_camera_settings(self._read_json()) if app is not None else {"ok": False}
+            except Exception as e:
+                payload = {"ok": False, "error": str(e)}
+            self._json(payload, 200 if payload.get("ok") else 400)
+            return
         self.send_response(404)
         self.end_headers()
 
     def do_GET(self):
         path = self.translate_path(self.path)
+
+        if self.path == "/api/camera":
+            app = getattr(self.server, "app", None)
+            try:
+                payload = {"ok": True, "camera": app.camera_payload() if app is not None else {}}
+            except Exception as e:
+                payload = {"ok": False, "error": str(e)}
+            self._json(payload)
+            return
+
+        if self.path == "/api/camera/settings":
+            app = getattr(self.server, "app", None)
+            try:
+                payload = {"ok": True, "settings": app.camera_settings_payload() if app is not None else {}}
+            except Exception as e:
+                payload = {"ok": False, "error": str(e)}
+            self._json(payload)
+            return
 
         if self.path == "/api/status":
             app = getattr(self.server, "app", None)
@@ -361,6 +415,7 @@ class PhotoImportApp:
             "machine_id": "",
             "sync_interval": 8,
             "auto_download": True,
+            "camera_auto_capture": False,
         }
         self.load_config()
 
@@ -385,6 +440,10 @@ class PhotoImportApp:
             "download": None,
             "peer": {"found": False, "name": "", "ip": "", "port": 0, "status": "", "error": "", "batches": []},
             "server": {"active": False, "ips": [], "url": "", "port": 0},
+            "camera": {
+                "connected": False, "devices": [], "name": "", "capturing": False,
+                "message": "", "lastBatch": "", "lastCount": 0, "lastAt": 0, "lastError": "",
+            },
             "ignored": [],
         }
 
@@ -393,6 +452,12 @@ class PhotoImportApp:
         self._registry_names = {}
         self._registry_hashes = set()
         self._load_import_registry()
+
+        self._camera_lock = threading.Lock()
+        self._camera_index_file = os.path.join(
+            self.config["destination_path"], ".natal_camera_index.json")
+        self._camera_index = self._load_camera_index()
+        self._last_process_reason = ""
 
         self.root.attributes("-topmost", self.config.get("always_on_top", True) and not self.headless)
         if self.headless:
@@ -513,6 +578,188 @@ class PhotoImportApp:
             "drive": drive, "batch": batch,
         }
 
+    # --------------------------------------------------------------- camera
+    def _set_camera(self, **values):
+        cam = self._status["camera"]
+        for key, value in values.items():
+            cam[key] = value
+
+    def _load_camera_index(self):
+        try:
+            with open(self._camera_index_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            keys = data.get("keys") or []
+            return set(str(k) for k in keys)
+        except Exception:
+            return set()
+
+    def _camera_index_add(self, keys):
+        keys = [str(k) for k in (keys or []) if k]
+        if not keys:
+            return
+        with self._camera_lock:
+            self._camera_index.update(keys)
+            try:
+                tmp = self._camera_index_file + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump({"keys": sorted(self._camera_index)}, f)
+                os.replace(tmp, self._camera_index_file)
+            except Exception as e:
+                self.log("camera: falha ao salvar indice: %s" % e)
+
+    def _update_camera_presence(self, devices):
+        names = []
+        for dev in devices or []:
+            if isinstance(dev, dict):
+                name = (dev.get("name") or dev.get("description") or "").strip()
+            else:
+                name = str(dev or "").strip()
+            if name and name not in names:
+                names.append(name)
+        cam = self._status["camera"]
+        cam["connected"] = bool(names)
+        cam["devices"] = names
+        cam["name"] = names[0] if names else ""
+        if not names and not cam.get("capturing"):
+            cam["message"] = ""
+
+    def camera_payload(self):
+        cam = self._status["camera"]
+        return {
+            "connected": bool(cam.get("connected")),
+            "devices": list(cam.get("devices") or []),
+            "name": cam.get("name") or "",
+            "capturing": bool(cam.get("capturing")),
+            "message": cam.get("message") or "",
+            "lastBatch": cam.get("lastBatch") or "",
+            "lastCount": int(cam.get("lastCount") or 0),
+            "lastAt": cam.get("lastAt") or 0,
+            "lastError": cam.get("lastError") or "",
+            "autoCapture": bool(self.config.get("camera_auto_capture", False)),
+        }
+
+    def camera_settings_payload(self):
+        return {"autoCapture": bool(self.config.get("camera_auto_capture", False))}
+
+    def set_camera_settings(self, data):
+        if not isinstance(data, dict):
+            return {"ok": False, "error": "invalid"}
+        if "autoCapture" in data:
+            self.config["camera_auto_capture"] = bool(data.get("autoCapture"))
+            self.save_config()
+            self.log("camera: captura automatica %s" % (
+                "ativada" if self.config["camera_auto_capture"] else "desativada"))
+        return {"ok": True, "settings": self.camera_settings_payload()}
+
+    def camera_scan(self):
+        self._update_camera_presence(camera.list_wpd_devices())
+        with self._camera_lock:
+            skip = set(self._camera_index)
+        result = camera.scan(skip)
+        cams = [str(c) for c in (result.get("cameras") or []) if c]
+        if cams:
+            self._update_camera_presence([{"name": c} for c in cams])
+        else:
+            self._update_camera_presence([])
+        return {
+            "ok": bool(result.get("ok")),
+            "connected": bool(cams),
+            "cameras": cams,
+            "name": cams[0] if cams else "",
+            "newCount": int(result.get("newCount") or 0),
+            "total": int(result.get("total") or 0),
+            "files": result.get("files") or [],
+            "error": result.get("error") or "",
+            "autoCapture": bool(self.config.get("camera_auto_capture", False)),
+        }
+
+    def start_camera_capture(self):
+        with self._camera_lock:
+            cam = self._status["camera"]
+            if cam.get("capturing") or self.is_copying:
+                return {"ok": False, "error": "busy", "message": "Ja existe uma importacao em andamento."}
+            if not cam.get("connected"):
+                self._update_camera_presence(camera.list_wpd_devices())
+            if not cam.get("connected"):
+                return {"ok": False, "error": "no_camera", "message": "Nenhuma camera conectada."}
+            cam.update({
+                "capturing": True,
+                "message": "Lendo a camera...",
+                "lastBatch": "",
+                "lastCount": 0,
+                "lastAt": 0,
+                "lastError": "",
+            })
+        threading.Thread(target=self._camera_capture_worker, daemon=True).start()
+        return {"ok": True, "started": True}
+
+    def _camera_capture_worker(self):
+        root = self.config["destination_path"]
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        staging = os.path.join(root, TMP_PREFIX + "camera_" + stamp)
+        cam_name = self._status["camera"].get("name") or "Camera"
+        try:
+            with self._camera_lock:
+                skip = set(self._camera_index)
+            self.log("camera: procurando fotos novas (%s, %d ignoradas)" % (cam_name, len(skip)))
+            result = camera.capture(staging, skip)
+            files = result.get("files") or []
+            errors = result.get("errors") or []
+            if not files:
+                if result.get("error"):
+                    raise RuntimeError(result.get("error"))
+                if errors:
+                    raise RuntimeError("%d foto(s) nao puderam ser copiadas" % len(errors))
+                self._set_camera(
+                    capturing=False, message="Nenhuma foto nova na camera.",
+                    lastBatch="", lastCount=0, lastAt=time.time(), lastError="",
+                )
+                self._set_card("camera_empty", "CAMERA SEM NOVIDADES",
+                               "Nenhuma foto nova na camera.")
+                return
+            paths = [f.get("path") for f in files if f.get("path") and os.path.isfile(f.get("path"))]
+            if not paths:
+                raise RuntimeError("As fotos nao chegaram ao computador")
+            self._set_camera(message="Copiando %d foto(s)..." % len(paths))
+            batch_name = self.process_import(staging, paths, source_label=cam_name)
+            reason = self._last_process_reason
+            if batch_name:
+                self._camera_index_add([f.get("key") for f in files])
+                aviso = (" (%d foto(s) nao copiada(s))" % len(errors)) if errors else ""
+                self._set_camera(
+                    capturing=False,
+                    message="Sessao criada: %s (%d fotos).%s" % (batch_name, len(paths), aviso),
+                    lastBatch=batch_name, lastCount=len(paths),
+                    lastAt=time.time(), lastError="",
+                )
+            elif reason in ("duplicate", "no_new"):
+                self._camera_index_add([f.get("key") for f in files])
+                msg = ("Essas fotos ja estavam importadas." if reason == "duplicate"
+                       else "Nenhuma foto nova na camera.")
+                self._set_camera(
+                    capturing=False, message=msg, lastBatch="",
+                    lastCount=len(paths) if reason == "duplicate" else 0,
+                    lastAt=time.time(), lastError="",
+                )
+            else:
+                self._set_camera(
+                    capturing=False, message="Falha ao importar as fotos da camera.",
+                    lastBatch="", lastCount=len(paths), lastAt=time.time(),
+                    lastError="Nao foi possivel publicar a sessao.",
+                )
+                self._set_card("camera_error", "ERRO NA CAMERA",
+                               "Nao foi possivel publicar a sessao.")
+        except Exception as e:
+            self.log("camera: erro: %s" % e)
+            self._set_camera(
+                capturing=False, message="Falha ao ler a camera.",
+                lastAt=time.time(), lastError=str(e)[:300],
+            )
+            self._set_card("camera_error", "ERRO NA CAMERA", str(e)[:200])
+        finally:
+            self.is_copying = False
+            shutil.rmtree(staging, ignore_errors=True)
+
     def status_payload(self):
         """Estado completo para o PDV (GET /api/status). Roda fora da thread Tk:
         le apenas atributos simples e o diretorio de lotes."""
@@ -556,6 +803,7 @@ class PhotoImportApp:
                 "serving": os.path.basename(root),
             },
             "peer": self._status["peer"],
+            "camera": self.camera_payload(),
             "batches": batches,
             "history": self.config.get("history", [])[-50:],
             "ignored": sorted(self.peer_ignored),
@@ -1285,32 +1533,66 @@ class PhotoImportApp:
                 continue
             try:
                 removable_drives = self.get_removable_drives()
+                was_camera_connected = bool(self._status["camera"].get("connected"))
+                try:
+                    cam_devices = camera.list_wpd_devices()
+                except Exception:
+                    cam_devices = []
+                self._update_camera_presence(cam_devices)
+                now_camera_connected = bool(self._status["camera"].get("connected"))
+
                 if not removable_drives:
                     self.last_processed_drive = None
-                    self.root.after(0, self.set_status_waiting)
-                    continue
+                started_import = False
+                has_card_photos = False
                 for drive in removable_drives:
                     photos = self.find_photos_in_drive(drive)
                     if photos:
+                        has_card_photos = True
                         if drive != self.last_processed_drive:
                             self.root.after(0, self.set_status_detected, drive, len(photos))
                             if self.config.get("auto_import", True):
                                 self.last_processed_drive = drive
                                 threading.Thread(target=self.process_import, args=(drive, photos), daemon=True).start()
+                                started_import = True
                                 break
                         else:
                             self.root.after(0, self.set_status_ready_existing, drive, len(photos))
                     else:
                         if drive != self.last_processed_drive:
                             self.root.after(0, self.set_status_empty, drive)
+
+                if started_import or self.is_copying:
+                    continue
+                cam = self._status["camera"]
+                if (now_camera_connected and not was_camera_connected
+                        and not has_card_photos
+                        and self.config.get("camera_auto_capture", False)
+                        and not cam.get("capturing")):
+                    self.log("camera: conectada; iniciando captura automatica")
+                    self.root.after(0, self.set_status_camera_ready, cam.get("name") or "")
+                    self.start_camera_capture()
+                    continue
+                if not removable_drives and cam.get("connected") and not cam.get("capturing"):
+                    self.root.after(0, self.set_status_camera_ready, cam.get("name") or "")
+                elif not removable_drives and not cam.get("connected"):
+                    self.root.after(0, self.set_status_waiting)
             except Exception:
                 pass
 
     def set_status_waiting(self):
-        self.status_badge.config(text="AGUARDANDO CARTAO...", bg="#f59e0b", fg="#11111b")
-        self.drive_info_lbl.config(text="Insira um cartao de memoria ou pen drive no computador...")
-        self._set_card("waiting", "AGUARDANDO CARTAO...",
-                       "Insira um cartao de memoria ou pen drive no computador...")
+        self.status_badge.config(text="AGUARDANDO CARTAO OU CAMERA...", bg="#f59e0b", fg="#11111b")
+        self.drive_info_lbl.config(text="Insira um cartao/pen drive ou conecte a camera no computador...")
+        self._set_card("waiting", "AGUARDANDO CARTAO OU CAMERA...",
+                       "Insira um cartao/pen drive ou conecte a camera no computador...")
+
+    def set_status_camera_ready(self, name):
+        nome = name or "Camera"
+        badge = f"CAMERA CONECTADA ({nome})"
+        msg = f"{nome} conectada. Tire as fotos e use 'Sessao da camera' no PDV."
+        self.status_badge.config(text=badge, bg="#8b5cf6", fg="#ffffff")
+        self.drive_info_lbl.config(text=msg)
+        self._set_card("camera_ready", badge, msg, drive=nome)
 
     def set_status_detected(self, drive, count):
         self.status_badge.config(text=f"CARTAO DETECTADO ({drive})", bg="#3b82f6", fg="#ffffff")
@@ -1399,7 +1681,9 @@ class PhotoImportApp:
             pass
         return None
 
-    def process_import(self, source_path, photo_files):
+    def process_import(self, source_path, photo_files, source_label=None):
+        source = source_label or source_path
+        self._last_process_reason = ""
         self.is_copying = True
         self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.DISABLED))
         self.root.after(0, lambda: self.drive_info_lbl.config(text="Verificando quais fotos sao novas..."))
@@ -1442,6 +1726,7 @@ class PhotoImportApp:
             new_files.append((f, fhash, size, qhash))
 
         if not new_files:
+            self._last_process_reason = "no_new"
             self.is_copying = False
             self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.NORMAL))
             try:
@@ -1449,19 +1734,20 @@ class PhotoImportApp:
             except Exception:
                 pass
             self.root.after(0, self.set_status_all_imported)
-            return
+            return None
 
         # se o MESMO conteudo ja existe em outro lote (ex: baixado do outro PC
         # com outro nome) nao cria uma pasta duplicada
         prospective = make_lot_hash(self._dest_entries_for(new_files))
         same_lot = self._lot_with_hash(prospective)
         if same_lot:
+            self._last_process_reason = "duplicate"
             self.is_copying = False
             self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.NORMAL))
             self.root.after(0, self.set_status_all_imported)
             self.root.after(0, lambda: self.drive_info_lbl.config(
                 text=f"Essas fotos ja estao no lote {same_lot}. Pode remover o cartao."))
-            return
+            return None
 
         prefix = self.config.get("prefix", "NATAL")
         seq = self.get_next_sequence()
@@ -1515,36 +1801,38 @@ class PhotoImportApp:
         if copied_count != total_files or copy_errors:
             # Nunca publica lote incompleto: o sidecar criaria uma sessao
             # faltando fotos e o cartao poderia ser apagado pelo operador.
+            self._last_process_reason = "copy_error"
             shutil.rmtree(tmp_dir, ignore_errors=True)
             self.is_copying = False
             self._status["progress"] = None
             faltaram = total_files - copied_count
             self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.NORMAL))
-            self.root.after(0, self.set_status_empty, source_path)
+            self.root.after(0, self.set_status_empty, source)
             self.root.after(0, lambda: self.drive_info_lbl.config(
                 text=f"Falha ao copiar {faltaram} foto(s). Nada foi publicado; tente de novo."))
             self.log("lote %s NAO publicado: %s de %s copiados" % (
                 batch_name, copied_count, total_files))
-            return
+            return None
 
         published = self._publish_batch(tmp_dir, final_dir)
         if not published:
+            self._last_process_reason = "publish_error"
             shutil.rmtree(tmp_dir, ignore_errors=True)
             self.is_copying = False
             self._status["progress"] = None
             self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.NORMAL))
-            self.root.after(0, self.set_status_empty, source_path)
-            return
+            self.root.after(0, self.set_status_empty, source)
+            return None
 
         self._save_import_registry()
-        self._write_marker(final_dir, copied_count, copied_bytes, source_path,
+        self._write_marker(final_dir, copied_count, copied_bytes, source,
                            make_lot_hash(lot_entries), dict(lot_entries))
 
         formatted_size = self.format_size(copied_bytes)
         date_str = datetime.now().strftime("%d/%m/%Y %H:%M")
         self.config.setdefault("history", []).append({
             "batch": batch_name, "date": date_str,
-            "count": copied_count, "size": formatted_size, "source": source_path
+            "count": copied_count, "size": formatted_size, "source": source
         })
         self.save_config()
 
@@ -1554,6 +1842,8 @@ class PhotoImportApp:
             pass
 
         self.root.after(0, self.finish_import, batch_name, copied_count)
+        self._last_process_reason = "ok"
+        return batch_name
 
     def _publish_batch(self, tmp_dir, final_dir):
         """Publica o lote de forma atomica: so aparece pronto para o outro PC."""

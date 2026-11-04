@@ -13,7 +13,7 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[('shared.py', '.'), ('peer.py', '.'), ('notify.py', '.'), ('natal_icon.png', '.')],
+    datas=[('shared.py', '.'), ('peer.py', '.'), ('notify.py', '.'), ('camera.py', '.'), ('camera_capture.ps1', '.'), ('natal_icon.png', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

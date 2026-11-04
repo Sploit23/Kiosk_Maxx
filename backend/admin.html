@@ -532,8 +532,6 @@ select.form-input{appearance:none;}
     <div class="sb-section">Equipe</div>
     <div class="sb-item" data-screen="equipe"><span class="ico">👥</span> Colaboradores</div>
     <div class="sb-item" data-screen="ranking"><span class="ico">🏆</span> Ranking</div>
-    <div class="sb-section">Admin</div>
-    <div class="sb-item" data-screen="config"><span class="ico">⚙️</span> Configurações</div>
   </div>
   <div class="sb-footer">
     <div class="user"><strong id="footer-user">—</strong><span id="footer-acesso">Acesso total</span></div>
@@ -628,51 +626,6 @@ select.form-input{appearance:none;}
       <div class="card">
         <h3>Equipe cadastrada</h3>
         <table id="tabela-equipe"></table>
-      </div>
-    </div>
-
-    <!-- ====== CONFIGURAÇÕES ====== -->
-    <div class="screen" id="screen-config">
-      <div class="section-head"><div><h2>Configurações da operação</h2><p>Segurança do portal e informações da API</p></div></div>
-      <div class="grid2">
-        <div class="card">
-          <h3>Senha do administrador do portal</h3>
-          <div class="alert-item info" style="margin-bottom:14px;">
-            <span class="alert-ico">🔑</span>
-            <div class="alert-body">
-              <div class="a-title">Uma única senha da gestão</div>
-              <div class="a-sub">Quem selecionar um usuário da gestão na tela de login usa esta mesma senha para entrar.</div>
-            </div>
-          </div>
-          <button class="btn btn-primary" id="btn-trocar-senha">Trocar senha do portal</button>
-        </div>
-        <div class="card">
-          <h3>API / Backend</h3>
-          <table id="tabela-api"></table>
-        </div>
-      </div>
-      <div class="card">
-        <h3>Parâmetros financeiros (DRE)</h3>
-        <p style="margin:0 0 12px;color:var(--slate-400);font-size:12px;">Usados no resultado do período: custo de ribbon por unidade e comissões sobre a receita de cada operador.</p>
-        <div class="form-row-h">
-          <div class="form-row"><label class="form-label">Custo do ribbon (R$/unidade)</label>
-            <input class="form-input" id="p-custo-ribbon" type="number" min="0" step="0.01" placeholder="0,00"></div>
-          <div class="form-row"><label class="form-label">Comissão vendedora (%)</label>
-            <input class="form-input" id="p-com-vend" type="number" min="0" max="100" step="0.1" placeholder="0"></div>
-          <div class="form-row"><label class="form-label">Comissão fotógrafo (%)</label>
-            <input class="form-input" id="p-com-foto" type="number" min="0" max="100" step="0.1" placeholder="0"></div>
-          <div class="form-row"><label class="form-label">Ribbon crítico (un.)</label>
-            <input class="form-input" id="p-ribbon-crit" type="number" min="0" step="1" placeholder="100"></div>
-        </div>
-        <div style="margin-top:12px;"><button class="btn btn-primary" id="btn-salvar-params">💾 Salvar parâmetros</button></div>
-      </div>
-      <div class="card">
-        <h3>Exportação de dados</h3>
-        <p style="margin:0 0 12px;color:var(--slate-400);font-size:12px;">Baixe uma visão completa do portal (lojas, equipe, vendas, pedidos, despesas e parâmetros).</p>
-        <div class="form-row-h">
-          <button class="btn btn-primary" id="btn-exportar-relatorio">🖨️ Relatório (HTML)</button>
-          <button class="btn btn-ghost" id="btn-exportar-json">⬇️ Backup completo (JSON)</button>
-        </div>
       </div>
     </div>
 
@@ -776,6 +729,39 @@ select.form-input{appearance:none;}
         </h3>
         <div id="fin-pedidos-wrap" style="display:none;">
           <table id="fin-pedidos"></table>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h3>Parâmetros do DRE</h3>
+          <p style="margin:0 0 12px;color:var(--slate-400);font-size:12px;">Custo de ribbon e comissões usados no resultado do período.</p>
+          <div class="form-row-h">
+            <div class="form-row"><label class="form-label">Custo do ribbon (R$/unidade)</label>
+              <input class="form-input" id="p-custo-ribbon" type="number" min="0" step="0.01" placeholder="0,00"></div>
+            <div class="form-row"><label class="form-label">Comissão vendedora (%)</label>
+              <input class="form-input" id="p-com-vend" type="number" min="0" max="100" step="0.1" placeholder="0"></div>
+            <div class="form-row"><label class="form-label">Comissão fotógrafo (%)</label>
+              <input class="form-input" id="p-com-foto" type="number" min="0" max="100" step="0.1" placeholder="0"></div>
+            <div class="form-row"><label class="form-label">Ribbon crítico (un.)</label>
+              <input class="form-input" id="p-ribbon-crit" type="number" min="0" step="1" placeholder="100"></div>
+          </div>
+          <div style="margin-top:12px;"><button class="btn btn-primary" id="btn-salvar-params">Salvar parâmetros</button></div>
+        </div>
+        <div class="card">
+          <h3>Exportar e limpar dados</h3>
+          <p style="margin:0 0 12px;color:var(--slate-400);font-size:12px;">Baixe um backup completo antes de iniciar a produção. A limpeza preserva lojas, equipe, catálogo, preços e parâmetros.</p>
+          <div class="form-row-h">
+            <button class="btn btn-primary" id="btn-exportar-relatorio">Relatório (HTML)</button>
+            <button class="btn btn-ghost" id="btn-exportar-json">Backup completo (JSON)</button>
+          </div>
+          <div class="alert-item warn" style="margin-top:14px;">
+            <span class="alert-ico">!</span>
+            <div class="alert-body">
+              <div class="a-title">Limpar dados de teste</div>
+              <div class="a-sub">Apaga vendas, pedidos, caixas, auditoria, despesas e contagem de estoque. Não apaga lojas, equipe, catálogo, preços ou parâmetros.</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;"><button class="btn" id="btn-limpar-dados" style="background:var(--red-400);color:#fff;">Limpar dados de teste</button></div>
         </div>
       </div>
       <div class="fin2-tip" id="fin2-tip"></div>
@@ -1006,7 +992,7 @@ function healthPing(){
 // ——— NAVEGAÇÃO ———
 var titles = {
   dashboard:'Dashboard', lojas:'Lojas', equipe:'Colaboradores', ranking:'Ranking',
-  config:'Configurações', precos:'Catálogo de produtos',
+  precos:'Catálogo de produtos',
   financeiro:'Financeiro', fluxo:'Fluxo de Caixa',
   estoque:'Estoque'
 };
@@ -1029,7 +1015,6 @@ function goScreen(name){
   if(name==='dashboard') renderDashboard();
   if(name==='lojas') renderLojas();
   if(name==='equipe') renderEquipe();
-  if(name==='config') renderConfig();
   if(name==='precos') renderPrecos();
   if(name==='financeiro') renderFinanc();
   if(name==='fluxo') renderFluxo();
@@ -1137,7 +1122,9 @@ $('#btn-user-chip').addEventListener('click', function(){
   openPortalModal(
     '<div class="modal-head"><h3>Sair do portal?</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
     '<p style="font-size:13px;color:var(--slate-400);margin-bottom:18px;">'+esc(state.currentUser.nome)+' ('+esc(state.currentUser.funcao)+')</p>'+
-    '<button class="btn btn-primary" style="width:100%;" id="confirmar-logout">Sair</button>'
+    '<div style="display:flex;gap:8px;">'+
+    '<button class="btn btn-ghost" style="flex:1;" id="abrir-trocar-senha">Trocar senha</button>'+
+    '<button class="btn btn-primary" style="flex:1;" id="confirmar-logout">Sair</button></div>'
   );
   $('#confirmar-logout').addEventListener('click', function(){
     state.currentUser = null;
@@ -1151,6 +1138,7 @@ $('#btn-user-chip').addEventListener('click', function(){
     $('#login-error').textContent = '';
     $('#login-overlay').classList.remove('hidden');
   });
+  $('#abrir-trocar-senha').addEventListener('click', abrirTrocarSenha);
 });
 window.nacCloseModal = closePortalModal;
 
@@ -1828,6 +1816,7 @@ async function renderFinanc(){
   fin2InitFiltros();
   await Promise.all([getVendas(), getPedidos(), loadDespesas(), getParametros()]);
   fin2InitFiltros();
+  pintarParametrosDRE();
   var agg = fin2Aggregar();
   state._fin2Agg = agg;
   fin2RenderFiltros(agg);
@@ -3003,39 +2992,9 @@ async function excluirUser(id){
 }
 
 // ——— CONFIG ———
-async function renderConfig(){
-  $('#tabela-api').innerHTML =
-    '<tr><th></th><th></th></tr>'+
-    '<tr><td>Plataforma</td><td>HostGator (PHP)</td></tr>'+
-    '<tr><td>Portal</td><td>maxxfoto.com.br/natalcontroler</td></tr>'+
-    '<tr><td>Login do kiosk</td><td>Valida no portal (lojaId na config)</td></tr>'+
-    '<tr><td>Offline</td><td>Kiosk usa cadastro local se sem internet</td></tr>';
-  var pr = await getParametros();
-  var p = pr || {};
-  if($('#p-custo-ribbon')) $('#p-custo-ribbon').value = toNum(p.custoRibbonUnitario);
-  if($('#p-com-vend')) $('#p-com-vend').value = toNum(p.comissaoVendedor);
-  if($('#p-com-foto')) $('#p-com-foto').value = toNum(p.comissaoFotografo);
-  if($('#p-ribbon-crit')) $('#p-ribbon-crit').value = toNum(p.ribbonCritico);
-}
-$('#btn-salvar-params').addEventListener('click', async function(){
-  var payload = {
-    custoRibbonUnitario: parseFloat($('#p-custo-ribbon').value) || 0,
-    comissaoVendedor: parseFloat($('#p-com-vend').value) || 0,
-    comissaoFotografo: parseFloat($('#p-com-foto').value) || 0,
-    ribbonCritico: parseFloat($('#p-ribbon-crit').value) || 0,
-  };
-  var res = await call('parametros.save', payload);
-  if(!res || !res.ok){ toast((res&&res.error)||'Falha ao salvar parâmetros', true); return; }
-  state.parametros = res.parametros || payload;
-  state._paramProm = null;
-  if(state._despDirty !== undefined) state._despDirty = true;
-  toast('Parâmetros financeiros salvos');
-  notif('⚙️','Parâmetros atualizados','Custo de ribbon e comissões atualizados.');
-  renderConfig();
-});
-$('#btn-trocar-senha').addEventListener('click', function(){
+function abrirTrocarSenha(){
   openPortalModal(
-    '<div class="modal-head"><h3>Trocar senha do portal</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
+    '<div class="modal-head"><h3>Trocar senha do portal</h3><button class="modal-close" onclick="nacCloseModal()">x</button></div>'+
     '<div class="form-row"><label class="form-label">Senha atual</label>'+
     '<input class="form-input" id="f-senha-atual" type="password"></div>'+
     '<div class="form-row"><label class="form-label">Nova senha (mín. 4 caracteres)</label>'+
@@ -3050,11 +3009,39 @@ $('#btn-trocar-senha').addEventListener('click', function(){
     var res = await call('admin.changePassword', { senhaAtual: atual, novaSenha: nova });
     if(!res.ok){ toast(res.error==='SENHA_ATUAL_INVALIDA'?'Senha atual incorreta.':'Falha ao trocar', true); return; }
     toast('Senha do portal alterada');
-    notif('🔑','Senha alterada','A senha da gestão foi atualizada.');
+    notif('i','Senha alterada','A senha da gestão foi atualizada.');
     closePortalModal();
   });
+}
+function pintarParametrosDRE(){
+  var p = state.parametros || {};
+  var set = function(sel, val){
+    var el = $(sel);
+    if(el && document.activeElement !== el) el.value = val;
+  };
+  set('#p-custo-ribbon', toNum(p.custoRibbonUnitario));
+  set('#p-com-vend', toNum(p.comissaoVendedor));
+  set('#p-com-foto', toNum(p.comissaoFotografo));
+  set('#p-ribbon-crit', toNum(p.ribbonCritico));
+}
+$('#btn-salvar-params').addEventListener('click', async function(){
+  var payload = {
+    custoRibbonUnitario: parseFloat($('#p-custo-ribbon').value) || 0,
+    comissaoVendedor: parseFloat($('#p-com-vend').value) || 0,
+    comissaoFotografo: parseFloat($('#p-com-foto').value) || 0,
+    ribbonCritico: parseFloat($('#p-ribbon-crit').value) || 0,
+  };
+  var res = await call('parametros.save', payload);
+  if(!res || !res.ok){ toast((res&&res.error)||'Falha ao salvar parâmetros', true); return; }
+  state.parametros = res.parametros || payload;
+  state._paramProm = null;
+  state._paramAt = 0;
+  if(state._despDirty !== undefined) state._despDirty = true;
+  toast('Parâmetros financeiros salvos');
+  notif('⚙','Parâmetros atualizados','Custo de ribbon e comissões atualizados.');
+  pintarParametrosDRE();
+  renderFinanc();
 });
-
 // ——— EXPORTAÇÃO DE DADOS ———
 function exportarTudo(){
   return Promise.all([
@@ -3189,6 +3176,56 @@ function exportarJSON(){
 }
 $('#btn-exportar-relatorio').addEventListener('click', exportarDados);
 $('#btn-exportar-json').addEventListener('click', exportarJSON);
+
+function abrirLimparDados(){
+  openPortalModal(
+    '<div class="modal-head"><h3>Limpar dados de teste</h3><button class="modal-close" onclick="nacCloseModal()">x</button></div>'+
+    '<div class="alert-item warn" style="margin-bottom:14px;">'+
+      '<span class="alert-ico">!</span><div class="alert-body">'+
+      '<div class="a-title">Esta acao nao pode ser desfeita pelo portal</div>'+
+      '<div class="a-sub">Serao apagados vendas, pedidos, caixas, auditoria, despesas e contagem de estoque. Lojas, equipe, catalogo, precos e parametros serao mantidos. Um backup e criado antes da limpeza.</div>'+
+      '</div></div>'+
+    '<div class="form-row"><label class="form-label">Digite LIMPAR para confirmar</label>'+
+    '<input class="form-input" id="f-limpar-confirma" autocomplete="off"></div>'+
+    '<div class="form-row"><label class="form-label">Senha do administrador</label>'+
+    '<input class="form-input" id="f-limpar-senha" type="password"></div>'+
+    '<div class="modal-actions"><button class="btn" id="conf-limpar-dados" style="background:var(--red-400);color:#fff;">Limpar dados</button>'+
+    '<button class="btn btn-ghost" onclick="nacCloseModal()">Cancelar</button></div>'
+  );
+  $('#conf-limpar-dados').addEventListener('click', async function(){
+    var conf = ($('#f-limpar-confirma').value || '').trim().toUpperCase();
+    var senha = $('#f-limpar-senha').value;
+    if(conf !== 'LIMPAR'){ toast('Digite LIMPAR para confirmar', true); return; }
+    if(!senha){ toast('Informe a senha do administrador', true); return; }
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Limpando...';
+    var res;
+    try{
+      res = await call('admin.limparDados', { confirmacao: conf, senha: senha });
+    }catch(e){
+      toast('Falha ao limpar os dados', true);
+      btn.disabled = false;
+      btn.textContent = 'Limpar dados';
+      return;
+    }
+    if(!res || !res.ok){
+      toast((res && res.error) || 'Falha ao limpar os dados', true);
+      btn.disabled = false;
+      btn.textContent = 'Limpar dados';
+      return;
+    }
+    closePortalModal();
+    state._vendasAt = 0; state._vendasProm = null;
+    state._pedAt = 0; state._pedProm = null; state._pedDirty = true;
+    state._despAt = 0; state._despProm = null; state._despDirty = true;
+    state.vendasRaw = []; state.pedidos = []; state.despesas = []; state._fin2Agg = null;
+    toast('Dados de teste limpos. Backup: ' + (res.backup || '-'));
+    notif('!', 'Dados limpos', 'Vendas, pedidos, caixas, auditoria, despesas e estoque foram zerados.');
+    renderFinanc();
+  });
+}
+$('#btn-limpar-dados').addEventListener('click', abrirLimparDados);
 
 // ——— CATÁLOGO DE PRODUTOS (tamanhos/extras/combos por loja) ———
 var MODELOS_CAT = [

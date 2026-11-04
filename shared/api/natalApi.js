@@ -117,6 +117,10 @@ const natalApi = {
   // 8099 via sidecar) + força busca no cartão agora.
   importStatus: () => api('GET', '/api/import/status'),
   importSincronizar: () => api('POST', '/api/import/sincronizar'),
+  // Câmera USB (WPD/MTP): o fotógrafo escolhe quando criar a sessão.
+  importCameraScan: () => api('POST', '/api/import/camera/scan'),
+  importCameraCapture: () => api('POST', '/api/import/camera/capture'),
+  importCameraSettings: (settings) => api('POST', '/api/import/camera/settings', settings || {}),
   // Manutenção: apaga sessões, pedidos, caixa, fila de impressão, auditoria e
   // contador de ribbon (preserva config.json → pareamento com a loja).
   // Exige { senha } no body; com caixa aberto precisa de { forcar: true }.

@@ -272,7 +272,7 @@
   }
   .login-peer:hover{border-color:var(--gold-500);background:var(--navy-800);}
   .login-peer .hint{margin-left:auto;font-size:10.5px;font-weight:700;color:var(--gold-300);white-space:nowrap;}
-  .login-peer #login-peer-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+  .login-peer #login-peer-txt,.login-peer #login-camera-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
   .login-peer .dot{width:8px;height:8px;border-radius:50%;background:var(--slate-500);flex:0 0 auto;}
   .login-peer.on{border-color:rgba(34,197,94,.45);color:var(--green-400);}
   .login-peer.on .dot{background:var(--green-500);box-shadow:0 0 8px rgba(34,197,94,.8);}
@@ -1194,6 +1194,7 @@
     </div>
     <p class="login-error" id="login-error"></p>
     <button type="button" class="login-peer" id="login-peer" style="display:none;"><span class="dot"></span><span id="login-peer-txt"></span><span class="hint">ver fotos ›</span></button>
+    <button type="button" class="login-peer" id="login-camera" style="display:none;"><span class="dot"></span><span id="login-camera-txt"></span><span class="hint">criar sessão ›</span></button>
     <p class="login-kiosk" id="login-kiosk">🖥️ Código do kiosk: <b id="kiosk-code-el">—</b><br><span id="kiosk-pair-st"></span></p>
   </div>
 </div>
@@ -1217,6 +1218,31 @@
     <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--slate-500);font-weight:700;margin:4px 0 6px;">Sessões recentes</div>
     <div id="receive-list" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto;"></div>
     <div style="font-size:10.5px;color:var(--slate-500);margin-top:10px;">Atualiza sozinho a cada 2,5s — pode deixar esta tela aberta.</div>
+  </div>
+</div>
+
+<!-- ============ CÂMERA USB: captura manual em UMA sessão ============ -->
+<div class="modal-overlay" id="camera-overlay" style="z-index:260;">
+  <div class="modal-box" style="width:560px;">
+    <div class="modal-head">
+      <div>
+        <div class="modal-step-label">Câmera USB</div>
+        <h3 style="margin:0;font-size:18px;color:var(--gold-050);">Criar sessão da câmera</h3>
+      </div>
+      <button type="button" id="camera-close" style="padding:6px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;font-family:inherit;">Fechar</button>
+    </div>
+    <div id="camera-status" style="font-size:12.5px;font-weight:700;margin:10px 0 4px;">—</div>
+    <div id="camera-detail" style="font-size:12px;color:var(--slate-300);line-height:1.55;min-height:44px;"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">
+      <button type="button" id="camera-scan" style="padding:9px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;">🔄 Verificar fotos novas</button>
+      <button type="button" id="camera-capture" disabled style="padding:9px 16px;border:none;border-radius:8px;background:var(--gold-500);color:var(--navy-950);font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit;opacity:.55;">📷 Pegar fotos e criar sessão</button>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:var(--slate-300);cursor:pointer;">
+      <input type="checkbox" id="camera-auto" style="width:16px;height:16px;accent-color:var(--gold-500);">
+      Importar automaticamente ao conectar a câmera
+    </label>
+    <div style="font-size:11px;color:var(--slate-500);margin-top:8px;line-height:1.5;">Ideal para o fluxo de desconectar a câmera para fotografar e conectar o cabo para importar.</div>
+    <div style="font-size:11px;color:var(--slate-500);margin-top:12px;line-height:1.5;">As fotos novas entram em <b>uma única sessão</b>. O sistema não apaga nada da câmera: depois de criar a sessão, você pode apagar as fotos nela para liberar espaço.</div>
   </div>
 </div>
 
@@ -1264,6 +1290,7 @@
       <span id="sales-eye-icon">👁️</span> <span id="sales-eye-value">Vendas de hoje</span>
     </div>
     <button class="op-chip op-chip-btn" id="import-chip" style="display:none;" title="Cartão de memória e conexão com o outro PC"><span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6l2-4z"/><path d="M9 2v5h7V2"/><path d="M9 12h6M9 16h6"/></svg></span><span class="peer-alert-dot" aria-hidden="true"></span><span id="import-chip-txt">Cartão</span></button>
+    <button class="op-chip op-chip-btn" id="camera-chip" style="display:none;" title="Pegar as fotos novas da câmera e criar uma sessão"><span>📷</span> <span id="camera-chip-txt">Sessão da câmera</span></button>
     <div class="op-chip" id="ribbon-chip">🖨️ Ribbon: — un.</div>
     <button class="op-chip op-chip-btn" id="user-chip">👤 —</button>
     <button class="op-chip op-chip-btn" id="btn-config" title="Configurações">⚙</button>
@@ -1379,6 +1406,7 @@
               <span class="fc-val" id="zoom-val">100%</span>
             </div>
             <button class="fc-btn" id="btn-orientacao">Retrato</button>
+            <button class="fc-btn" id="btn-girar">↻ Girar</button>
             <button class="fc-btn" id="btn-overlay">Ocultar guia</button>
             <button class="fc-btn fc-btn-undo" id="btn-undo">↺ Desfazer ajuste</button>
           </div>
@@ -1702,6 +1730,7 @@ let includeLogo = true;
 let overlayVariant = '1';
 let logoTexto = 'SHOPPING PALLADIUM'; // texto da logo do shopping (configurável nas Configurações ⚙)
 let zoom = 100, offX = 0, offY = 0;
+let rotation = 0; // giro da foto dentro da moldura: 0 | 90 | 180 | 270 (graus, sentido horário)
 let dragging=false, dragStart={x:0,y:0}, offStart={x:0,y:0};
 let resizing=false, resizeStart={dist:0,zoom:100};
 let cart = []; // {cartId, sessionId, fotoSeed, tipo, produtoId, label, preco, zoom, offX, offY, orientation, logo}
@@ -1924,6 +1953,7 @@ function mapearPedido(p){
         tipo: 'tamanho', produtoId: it.key, label: labelProduto(it.key, 'tamanho'),
         modelo, qtd: it.qty || 1, precoUnit: it.unitPrice || 0, preco: it.subtotal || 0,
         zoom: it.scale || 100, offX: it.diffx || 0, offY: it.diffy || 0,
+        rotation: it.angle || 0,
         orientation: it.orientation || 'retrato',
         overlayVariant: variant || undefined,
         logo: config.allowsLogo(modelo), pdv: true,
@@ -2576,13 +2606,14 @@ function renderImportChip(){
   const el = document.getElementById('import-chip');
   if(!el) return;
   const r = _importStatus;
-  if(!r || !r.success){ el.style.display = 'none'; renderLoginPeer(r); return; }
+  if(!r || !r.success){ el.style.display = 'none'; renderLoginPeer(r); renderLoginCamera(r); return; }
   el.style.display = '';
   const imp = r.importer || {};
   const card = imp.card || {};
   const prog = imp.progress || {};
   const dl = imp.download || {};
   const peer = imp.peer || {};
+  const cam = imp.camera || {};
   const batches = Array.isArray(imp.batches) ? imp.batches : [];
   const sessoes = r.sessoes || {};
   const pendentes = batches.filter(b => b.done && !sessoes[b.name]).length;
@@ -2595,6 +2626,7 @@ function renderImportChip(){
   if(!r.online) txt = 'Importador parado';
   else if(dl && dl.total) txt = `Baixando ${dl.count || 0}/${dl.total}`;
   else if(prog && prog.total) txt = `Copiando ${prog.count || 0}/${prog.total}`;
+  else if(cam.capturing) txt = 'Pegando fotos da câmera…';
   else if(card.state === 'copying' || imp.copying) txt = 'Lendo cartão…';
   else if(card.state === 'detected') txt = `Cartão detectado${card.drive ? ' (' + card.drive + ')' : ''}`;
   else if(alertPeer){ peerTxt = true; txt = lastNome ? `${lastNome} fora da rede` : 'Outro PC não encontrado'; }
@@ -2626,7 +2658,18 @@ function renderImportChip(){
     : (peer.found
         ? `Outro PC conectado: ${peer.name || 'sem nome'} (${peer.ip || '?'})${peerStatus ? ' — ' + peerStatus : ''}`
         : `O outro PC não foi encontrado na rede.${ultimo}`);
+  const camEl = document.getElementById('camera-chip');
+  if(camEl){
+    const showCam = !!r.online && !!cam.connected;
+    camEl.style.display = showCam ? '' : 'none';
+    const camTxt = document.getElementById('camera-chip-txt');
+    if(camTxt) camTxt.textContent = cam.capturing ? 'Pegando fotos…' : 'Sessão da câmera';
+    camEl.title = cam.name
+      ? `Câmera conectada: ${cam.name}. Pegar as fotos novas e criar uma sessão.`
+      : 'Pegar as fotos novas da câmera e criar uma sessão.';
+  }
   renderLoginPeer(r);
+  renderLoginCamera(r);
 }
 
 /* Indicador na TELA DE LOGIN: o PC que só recebe fotos não precisa entrar,
@@ -2653,6 +2696,201 @@ function renderLoginPeer(r){
   el.title = online
     ? (peer.error || 'Este PC recebe as fotos do cartão e sincroniza com o outro PDV.')
     : 'O importador embutido não respondeu nesta máquina.';
+}
+
+/* Câmera USB: pílula no login + botão na topbar. Só aparece quando a câmera
+   está conectada; a captura é MANUAL para o fotógrafo fechar uma sessão. */
+function renderLoginCamera(r){
+  const el = document.getElementById('login-camera');
+  if(!el) return;
+  const imp = (r && r.importer) || {};
+  const cam = imp.camera || {};
+  const online = !!(r && r.online);
+  if(!online || !cam.connected){ el.style.display = 'none'; return; }
+  const txt = document.getElementById('login-camera-txt');
+  el.style.display = '';
+  el.className = 'login-peer on';
+  if(txt) txt.textContent = `Câmera: ${cam.name || 'conectada'}`;
+  el.title = 'Pegar as fotos novas da câmera e criar uma sessão.';
+}
+
+let _cameraTimer = null;
+let _cameraPoll = null;
+let _cameraLast = null;
+
+function camEsc(s){
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function cameraButtons(scanOff, capOn){
+  const scan = document.getElementById('camera-scan');
+  const cap = document.getElementById('camera-capture');
+  if(scan) scan.disabled = !!scanOff;
+  if(cap){
+    cap.disabled = !capOn;
+    cap.style.opacity = capOn ? '1' : '.55';
+  }
+}
+
+function setCameraAuto(cam){
+  const cb = document.getElementById('camera-auto');
+  if(cb && cam && typeof cam.autoCapture === 'boolean') cb.checked = cam.autoCapture;
+}
+
+async function cameraToggleAuto(){
+  const cb = document.getElementById('camera-auto');
+  if(!cb) return;
+  const want = !!cb.checked;
+  cb.disabled = true;
+  try{
+    const r = await natalApi.importCameraSettings({ autoCapture: want });
+    if(!r || !r.success) throw new Error((r && r.error) || 'Falha ao salvar');
+    const saved = (r.settings && typeof r.settings.autoCapture === 'boolean') ? r.settings.autoCapture : want;
+    cb.checked = saved;
+    toast(saved ? 'Importação automática ativada.' : 'Importação automática desativada.');
+  }catch(e){
+    cb.checked = !want;
+    toast('Não foi possível salvar: ' + ((e && e.message) || e));
+  }finally{
+    cb.disabled = false;
+  }
+}
+
+function abrirCamera(){
+  const ov = document.getElementById('camera-overlay');
+  if(!ov) return;
+  ov.classList.add('active');
+  _cameraLast = null;
+  const camNow = (_importStatus && _importStatus.importer && _importStatus.importer.camera) || {};
+  setCameraAuto(camNow);
+  if(camNow.capturing){
+    cameraPollCapture();
+    if(_cameraPoll) clearInterval(_cameraPoll);
+    _cameraPoll = setInterval(cameraPollCapture, 1500);
+    return;
+  }
+  cameraScan();
+}
+
+function fecharCamera(){
+  const ov = document.getElementById('camera-overlay');
+  if(ov) ov.classList.remove('active');
+  if(_cameraTimer){ clearInterval(_cameraTimer); _cameraTimer = null; }
+  if(_cameraPoll){ clearInterval(_cameraPoll); _cameraPoll = null; }
+}
+
+async function cameraScan(){
+  const st = document.getElementById('camera-status');
+  const det = document.getElementById('camera-detail');
+  if(!st || !det) return;
+  cameraButtons(true, false);
+  st.textContent = 'Procurando a câmera...';
+  det.textContent = 'Ligando a câmera e lendo a lista de fotos. Isso pode levar alguns segundos.';
+  try{
+    const r = await natalApi.importCameraScan();
+    const cam = (r && r.camera) || {};
+    if(!r || !r.success){
+      st.innerHTML = '<span style="color:var(--red-400);">Câmera indisponível</span>';
+      det.textContent = (r && r.error) || 'Não foi possível falar com o importador.';
+      cameraButtons(false, false);
+      return;
+    }
+    _cameraLast = cam;
+    setCameraAuto(cam);
+    if(!cam.connected){
+      st.innerHTML = '<span style="color:var(--amber-500);">Nenhuma câmera conectada</span>';
+      det.textContent = 'Ligue a câmera, conecte o cabo USB e escolha o modo de conexão com o PC.';
+      cameraButtons(false, false);
+      return;
+    }
+    const nome = (cam.cameras && cam.cameras[0]) || cam.name || 'Câmera';
+    if(cam.newCount > 0){
+      st.innerHTML = `<span style="color:var(--green-400);">● ${camEsc(nome)}</span>`;
+      const ja = Math.max(0, (cam.total || 0) - (cam.newCount || 0));
+      det.innerHTML = `<b style="color:var(--gold-300);">${cam.newCount} foto${cam.newCount === 1 ? '' : 's'} nova${cam.newCount === 1 ? '' : 's'}</b> pronta${cam.newCount === 1 ? '' : 's'} para entrar em uma sessão.` +
+        (cam.total ? `<br><span style="color:var(--slate-500);">${cam.total} foto(s) na câmera${ja ? `; ${ja} já importada(s)` : ''}.</span>` : '') +
+        '<br><span style="color:var(--slate-500);">Fotos já importadas são ignoradas ao capturar.</span>';
+      cameraButtons(false, true);
+    } else {
+      st.innerHTML = `<span style="color:var(--amber-500);">● ${camEsc(nome)}</span>`;
+      det.textContent = cam.total
+        ? `Nenhuma foto nova. As ${cam.total} foto(s) da câmera já foram importadas.`
+        : 'A câmera não tem fotos JPG. Verifique se ela está gravando em JPEG (não RAW).';
+      cameraButtons(false, false);
+    }
+  }catch(e){
+    st.innerHTML = '<span style="color:var(--red-400);">Falha ao ler a câmera</span>';
+    det.textContent = (e && e.message) || 'Tente novamente.';
+    cameraButtons(false, false);
+  }
+}
+
+async function cameraCapture(){
+  const st = document.getElementById('camera-status');
+  const det = document.getElementById('camera-detail');
+  if(!st || !det) return;
+  cameraButtons(true, false);
+  st.textContent = 'Pegando fotos da câmera...';
+  det.textContent = 'Não desconecte a câmera. As fotos novas estão sendo copiadas para uma sessão.';
+  try{
+    const r = await natalApi.importCameraCapture();
+    if(!r || !r.success){
+      st.innerHTML = '<span style="color:var(--red-400);">Não foi possível iniciar</span>';
+      const err = (r && r.error) || '';
+      det.textContent = err === 'busy'
+        ? 'Já existe uma importação em andamento. Aguarde terminar.'
+        : (err === 'no_camera' ? 'Nenhuma câmera conectada. Ligue a câmera e tente de novo.' : (err || 'Tente novamente.'));
+      cameraButtons(false, false);
+      return;
+    }
+    if(_cameraPoll) clearInterval(_cameraPoll);
+    _cameraPoll = setInterval(cameraPollCapture, 1500);
+    cameraPollCapture();
+  }catch(e){
+    st.innerHTML = '<span style="color:var(--red-400);">Falha ao iniciar a captura</span>';
+    det.textContent = (e && e.message) || 'Tente novamente.';
+    cameraButtons(false, false);
+  }
+}
+
+async function cameraPollCapture(){
+  let r = null;
+  try{ r = await natalApi.importStatus(); }catch{}
+  if(!r || !r.success) return;
+  _importStatus = r;
+  renderImportChip();
+  const cam = (r.importer && r.importer.camera) || {};
+  const st = document.getElementById('camera-status');
+  const det = document.getElementById('camera-detail');
+  if(!st || !det) return;
+  if(cam.capturing){
+    st.textContent = 'Pegando fotos da câmera...';
+    const prog = (r.importer && r.importer.progress) || {};
+    det.textContent = prog.total
+      ? `Copiando ${prog.count || 0}/${prog.total}...`
+      : (cam.message || 'Lendo a câmera...');
+    cameraButtons(true, false);
+    return;
+  }
+  if(_cameraPoll){ clearInterval(_cameraPoll); _cameraPoll = null; }
+  if(cam.lastError){
+    st.innerHTML = '<span style="color:var(--red-400);">Falha na câmera</span>';
+    det.textContent = cam.lastError;
+    cameraButtons(false, false);
+    return;
+  }
+  if(cam.lastBatch){
+    const sid = (r.sessoes && r.sessoes[cam.lastBatch]) || '';
+    st.innerHTML = '<span style="color:var(--green-400);">● Sessão criada</span>';
+    det.innerHTML = `Lote <b style="color:var(--gold-300);">${camEsc(cam.lastBatch)}</b>` +
+      (sid ? ` → sessão <b style="color:var(--gold-300);">${camEsc(sid)}</b>` : ' — a sessão aparece em instantes.') +
+      (cam.lastCount ? `<br>${cam.lastCount} foto(s) nesta sessão.` : '');
+    cameraButtons(false, false);
+    return;
+  }
+  st.textContent = cam.message || 'Nenhuma foto nova.';
+  det.textContent = 'Tire novas fotos e toque em Verificar fotos novas.';
+  cameraButtons(false, false);
 }
 
 /* Monitor de recebimento: aberto pela pílula do login. Mostra se o outro PC
@@ -2773,6 +3011,7 @@ async function renderImportConfigPanel(){
   const imp = r.importer || {};
   const card = imp.card || {};
   const peer = imp.peer || {};
+  const cam = imp.camera || {};
   const online = !!r.online;
   const sessoes = r.sessoes || {};
   const batches = Array.isArray(imp.batches) ? imp.batches : [];
@@ -2817,6 +3056,7 @@ async function renderImportConfigPanel(){
       ${online ? '● Importador ativo' : '○ Importador não está rodando'}
       <span style="color:var(--slate-400);font-weight:400;">— ${esc(card.badge || card.message || 'aguardando cartão')}</span>
     </div>
+    ${cam.connected ? `<div style="font-size:11.5px;color:var(--green-400);font-weight:600;margin-top:4px;">📷 Câmera conectada: ${esc(cam.name || 'câmera')}${cam.capturing ? ' <span style="color:var(--amber-500);">— pegando fotos…</span>' : ''}</div>` : ''}
     <div style="font-size:11px;color:var(--slate-500);margin-top:4px;word-break:break-all;">Pasta dos lotes: ${esc(pasta || '—')}</div>`;
 
   const btnFotos = document.getElementById('cfg-fotos-btn');
@@ -3300,6 +3540,13 @@ function normalizarComboPortal(c){
       })).filter(o => o.produtoId),
     };
   }
+  if(/2\s*fotos?\s*15x20/i.test(combo.nome)){
+    const fotos = combo.itens.filter(it => it.tipoProduto === 'tamanho');
+    if(fotos.filter(it => it.produtoId === '15x20').length === 1){
+      const trocado = fotos.find(it => it.produtoId === '10x15');
+      if(trocado) trocado.produtoId = '15x20';
+    }
+  }
   return combo;
 }
 function aplicarCatalogoPortal(cat){
@@ -3472,7 +3719,7 @@ async function criarPedidoReal(itens, total, origemPedidoId){
       // filename pro backend é o nome simples (o seed tem sessaoId/nome para exibição)
       key: c.produtoId, qty: c.qtd || 1, filename: (c.fotoSeed || '').includes('/') ? String(c.fotoSeed).split('/').pop() : (c.fotoSeed || null),
       sessaoId: c.sessionId || null,
-      scale: c.zoom || 100, diffx: c.offX || 0, diffy: c.offY || 0, angle: 0,
+      scale: c.zoom || 100, diffx: c.offX || 0, diffy: c.offY || 0, angle: c.rotation || 0,
       overlayVariant: c.overlayVariant || null,
       orientation: c.orientation || 'paisagem', unitPrice: c.precoUnit || 0, subtotal: c.preco || 0, pdv: true,
     })),
@@ -3535,7 +3782,7 @@ async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
       agrupado.set(id, {
         sessionId: sessId, filename: uploadName, key: modelo,
         qty: f.qtd || 1, url: natalApi.fotoUrl(sessId, 'originais', fileName || ''),
-        scale: f.zoom || 100, diffx: f.offX || 0, diffy: f.offY || 0, angle: 0,
+        scale: f.zoom || 100, diffx: f.offX || 0, diffy: f.offY || 0, angle: f.rotation || 0,
         orientation: f.orientation || 'paisagem', pdv: true,
         overlayVariant: variant,
         logo: !!f.logo, logoTexto,
@@ -3646,7 +3893,7 @@ async function enviarDigitais(pedidoId, codigo, itens){
         key: '10x15',
         url: natalApi.fotoUrl(sessId, 'originais', fileName),
         scale: item.zoom || 100, diffx: item.offX || 0, diffy: item.offY || 0,
-        angle: 0, orientation: item.orientation || 'paisagem',
+        angle: item.rotation || 0, orientation: item.orientation || 'paisagem',
         pdv: true, single: true,
       });
       const up = await natalApi.enviarGaleria(codigo, i + 1, blob);
@@ -5179,7 +5426,7 @@ function aplicarCombo(comboId){
 
 /* ---------------- FRAME / CROP ---------------- */
 function resetCrop(){
-  zoom=100; offX=0; offY=0;
+  zoom=100; offX=0; offY=0; rotation=0;
   currentOrientation='paisagem';
 }
 
@@ -5189,7 +5436,8 @@ function applyTransform(){
   const im = document.getElementById('crop-img');
   if(!im) return;
   const scale = baseScale * (zoom/100);
-  im.style.transform = `translate(calc(-50% + ${offX}px), calc(-50% + ${offY}px)) scale(${scale})`;
+  const rot = rotation ? ` rotate(${rotation}deg)` : '';
+  im.style.transform = `translate(calc(-50% + ${offX}px), calc(-50% + ${offY}px)) scale(${scale})${rot}`;
 }
 
 // `target` (opcional) = a janela da foto dentro do molde, em px do box de tela.
@@ -5204,7 +5452,12 @@ function setupCover(im, boxW, boxH, target){
     if(!nw || !nh) return;
     const tw = target ? target.w : boxW;
     const th = target ? target.h : boxH;
-    baseScale = Math.max(tw/nw, th/nh); // cover da janela (ou do box inteiro)
+    // Com a foto girada 90°/270°, a caixa que ela ocupa na tela tem largura e
+    // altura trocadas — então o cover precisa usar as dimensões trocadas.
+    const swap = (rotation === 90 || rotation === 270);
+    const cw = swap ? nh : nw;
+    const ch = swap ? nw : nh;
+    baseScale = Math.max(tw/cw, th/ch); // cover da janela (ou do box inteiro)
     if(target){
       // `applyTransform` posiciona a foto a partir do CENTRO do box
       // (top/left:50% + translate(-50%,-50%)) e soma offX/offY. Então o
@@ -5441,6 +5694,11 @@ document.getElementById('btn-orientacao').addEventListener('click', ()=>{
   offX=0; offY=0; // reseta posição ao trocar orientação, mantém zoom
   renderFrame();
 });
+document.getElementById('btn-girar').addEventListener('click', ()=>{
+  rotation = (rotation + 90) % 360;
+  offX=0; offY=0; // re-centraliza ao girar, mantém zoom
+  renderFrame();
+});
 document.getElementById('btn-overlay').addEventListener('click', ()=>{
   showOverlay = !showOverlay;
   renderFrame();
@@ -5634,7 +5892,8 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1, opts={}){
     const jaTem = cart.some(c => c.produtoId === 'foto-digital' && c.fotoSeed === currentFoto.seed
       && Math.round(c.zoom||100) === Math.round(zoom||100)
       && Math.round(c.offX||0) === Math.round(offX||0)
-      && Math.round(c.offY||0) === Math.round(offY||0));
+      && Math.round(c.offY||0) === Math.round(offY||0)
+      && Math.round(((c.rotation||0)%360+360)%360) === Math.round(((rotation||0)%360+360)%360));
     if(jaTem){ toast('📲 Essa foto já está no carrinho como envio digital'); return null; }
     qtd = 1;
   }
@@ -5652,6 +5911,7 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1, opts={}){
     tipo, produtoId, label,
     qtd, precoUnit, preco: +(precoUnit*qtd).toFixed(2),
     zoom: (tipo==='tamanho'||digital)?zoom:100, offX: (tipo==='tamanho'||digital)?offX:0, offY: (tipo==='tamanho'||digital)?offY:0,
+    rotation: (tipo==='tamanho'||digital)?rotation:0,
     orientation: (tipo==='tamanho'||digital)?currentOrientation:null,
     // allowLogo do formato decide: a polaroide/bolinha nunca entram com logo,
     // mesmo com o checkbox marcado (o printUtils também checa, por segurança)
@@ -5794,6 +6054,7 @@ function showItemReviewModal(cartId){
       currentOrientation = c.orientation || 'paisagem';
       overlayVariant = c.overlayVariant || '1';
       zoom = c.zoom; offX = c.offX; offY = c.offY;
+      rotation = c.rotation || 0;
     }
     renderThumbs(); renderOptions(); renderFrame();
   });
@@ -5847,10 +6108,15 @@ function renderEnquadramentoEstatico(wrap, c){
   const applyFixedCover = ()=>{
     const nw=im.naturalWidth, nh=im.naturalHeight;
     if(!nw||!nh) return;
-    const base = Math.max(tw/nw, th/nh);
+    const rot = ((c.rotation||0) % 360 + 360) % 360;
+    const swap = rot === 90 || rot === 270;
+    const cw = swap ? nh : nw;
+    const ch = swap ? nw : nh;
+    const base = Math.max(tw/cw, th/ch);
     im.style.width=nw+'px'; im.style.height=nh+'px';
     const scale = base * ((c.zoom||100)/100);
-    im.style.transform = `translate(calc(-50% + ${(c.offX||0)*k}px), calc(-50% + ${(c.offY||0)*k}px)) scale(${scale})`;
+    const rotCss = rot ? ` rotate(${rot}deg)` : '';
+    im.style.transform = `translate(calc(-50% + ${(c.offX||0)*k}px), calc(-50% + ${(c.offY||0)*k}px)) scale(${scale})${rotCss}`;
   };
   if(im.complete && im.naturalWidth) applyFixedCover();
   else im.addEventListener('load', applyFixedCover);
@@ -6497,6 +6763,7 @@ async function showConfigModal(tabInicial){
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Fotos do cartão (importador embutido)</div>
       <div id="cfg-import-info" style="font-size:12px;color:var(--slate-300);">—</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button id="cfg-camera-capture" style="padding:8px 14px;border:1px solid var(--gold-500);border-radius:8px;background:var(--gold-500);color:var(--navy-950);font-size:12px;font-weight:800;cursor:pointer;font-family:Arial,sans-serif;">📷 Sessão da câmera</button>
         <button id="cfg-import-sync" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">🔄 Procurar fotos agora</button>
         <button id="cfg-import-open" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">📂 Abrir pasta</button>
         <button id="cfg-import-restart" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:transparent;color:var(--slate-300);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;" title="Reinicia o importador de fotos do cartao neste PC">Reiniciar importador</button>
@@ -6610,6 +6877,8 @@ async function showConfigModal(tabInicial){
 
   // ─── Aba Cartão: status do importador, busca manual e pasta ───
   renderImportConfigPanel();
+  const impCameraBtn = document.getElementById('cfg-camera-capture');
+  if(impCameraBtn) impCameraBtn.onclick = ()=> abrirCamera();
   const impSyncBtn = document.getElementById('cfg-import-sync');
   if(impSyncBtn) impSyncBtn.onclick = async ()=>{
     impSyncBtn.disabled = true;
@@ -9003,6 +9272,13 @@ async function INIT(){
   document.getElementById('btn-config').addEventListener('click', ()=> showConfigModal());
   document.getElementById('import-chip').addEventListener('click', ()=> showConfigModal('card'));
   document.getElementById('login-peer').addEventListener('click', abrirRecebimento);
+  document.getElementById('login-camera').addEventListener('click', abrirCamera);
+  document.getElementById('camera-chip').addEventListener('click', abrirCamera);
+  document.getElementById('camera-close').addEventListener('click', fecharCamera);
+  document.getElementById('camera-scan').addEventListener('click', cameraScan);
+  document.getElementById('camera-capture').addEventListener('click', cameraCapture);
+  document.getElementById('camera-auto').addEventListener('change', cameraToggleAuto);
+  document.getElementById('camera-overlay').addEventListener('click', (e)=>{ if(e.target && e.target.id === 'camera-overlay') fecharCamera(); });
   document.getElementById('receive-close').addEventListener('click', fecharRecebimento);
   document.getElementById('printer-alert-close').addEventListener('click', fecharPrinterAlert);
   const receiveRestart = document.getElementById('receive-restart');
