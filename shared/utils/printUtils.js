@@ -176,6 +176,7 @@ export async function composePrintImage(photo) {
   // aqui seria desenhada na folha inteira e jogada fora. Pula.
   if (!multiCelula) {
     ctx.save();
+    if (photo.luz) ctx.filter = `brightness(${1 + photo.luz / 100})`;
     const cx = imgX + dispW / 2;
     const cy = imgY + dispH / 2;
     ctx.translate(cx, cy);
@@ -210,6 +211,7 @@ export async function composePrintImage(photo) {
       const imgX2 = diffx * S2;
       const imgY2 = diffy * S2;
       cellCtx.save();
+      if (photo.luz) cellCtx.filter = `brightness(${1 + photo.luz / 100})`;
       const cx2 = imgX2 + dispW2 / 2;
       const cy2 = imgY2 + dispH2 / 2;
       cellCtx.translate(cx2, cy2);

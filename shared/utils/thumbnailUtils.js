@@ -16,7 +16,7 @@ import { overlayRect } from './overlayCalibration';
 // `calOf(r, c)` devolve a calibração daquela célula. `overlayImg` nulo = só a
 // foto ladrilhada (usado pela miniatura sem molde).
 function ladrilharComMolde(ctx, img, overlayImg, {
-  printW, printH, rows, cols, editorW, editorH, scale, diffx, diffy, angle, calOf,
+  printW, printH, rows, cols, editorW, editorH, scale, diffx, diffy, angle, luz, calOf,
 }) {
   const cellW = printW / cols;
   const cellH = printH / rows;
@@ -35,6 +35,7 @@ function ladrilharComMolde(ctx, img, overlayImg, {
   const imgY = diffy * S;
 
   cellCtx.save();
+  if (luz) cellCtx.filter = `brightness(${1 + luz / 100})`;
   const cx = imgX + dispW / 2;
   const cy = imgY + dispH / 2;
   cellCtx.translate(cx, cy);
@@ -145,6 +146,7 @@ export async function generateOverlayPreview(photo, fileOrBlob, maxDim = config.
         diffx: photo.diffx ?? auto.diffX,
         diffy: photo.diffy ?? auto.diffY,
         angle: photo.scale != null ? (photo.angle ?? 0) : auto.angle,
+        luz: photo.luz || 0,
         calOf: (r, c) => config.getCellCalibration(key, r, c),
       });
     }
@@ -201,6 +203,7 @@ export async function generateOverlayThumbnail(photo, formatKey, dim = 240) {
         diffx: photo.diffx ?? auto.diffX,
         diffy: photo.diffy ?? auto.diffY,
         angle: photo.scale != null ? (photo.angle ?? 0) : auto.angle,
+        luz: photo.luz || 0,
         calOf: (r, c) => config.getCellCalibration(formatKey, r, c),
       });
     }

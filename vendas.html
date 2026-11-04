@@ -1436,6 +1436,11 @@
               <input type="range" id="zoom-slider" min="30" max="250" value="100" step="5">
               <span class="fc-val" id="zoom-val">100%</span>
             </div>
+            <div class="fc-zoom">
+              <span class="fc-label">Luz</span>
+              <input type="range" id="luz-slider" min="-50" max="50" value="0" step="1">
+              <span class="fc-val" id="luz-val">0</span>
+            </div>
             <button class="fc-btn" id="btn-orientacao">Retrato</button>
             <button class="fc-btn" id="btn-girar">↻ Girar</button>
             <button class="fc-btn" id="btn-overlay">Ocultar guia</button>
@@ -1763,6 +1768,7 @@ let overlayVariant = '1';
 let logoTexto = 'SHOPPING PALLADIUM'; // texto da logo do shopping (configurável nas Configurações ⚙)
 let zoom = 100, offX = 0, offY = 0;
 let rotation = 0; // giro da foto dentro da moldura em graus (sentido horário); "Girar" anda de 90 em 90, o handle de inclinação ajusta fino
+let luz = 0; // brilho da foto em % (-50 escurece, +50 clareia); aplicado na tela e na impressão
 let dragging=false, dragStart={x:0,y:0}, offStart={x:0,y:0};
 let resizing=false, resizeStart={dist:0,zoom:100};
 let cart = []; // {cartId, sessionId, fotoSeed, tipo, produtoId, label, preco, zoom, offX, offY, orientation, logo}
@@ -1986,6 +1992,7 @@ function mapearPedido(p){
         modelo, qtd: it.qty || 1, precoUnit: it.unitPrice || 0, preco: it.subtotal || 0,
         zoom: it.scale || 100, offX: it.diffx || 0, offY: it.diffy || 0,
         rotation: it.angle || 0,
+        luz: it.luz || 0,
         orientation: it.orientation || 'retrato',
         overlayVariant: variant || undefined,
         logo: config.allowsLogo(modelo), pdv: true,
@@ -3752,6 +3759,7 @@ async function criarPedidoReal(itens, total, origemPedidoId){
       key: c.produtoId, qty: c.qtd || 1, filename: (c.fotoSeed || '').includes('/') ? String(c.fotoSeed).split('/').pop() : (c.fotoSeed || null),
       sessaoId: c.sessionId || null,
       scale: c.zoom || 100, diffx: c.offX || 0, diffy: c.offY || 0, angle: c.rotation || 0,
+      luz: c.luz || 0,
       overlayVariant: c.overlayVariant || null,
       orientation: c.orientation || 'paisagem', unitPrice: c.precoUnit || 0, subtotal: c.preco || 0, pdv: true,
     })),
@@ -3815,6 +3823,7 @@ async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
         sessionId: sessId, filename: uploadName, key: modelo,
         qty: f.qtd || 1, url: natalApi.fotoUrl(sessId, 'originais', fileName || ''),
         scale: f.zoom || 100, diffx: f.offX || 0, diffy: f.offY || 0, angle: f.rotation || 0,
+        luz: f.luz || 0,
         orientation: f.orientation || 'paisagem', pdv: true,
         overlayVariant: variant,
         logo: !!f.logo, logoTexto,
@@ -3925,7 +3934,7 @@ async function enviarDigitais(pedidoId, codigo, itens){
         key: '10x15',
         url: natalApi.fotoUrl(sessId, 'originais', fileName),
         scale: item.zoom || 100, diffx: item.offX || 0, diffy: item.offY || 0,
-        angle: item.rotation || 0, orientation: item.orientation || 'paisagem',
+        angle: item.rotation || 0, luz: item.luz || 0, orientation: item.orientation || 'paisagem',
         pdv: true, single: true,
       });
       const up = await natalApi.enviarGaleria(codigo, i + 1, blob);
@@ -5162,6 +5171,8 @@ function capturarComboSlotAtual(){
   slot.zoom = zoom;
   slot.offX = offX;
   slot.offY = offY;
+  slot.rotation = rotation;
+  slot.luz = luz;
   slot.orientation = currentOrientation;
   slot.overlayVariant = (t && config.getOverlayVariants(modeloDe(t)).length) ? overlayVariant : undefined;
   slot.logo = !!(t && includeLogo && config.allowsLogo(modeloDe(t)));
@@ -5227,13 +5238,14 @@ function aplicarComboComSlots(combo, slots){
   });
   const adicionados = [];
   const prev = {
-    currentFoto, currentTamanho, zoom, offX, offY,
+    currentFoto, currentTamanho, zoom, offX, offY, rotation, luz,
     currentOrientation, overlayVariant, includeLogo,
   };
   const restaurarEditor = ()=>{
     currentFoto = prev.currentFoto;
     currentTamanho = prev.currentTamanho;
     zoom = prev.zoom; offX = prev.offX; offY = prev.offY;
+    rotation = prev.rotation; luz = prev.luz;
     currentOrientation = prev.currentOrientation;
     overlayVariant = prev.overlayVariant;
     includeLogo = prev.includeLogo;
@@ -5254,6 +5266,8 @@ function aplicarComboComSlots(combo, slots){
     zoom = slot.zoom == null ? 100 : slot.zoom;
     offX = slot.offX || 0;
     offY = slot.offY || 0;
+    rotation = slot.rotation || 0;
+    luz = slot.luz || 0;
     currentOrientation = slot.orientation || 'paisagem';
     overlayVariant = slot.overlayVariant || '1';
     includeLogo = slot.logo !== false;
@@ -5478,7 +5492,7 @@ function aplicarCombo(comboId){
 
 /* ---------------- FRAME / CROP ---------------- */
 function resetCrop(){
-  zoom=100; offX=0; offY=0; rotation=0;
+  zoom=100; offX=0; offY=0; rotation=0; luz=0;
   currentOrientation='paisagem';
 }
 
@@ -5498,6 +5512,7 @@ function applyTransform(){
   const scale = baseScale * (zoom/100);
   const rot = rotation ? ` rotate(${rotation}deg)` : '';
   im.style.transform = `translate(calc(-50% + ${offX}px), calc(-50% + ${offY}px)) scale(${scale})${rot}`;
+  im.style.filter = luz ? `brightness(${1 + luz/100})` : '';
 }
 
 // `target` (opcional) = a janela da foto dentro do molde, em px do box de tela.
@@ -5577,6 +5592,8 @@ function renderFrame(){
     box.appendChild(im);
     photoInto(im, 'medium', currentFoto);
 
+    document.getElementById('luz-slider').value = luz;
+    document.getElementById('luz-val').textContent = (luz>0?'+':'')+luz;
     controls.classList.add('disabled');
     return;
   }
@@ -5779,6 +5796,8 @@ function renderFrame(){
 
   document.getElementById('zoom-slider').value = zoom;
   document.getElementById('zoom-val').textContent = zoom+'%';
+  document.getElementById('luz-slider').value = luz;
+  document.getElementById('luz-val').textContent = (luz>0?'+':'')+luz;
   document.getElementById('btn-orientacao').textContent = currentOrientation==='paisagem' ? 'Retrato' : 'Paisagem';
   document.getElementById('btn-overlay').textContent = showOverlay ? 'Ocultar guia' : 'Mostrar guia';
   document.getElementById('btn-overlay').classList.toggle('active', !showOverlay);
@@ -5789,6 +5808,11 @@ function renderFrame(){
 document.getElementById('zoom-slider').addEventListener('input', e=>{
   zoom = +e.target.value;
   document.getElementById('zoom-val').textContent = zoom+'%';
+  applyTransform();
+});
+document.getElementById('luz-slider').addEventListener('input', e=>{
+  luz = +e.target.value;
+  document.getElementById('luz-val').textContent = (luz>0?'+':'')+luz;
   applyTransform();
 });
 document.getElementById('btn-undo').addEventListener('click', ()=>{
@@ -5998,6 +6022,7 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1, opts={}){
       && Math.round(c.zoom||100) === Math.round(zoom||100)
       && Math.round(c.offX||0) === Math.round(offX||0)
       && Math.round(c.offY||0) === Math.round(offY||0)
+      && Math.round(c.luz||0) === Math.round(luz||0)
       && Math.round(((c.rotation||0)%360+360)%360) === Math.round(((rotation||0)%360+360)%360));
     if(jaTem){ toast('📲 Essa foto já está no carrinho como envio digital'); return null; }
     qtd = 1;
@@ -6017,6 +6042,7 @@ function addToCart(tipo, produtoId, label, precoUnit, qtd=1, opts={}){
     qtd, precoUnit, preco: +(precoUnit*qtd).toFixed(2),
     zoom: (tipo==='tamanho'||digital)?zoom:100, offX: (tipo==='tamanho'||digital)?offX:0, offY: (tipo==='tamanho'||digital)?offY:0,
     rotation: (tipo==='tamanho'||digital)?rotation:0,
+    luz: (tipo==='tamanho'||digital)?luz:0,
     orientation: (tipo==='tamanho'||digital)?currentOrientation:null,
     // allowLogo do formato decide: a polaroide/bolinha nunca entram com logo,
     // mesmo com o checkbox marcado (o printUtils também checa, por segurança)
@@ -6160,6 +6186,7 @@ function showItemReviewModal(cartId){
       overlayVariant = c.overlayVariant || '1';
       zoom = c.zoom; offX = c.offX; offY = c.offY;
       rotation = c.rotation || 0;
+      luz = c.luz || 0;
     }
     renderThumbs(); renderOptions(); renderFrame();
   });
@@ -6219,6 +6246,7 @@ function renderEnquadramentoEstatico(wrap, c){
     const scale = base * ((c.zoom||100)/100);
     const rotCss = rot ? ` rotate(${rot}deg)` : '';
     im.style.transform = `translate(calc(-50% + ${(c.offX||0)*k}px), calc(-50% + ${(c.offY||0)*k}px)) scale(${scale})${rotCss}`;
+    im.style.filter = c.luz ? `brightness(${1 + c.luz/100})` : '';
   };
   if(im.complete && im.naturalWidth) applyFixedCover();
   else im.addEventListener('load', applyFixedCover);
