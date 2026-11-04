@@ -862,7 +862,7 @@ app.whenReady().then(() => {
 
 
 
-ipcMain.handle('natal:printBematech', async (_event, { texto, qr, titulo, subtitulo } = {}) => {
+ipcMain.handle('natal:printBematech', async (_event, { texto, qr, titulo, subtitulo, telefone, qrLabel } = {}) => {
   let qrPath = '';
   const limparQr = () => { if (qrPath) { try { fs.unlinkSync(qrPath); } catch(e){} qrPath = ''; } };
   try {
@@ -887,6 +887,8 @@ ipcMain.handle('natal:printBematech', async (_event, { texto, qr, titulo, subtit
     const b64 = Buffer.from(safe + '\r\n\r\n\r\n', 'utf8').toString('base64');
     const tituloB64 = Buffer.from(typeof titulo === 'string' ? titulo : '', 'utf8').toString('base64');
     const subtituloB64 = Buffer.from(typeof subtitulo === 'string' ? subtitulo : '', 'utf8').toString('base64');
+    const telefoneB64 = Buffer.from(typeof telefone === 'string' ? telefone : '', 'utf8').toString('base64');
+    const qrLabelB64 = Buffer.from(typeof qrLabel === 'string' ? qrLabel : '', 'utf8').toString('base64');
     const qrSafe = qrPath.replace(/'/g, "''");
     const ps = [
       "Add-Type -AssemblyName System.Drawing;",
@@ -897,6 +899,8 @@ ipcMain.handle('natal:printBematech', async (_event, { texto, qr, titulo, subtit
       "$txt = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + b64 + "'));",
       "$titulo = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + tituloB64 + "'));",
       "$subtitulo = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + subtituloB64 + "'));",
+      "$telefone = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + telefoneB64 + "'));",
+      "$qrLabel = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + qrLabelB64 + "'));",
       "$qrPath = '" + qrSafe + "';",
       "$pd.Add_PrintPage({ param($s,$ev);",
       "  $ev.Graphics.PageUnit = [System.Drawing.GraphicsUnit]::Pixel;",
@@ -930,6 +934,12 @@ ipcMain.handle('natal:printBematech', async (_event, { texto, qr, titulo, subtit
       "      [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $subtitulo, $f, ([System.Drawing.Point]::new([int]$sx, [int]$y)), [System.Drawing.Color]::Black);",
       "      $y += $sSz.Height + 6;",
       "    }",
+      "    if ($telefone) {",
+      "      $tSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $telefone, $f);",
+      "      $tx = [Math]::Max(0, ($visW - $tSz.Width) / 2);",
+      "      [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $telefone, $f, ([System.Drawing.Point]::new([int]$tx, [int]$y)), [System.Drawing.Color]::Black);",
+      "      $y += $tSz.Height + 6;",
+      "    }",
       "    $sepLine = ('-' * 32);",
       "    [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $sepLine, $f, ([System.Drawing.Point]::new(4, [int]$y)), [System.Drawing.Color]::Black);",
       "    $y += $lineH + 2;",
@@ -943,6 +953,19 @@ ipcMain.handle('natal:printBematech', async (_event, { texto, qr, titulo, subtit
       "      if ($iw -gt $maxW) { $ih = $ih * ($maxW / $iw); $iw = $maxW };",
       "      $lines = ($txt.TrimEnd() -split ([Environment]::NewLine)).Count;",
       "      $ty = $y + ($lineH * $lines) + 24;",
+      "      if ($qrLabel) {",
+      "        $qSize = [float]($newSize * 1.35);",
+      "        $qFont = New-Object System.Drawing.Font('Arial', $qSize, [System.Drawing.FontStyle]::Bold);",
+      "        $qSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $qrLabel, $qFont);",
+      "        if ($qSz.Width -gt $target) {",
+      "          $qSize = [float]($qSize * ($target / $qSz.Width));",
+      "          $qFont = New-Object System.Drawing.Font('Arial', $qSize, [System.Drawing.FontStyle]::Bold);",
+      "          $qSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $qrLabel, $qFont);",
+      "        }",
+      "        $qx = [Math]::Max(0, ($visW - $qSz.Width) / 2);",
+      "        [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $qrLabel, $qFont, ([System.Drawing.Point]::new([int]$qx, [int]$ty)), [System.Drawing.Color]::Black);",
+      "        $ty += $qSz.Height + 6;",
+      "      }",
       "      $x = ($visW - $iw) / 2;",
       "      $ev.Graphics.DrawImage($img, [float]$x, [float]$ty, [float]$iw, [float]$ih);",
       "      $img.Dispose();",

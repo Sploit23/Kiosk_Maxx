@@ -4122,6 +4122,8 @@ async function finalizarVendaImpl(){
       await imprimirBematechTexto(texto, codigoDigital ? 'Cupom digital enviado' : undefined, qrImg, {
         titulo: 'MAXX FOTO LEMBRANÇA',
         subtitulo: 'CNPJ 22.902.082/0001-00',
+        telefone: 'Tel: (41) 99655-2801',
+        codigo: codigoDigital,
       });
     }catch(e){ toast('⚠ Falha ao imprimir cupom'); }
   });
@@ -4250,19 +4252,27 @@ function cupomBematechTexto({ loja, pdv, operador, data, pedidoId, itens, total,
     out.push(linha('', fmt(c.preco)));
   });
   out.push(sep);
-  pushLinha('TOTAL', fmt(total));
   const pags = String(pagamentos || '').split(' · ').filter(Boolean);
-  if(!pags.length) out.push('Pago: -');
-  else pags.forEach((p, i) => pushLinha(i === 0 ? 'Pago' : '', p));
+  if(!pags.length) out.push('Pagamento: -');
+  else pags.forEach(p => {
+    const m = String(p).split(/:\s*/);
+    if(m.length >= 2) pushLinha(m[0], m.slice(1).join(': '));
+    else pushLinha('', p);
+  });
   out.push(sep);
-  pushCentro('Obrigado pela preferencia!');
+  pushLinha('TOTAL', fmt(total));
+  out.push(sep);
+  pushCentro('Obrigado pela preferência!');
   if(codigoDigital){
-    const site = urlNatal('').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    let site = urlNatal('').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if(!/^www\./i.test(site)) site = 'www.' + site;
+    const padLink = Math.max(0, Math.floor((W - site.length) / 2));
+    const pushLink = (t) => out.push(' '.repeat(padLink) + t);
     out.push('');
     pushCentro('FOTO DIGITAL');
-    pushCentro('Escaneie o QR abaixo');
-    pushCentro('ou acesse ' + site);
-    pushCentro('Codigo: ' + codigoDigital);
+    pushCentro('Escaneie o QR abaixo ou acesse:');
+    pushLink(site);
+    pushCentro('e digite o seu código');
   }
   out.push('');
   return out.join('\n');
@@ -4315,6 +4325,8 @@ async function imprimirBematechTexto(texto, rotulo, qrImg, cabecalho){
     if(qrImg) payload.qr = qrImg;
     if(cabecalho && cabecalho.titulo) payload.titulo = cabecalho.titulo;
     if(cabecalho && cabecalho.subtitulo) payload.subtitulo = cabecalho.subtitulo;
+    if(cabecalho && cabecalho.telefone) payload.telefone = cabecalho.telefone;
+    if(cabecalho && cabecalho.codigo) payload.qrLabel = cabecalho.codigo;
     const res = await window.natal.ipcInvoke('natal:printBematech', payload);
     if(res && res.success){ toast('🧾 Cupom enviado para a Bematech'); return true; }
     toast('⚠ Falha ao imprimir cupom');
