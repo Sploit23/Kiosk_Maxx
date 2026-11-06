@@ -70,8 +70,7 @@
   html[data-theme="light"] .caixa-fechado-destaque{color:#b3453f;}
   html[data-theme="light"] .op-chip.ribbon-alert .rb-p .rb-n{color:var(--amber-500);}
   /* campos do modal ⚙ têm fundo navy-950 no default (inline) → senão ficariam escuros no claro */
-  html[data-theme="light"] #cfg-folder,
-  html[data-theme="light"] #cfg-logo{background:#fff !important;color:var(--cream-100) !important;}
+  html[data-theme="light"] #cfg-folder{background:#fff !important;color:var(--cream-100) !important;}
   /* botão dourado da ASK-400 (gradiente claro no default, não pode escurecer junto com o gold) */
   html[data-theme="light"] #btn-print-fotos{background:linear-gradient(135deg,#e8c787,#f7ecd4) !important;color:var(--navy-950) !important;}
   *{box-sizing:border-box;}
@@ -669,10 +668,10 @@
   .frame-box:active{cursor:grabbing;}
   .frame-box.no-frame{background:transparent;box-shadow:none;cursor:default;
     width:100%;height:100%;max-height:none;border-radius:0;}
-  /* a foto do enquadramento. `:not(.mold-overlay)` é obrigatório: sem isso esta
-     regra (especificidade 0,1,1) vence o `.mold-overlay` (0,1,0) e joga
-     top/left:50% no molde também — que deve ficar em inset:0, cobrindo o box. */
-  .frame-box img:not(.mold-overlay){
+  /* a foto do enquadramento. Os `:not(...)` são obrigatórios: sem eles esta
+     regra (especificidade 0,1,1) vence `.mold-overlay`/`.logo-overlay` (0,1,0)
+     e joga top/left:50% nos PNGs — que devem ficar em inset:0, cobrindo o box. */
+  .frame-box img:not(.mold-overlay):not(.logo-overlay){
     position:absolute;top:50%;left:50%;
     max-width:none;
     user-select:none;-webkit-user-drag:none;
@@ -721,6 +720,10 @@
      A janela transparente do PNG é o que aparece da foto. */
   .mold-overlay{position:absolute;inset:0;width:100%;height:100%;
     pointer-events:none;z-index:3;user-select:none;-webkit-user-drag:none;}
+  /* PNG da logo do shopping (10x15/15x20) — por cima da foto/máscara, mas
+     abaixo dos handles. A posição/tamanho da arte vêm do próprio PNG. */
+  .logo-overlay{position:absolute;inset:0;width:100%;height:100%;
+    pointer-events:none;z-index:4;user-select:none;-webkit-user-drag:none;}
 
   /* handle de canto — arrastar para dar zoom mantendo proporção */
   .resize-handle{
@@ -749,15 +752,6 @@
     color:var(--gold-300);font-size:10px;font-weight:700;
     padding:2px 7px;border-radius:10px;white-space:nowrap;
     z-index:6;pointer-events:none;
-  }
-
-  /* logo do shopping (overlay fixo na moldura, fora do zoom/pan da foto) */
-  .shop-logo{
-    position:absolute;left:50%;bottom:8%;transform:translateX(-50%);
-    background:rgba(10,22,38,.72);border:1px solid var(--gold-500);
-    color:var(--gold-300);font-size:10px;font-weight:700;letter-spacing:.5px;
-    padding:4px 10px;border-radius:20px;pointer-events:none;z-index:4;
-    white-space:nowrap;
   }
 
   /* instrução "sem tamanho"/"Ajustando enquadramento" — chip acima da foto (fluxo, não cobre a imagem) */
@@ -1765,7 +1759,6 @@ let currentOrientation = 'paisagem'; // 'paisagem' | 'retrato' — default paisa
 let showOverlay = true;
 let includeLogo = true;
 let overlayVariant = '1';
-let logoTexto = 'SHOPPING PALLADIUM'; // texto da logo do shopping (configurável nas Configurações ⚙)
 let zoom = 100, offX = 0, offY = 0;
 let rotation = 0; // giro da foto dentro da moldura em graus (sentido horário); "Girar" anda de 90 em 90, o handle de inclinação ajusta fino
 let luz = 0; // brilho da foto em % (-50 escurece, +50 clareia); aplicado na tela e na impressão
@@ -1995,7 +1988,7 @@ function mapearPedido(p){
         luz: it.luz || 0,
         orientation: it.orientation || 'retrato',
         overlayVariant: variant || undefined,
-        logo: config.allowsLogo(modelo), pdv: true,
+        logo: it.logo !== undefined ? !!it.logo : config.allowsLogo(modelo), pdv: true,
       };
     }),
     ...(p.produtos || []).map(it => ({
@@ -2377,7 +2370,6 @@ garantirIdentidade().then(async () => {
   atualizarKioskUI();
   try{
     const cfg = await natalApi.getConfig().catch(()=>({}));
-    if(cfg && String(cfg.logoTexto || '').trim()) logoTexto = String(cfg.logoTexto).trim();
     // Wizard de 1º uso: SÓ quando a máquina nunca foi configurada. Uma
     // atualização do app não pode reabrir o assistente nem pedir o nome da
     // loja de novo. `lojaNome` cobre configs antigas (pareadas antes de
@@ -3761,6 +3753,7 @@ async function criarPedidoReal(itens, total, origemPedidoId){
       scale: c.zoom || 100, diffx: c.offX || 0, diffy: c.offY || 0, angle: c.rotation || 0,
       luz: c.luz || 0,
       overlayVariant: c.overlayVariant || null,
+      logo: !!c.logo,
       orientation: c.orientation || 'paisagem', unitPrice: c.precoUnit || 0, subtotal: c.preco || 0, pdv: true,
     })),
     produtos: produtos.map(c => ({ key: c.produtoId, qty: c.qtd || 1, unitPrice: c.precoUnit || 0, subtotal: c.preco || 0 })),
@@ -3826,7 +3819,7 @@ async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
         luz: f.luz || 0,
         orientation: f.orientation || 'paisagem', pdv: true,
         overlayVariant: variant,
-        logo: !!f.logo, logoTexto,
+        logo: !!f.logo,
       });
     }
   }
@@ -5706,13 +5699,14 @@ function renderFrame(){
     clip.appendChild(moldImg);
   }
 
-  // a logo do shopping só nos formatos que a aceitam (10x15/15x20) — mesma
-  // regra da impressão, pra tela e papel não divergirem
-  if(includeLogo && config.allowsLogo(modeloDe(t))){
-    const logo=document.createElement('div');
-    logo.className='shop-logo';
-    logo.textContent=logoTexto;
-    clip.appendChild(logo);
+  // a logo do shopping (PNG do overlay) só nos formatos que a aceitam
+  // (10x15/15x20) — mesma regra da impressão, pra tela e papel não divergirem
+  if(includeLogo && config.allowsLogo(modeloDe(t)) && moldCelula?.image){
+    const logoImg=document.createElement('img');
+    logoImg.className='logo-overlay';
+    logoImg.src=moldCelula.image;
+    logoImg.alt='';
+    clip.appendChild(logoImg);
   }
 
   // handle de canto — arrasta para dar zoom mantendo proporção (uso com mouse)
@@ -6260,11 +6254,12 @@ function renderEnquadramentoEstatico(wrap, c){
     card.appendChild(moldImg);
   }
 
-  if(c.logo && config.allowsLogo(modeloDe(t))){
-    const logo=document.createElement('div');
-    logo.className='shop-logo';
-    logo.textContent=logoTexto;
-    card.appendChild(logo);
+  if(c.logo && config.allowsLogo(modeloDe(t)) && mold?.image){
+    const logoImg = document.createElement('img');
+    logoImg.src = mold.image;
+    logoImg.alt = '';
+    logoImg.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4;';
+    card.appendChild(logoImg);
   }
 
   wrap.innerHTML='';
@@ -6730,8 +6725,6 @@ async function showConfigModal(tabInicial){
   const importFolderCustomCfg = String(cfg.importFolderCustom || '');
   const importSessoesCfg = (impStatus ? impStatus.importSessoes !== false : cfg.importSessoes !== false);
   const folder = cfg.photosFolder || '';
-  const logoTextoCfg = String(cfg.logoTexto || '').trim() || 'SHOPPING PALLADIUM';
-  const logoTextoEsc = logoTextoCfg.replace(/"/g, '&quot;');
   const connected = printer && printer.success && printer.connected;
   const p10 = connected && printer.paper10x15 != null ? printer.paper10x15 : '—';
   const p15 = connected && printer.paper15x20 != null ? printer.paper15x20 : '—';
@@ -6792,14 +6785,6 @@ async function showConfigModal(tabInicial){
         <button id="cfg-import-browse" style="padding:10px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;white-space:nowrap;font-family:Arial,sans-serif;">Procurar</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Onde o importador grava os lotes recebidos do cartão. Vazio = <b>_cartao</b> dentro da pasta de fotos.</div>
-    </div>
-
-    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
-      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Logo do shopping</div>
-      <input id="cfg-logo" type="text" value="${logoTextoEsc}"
-        placeholder="SHOPPING PALLADIUM"
-        style="width:100%;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:14px;font-family:Arial,sans-serif;outline:none;box-sizing:border-box;" />
-      <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Escrita na frente das fotos quando a opção "Incluir logo do shopping" estiver marcada no enquadramento.</div>
     </div>
 
     <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
@@ -7215,8 +7200,6 @@ const r = await natalApi.limparFila({ pedidoId });
 
   document.getElementById('cfg-save').onclick = async ()=>{
     const val = document.getElementById('cfg-folder').value.trim();
-    const logoEl = document.getElementById('cfg-logo');
-    const logoVal = (logoEl ? logoEl.value.trim() : '') || 'SHOPPING PALLADIUM';
     const lojaIdEl = document.getElementById('cfg-loja-id');
     const lojaNomeEl = document.getElementById('cfg-loja-nome');
     const lojaIdVal = (lojaIdEl ? lojaIdEl.value.trim() : '');
@@ -7228,7 +7211,7 @@ const r = await natalApi.limparFila({ pedidoId });
   const impSessoesEl = document.getElementById('cfg-import-sessoes');
   const impSessoesVal = impSessoesEl ? !!impSessoesEl.checked : true;
   try{
-      const partial = { photosFolder: val, logoTexto: logoVal };
+      const partial = { photosFolder: val };
       if(lojaIdEl) partial.lojaId = lojaIdVal;
       if(lojaNomeEl) partial.lojaNome = lojaNomeVal;
       if(impFolderEl) partial.importFolder = impFolderVal;
@@ -7238,7 +7221,6 @@ const r = await natalApi.limparFila({ pedidoId });
       // a edição vale (machineId/kioskCode continuam protegidos).
       await natalApi.saveConfig({ ...partial, _allowLojaChange: true });
       if(window.natal?.saveConfig) await window.natal.saveConfig(partial);
-      logoTexto = logoVal;
       // identidade local mudou → republica e (re)agenda o envio da fila
       if(_identidade){
         if(lojaIdEl) _identidade.lojaId = lojaIdVal;

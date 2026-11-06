@@ -24,48 +24,6 @@ function rotateCanvas(src, ccw) {
   return rot;
 }
 
-// Escreve a logo do shopping (texto) centralizada no rodapé da foto de impressão,
-// replicando o .shop-logo do editor (pill escuro, borda dourada, texto dourado) em
-// escala para a resolução real (o box do editor tem H=460 CSS px em 10x15/15x20).
-function drawLogoBadge(ctx, W, H, texto) {
-  ctx.save();
-  let fontPx = Math.max(10, Math.round(10 * (H / 460)));
-  ctx.font = '700 ' + fontPx + 'px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  let tw = ctx.measureText(texto).width;
-  if (tw > W * 0.72) {
-    fontPx = Math.floor((fontPx * W * 0.72) / tw);
-    ctx.font = '700 ' + fontPx + 'px Arial, sans-serif';
-    tw = ctx.measureText(texto).width;
-  }
-  const padY = Math.max(4, Math.round(4 * (H / 460)));
-  const padX = Math.max(10, Math.round(10 * (H / 460)));
-  const barW = Math.round(tw + padX * 2);
-  const barH = Math.round(fontPx * 1.2 + padY * 2 + 2);
-  const barX = Math.round((W - barW) / 2);
-  const barY = Math.round(H * 0.92) - barH;
-  const rr = (x, y, w, h, r) => {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  };
-  ctx.fillStyle = 'rgba(10,22,38,.72)';
-  rr(barX, barY, barW, barH, barH / 2);
-  ctx.fill();
-  ctx.strokeStyle = '#d4a24c';
-  ctx.lineWidth = Math.max(1, Math.round(H / 460));
-  rr(barX, barY, barW, barH, barH / 2);
-  ctx.stroke();
-  ctx.fillStyle = '#e8c787';
-  ctx.fillText(texto, W / 2, barY + barH / 2 + 1);
-  ctx.restore();
-}
-
 // Compõe a imagem final de impressão de uma foto.
 // `photo`: { key, url, scale, diffx, diffy, angle }
 // Retorna um Blob JPEG na resolução de impressão do papel.
@@ -84,9 +42,10 @@ export async function composePrintImage(photo) {
   //  · grid multi-célula — o PNG é UMA CÉLULA, repetida rows x cols na folha.
   //    É o caso da Bolinha e da Polaroide: 2 cartões por folha 10x15.
   //  · wholeSheet — o PNG é a FOLHA INTEIRA (as janelas já desenhadas na folha
-  //    toda). Suportado, mas hoje nenhum formato usa: 10x15/15x20 têm PNG quase
-  //    100% transparente (só moldura decorativa) e a logo sai como escrita
-  //    configurável (drawLogoBadge), então não são compostos aqui.
+  //    toda). Suportado, mas hoje nenhum formato usa.
+  //  · 10x15/15x20 — o PNG do overlay é só a LOGO do shopping (quase 100%
+  //    transparente). Ele não é molde: é desenhado por cima da foto quando o
+  //    checkbox "Incluir logo" está marcado (ver bloco da logo mais abaixo).
   const temMolde = !!overlayInfo?.grid
     && (overlayInfo.wholeSheet || overlayInfo.grid.rows * overlayInfo.grid.cols > 1);
   const multiCelula = temMolde && !overlayInfo.wholeSheet;
@@ -258,14 +217,14 @@ export async function composePrintImage(photo) {
     }
   }
 
-  // Logo do shopping (checkbox "Incluir logo do shopping nesta foto"): escrita
-  // configurável na frente da foto, mesma posição do .shop-logo do editor.
-  // Desenhada no canvas horizontal ANTES da rotação 15x20 — o driver da ASK-400
-  // gira de volta na impressão, então a escrita sai em pé no rodapé da foto.
+  // Logo do shopping (checkbox "Incluir logo do shopping nesta foto"): o PNG
+  // do overlay (10x15/15x20) já É a arte da logo — desenha a folha inteira.
+  // Desenhada no canvas horizontal ANTES da rotação 15x20: o driver da ASK-400
+  // gira de volta na impressão, então a logo sai na posição da arte.
   // Só nos formatos que aceitam (10x15/15x20) — ver config.allowsLogo.
-  if (photo.logo && config.allowsLogo(photo.key)) {
-    const logoTexto = String(photo.logoTexto || config.logoTexto || 'SHOPPING PALLADIUM').trim();
-    if (logoTexto) drawLogoBadge(ctx, printW, printH, logoTexto);
+  if (!temMolde && photo.logo && config.allowsLogo(photo.key) && overlayInfo?.image) {
+    const logoImg = await loadImage(overlayInfo.image);
+    ctx.drawImage(logoImg, 0, 0, printW, printH);
   }
 
   // 15x20 (media=6x8): o Java sidecar gera SEMPRE BMP retrato (1844x2436) para

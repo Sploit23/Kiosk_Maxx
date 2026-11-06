@@ -386,6 +386,11 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `lojaId` (`teste`), `lojaNome`, `pairingCode`, `pdvNome`, formatos de foto,
   produtos, pricing, overlays, estados, meios de pagamento (`dinheiro`, `pix`,
   `debito`, `credito`) e timers.
+- **Logo do shopping (10x15/15x20):** o PNG `public/overlays/10x15.png`/
+  `15x20.png` é a arte da logo (canto inferior direito) e é aplicado no editor,
+  na revisão do carrinho e na impressão quando o checkbox "Incluir logo do
+  shopping nesta foto" está marcado (`allowLogo` no formato). Não há mais texto
+  configurável: `logoTexto` ficou só como chave de config legada, sem uso.
 - **Catálogo — fonte de verdade no portal:** o PDV (`vendas.html`) busca
   `portalApi.precos()` no boot, a cada 60s e a cada emparelhamento e reconstrói o
   catálogo local (`TAMANHOS`/`EXTRAS`/`COMBOS`) com o `catalogo` estruturado
@@ -578,7 +583,7 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   num campo dentro do próprio modal — `#cfg-senha-box`; **nunca** usar
   `window.prompt`, que o Electron não implementa e lança erro) = pasta de fotos
   nativa (IPC `natal:selectFolder` →
-  `dialog.showOpenDialog`), pasta dos lotes do cartão, logo do shopping, status
+  `dialog.showOpenDialog`), pasta dos lotes do cartão, status
   real da impressora (10x15/15x20, connected, lastError), fila de impressão,
   "Loja desta máquina" (`lojaId`/`lojaNome`), emparelhamento/kioskCode,
   versão/atualização, manutenção ("Limpar dados") e o botão **Salvar** (grava
