@@ -6488,7 +6488,7 @@ function openModal(html){
   document.getElementById('modal-box').className='modal-box';
   document.getElementById('modal-box').innerHTML = html;
   document.getElementById('modal-overlay').classList.add('active');
-  modalBloqueado = false; // por padrão, modais podem ser fechados clicando fora
+  modalBloqueado = false;
 }
 function closeModal(){
   document.getElementById('modal-overlay').classList.remove('active');
@@ -6499,9 +6499,6 @@ window.closeModal = closeModal;
 window.openModal = openModal;
 window.showConfigModal = showConfigModal;
 let modalBloqueado = false;
-document.getElementById('modal-overlay').addEventListener('click', e=>{
-  if(e.target.id==='modal-overlay' && !modalBloqueado) closeModal();
-});
 
 /* ---------------- TECLADO NUMÉRICO NA TELA ---------------- */
 // Campos numéricos (PIN de 4 dígitos, busca de sessão e valores de caixa) abrem
@@ -6688,7 +6685,6 @@ document.addEventListener('keydown', e=>{
 /* pointerdown (com preventDefault) pra o clique nas teclas NÃO roubar o foco
    do campo — o valor é gravado direto e o campo segue "focado" por baixo */
 document.getElementById('numpad-overlay').addEventListener('pointerdown', e=>{
-  if(e.target.id === 'numpad-overlay'){ fecharNumpad(true); return; }
   const btn = e.target.closest('button');
   if(!btn || !numpadTarget) return;
   e.preventDefault();
@@ -9214,6 +9210,7 @@ function fecharTesteFotografo(){
   _testeVoltarCheckout = false;
   closeModal();
 }
+window.fecharTesteFotografo = fecharTesteFotografo;
 
 async function abrirTesteFotografo(voltarCheckout){
   _testeVoltarCheckout = voltarCheckout === true;
@@ -9390,7 +9387,7 @@ async function INIT(){
   document.getElementById('camera-scan').addEventListener('click', cameraScan);
   document.getElementById('camera-capture').addEventListener('click', cameraCapture);
   document.getElementById('camera-auto').addEventListener('change', cameraToggleAuto);
-  document.getElementById('camera-overlay').addEventListener('click', (e)=>{ if(e.target && e.target.id === 'camera-overlay') fecharCamera(); });
+
   document.getElementById('receive-close').addEventListener('click', fecharRecebimento);
   document.getElementById('printer-alert-close').addEventListener('click', fecharPrinterAlert);
   const receiveRestart = document.getElementById('receive-restart');
@@ -9400,7 +9397,7 @@ async function INIT(){
     try{ await window.natal?.restartImporter(); }catch{}
     setTimeout(()=>{ receiveRestart.disabled = false; receiveRestart.textContent = 'Reiniciar importador'; renderRecebimento(); }, 8000);
   });
-  document.getElementById('receive-overlay').addEventListener('click', (e)=>{ if(e.target && e.target.id === 'receive-overlay') fecharRecebimento(); });
+
   const btnTema = document.getElementById('btn-tema');
   btnTema.addEventListener('click', ()=>{
     const light = document.documentElement.getAttribute('data-theme') === 'light';
