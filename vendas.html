@@ -2173,6 +2173,7 @@ async function recarregarLojaLocal(lojaId){
   await carregarEquipe();
   try{ renderLoginUsers(); }catch{}
   carregarPrecosPortal();
+  carregarOverlaysPortal();
 }
 
 async function recarregarDados(){
@@ -2351,6 +2352,7 @@ async function emparelharKiosk(){
       } else {
         carregarEquipe().then(() => renderLoginUsers());
         carregarPrecosPortal();
+        carregarOverlaysPortal();
       }
       if(_wz.ativo && _wz.etapa === 2) wzIr(3); // wizard: pareou → próxima etapa
       agendarSincronizacao(1500); // manda o que estiver pendente assim que liberar
@@ -3674,6 +3676,101 @@ async function carregarPrecosPortal(){
   }catch{ }
 }
 
+/* ---------------- OVERLAYS DO PORTAL (10x15/15x20, offline-first) ---------------- */
+const OVERLAY_PORTAL_KEY = 'natal-overlays-v1';
+const OVERLAY_PORTAL_TIPOS = ['10x15', '15x20'];
+let overlaysPortalCarregando = false;
+let overlaysPortalPendente = false;
+let overlayLojaCarregada = '';
+
+function overlayCacheKey(){
+  return OVERLAY_PORTAL_KEY + ':' + (portalApi.lojaIdAtivo() || 'sem-loja');
+}
+function overlayCacheLer(){
+  try{
+    const raw = localStorage.getItem(overlayCacheKey());
+    const cache = raw ? JSON.parse(raw) : null;
+    if(!cache || typeof cache !== 'object' || !cache.images || typeof cache.images !== 'object') return null;
+    return cache;
+  }catch{ return null; }
+}
+function overlayCacheSalvar(cache){
+  try{ localStorage.setItem(overlayCacheKey(), JSON.stringify(cache)); }catch{}
+}
+function rerenderOverlaysPortal(){
+  const ativo = document.querySelector('.screen.active');
+  if(ativo && ativo.id === 'screen-venda') renderFrame();
+}
+async function carregarOverlaysPortal(){
+  if(overlaysPortalCarregando){ overlaysPortalPendente = true; return; }
+  overlaysPortalCarregando = true;
+  try{
+    try{ await garantirIdentidade(); }catch{}
+    const lojaId = portalApi.lojaIdAtivo();
+    const cacheAtual = overlayCacheLer();
+    const lojaAnterior = overlayLojaCarregada;
+    overlayLojaCarregada = lojaId;
+    let mudou = false;
+    // Troca de loja sem cache da nova: não deixa a arte da loja antiga vazar.
+    if(!cacheAtual && lojaAnterior && lojaAnterior !== lojaId){
+      for(const tipo of OVERLAY_PORTAL_TIPOS){
+        if(config.setOverlayImage(tipo, null)) mudou = true;
+      }
+    }
+    let res = null;
+    try{ res = await portalApi.overlays(); }catch{}
+    if(res && res.ok && res.overlays && typeof res.overlays === 'object'){
+      const imagens = {};
+      const hashes = {};
+      for(const tipo of OVERLAY_PORTAL_TIPOS){
+        const meta = res.overlays[tipo];
+        if(meta && meta.hash){
+          hashes[tipo] = String(meta.hash);
+          const antiga = (cacheAtual && cacheAtual.images) ? cacheAtual.images[tipo] : null;
+          const mesmoHash = !!(antiga && cacheAtual.hashes && cacheAtual.hashes[tipo] === meta.hash);
+          if(mesmoHash){
+            imagens[tipo] = antiga;
+            if(config.setOverlayImage(tipo, antiga)) mudou = true;
+          } else {
+            const baixada = await portalApi.overlayImage(tipo, meta.hash);
+            if(baixada){
+              imagens[tipo] = baixada;
+              if(config.setOverlayImage(tipo, baixada)) mudou = true;
+            } else if(antiga){
+              // portal caiu no meio do download: mantém a última arte baixada
+              imagens[tipo] = antiga;
+              hashes[tipo] = String((cacheAtual.hashes && cacheAtual.hashes[tipo]) || '');
+              if(config.setOverlayImage(tipo, antiga)) mudou = true;
+            } else {
+              delete hashes[tipo];
+            }
+          }
+        } else if(config.setOverlayImage(tipo, null)){
+          // sem arte no portal → volta ao PNG bundled
+          mudou = true;
+        }
+      }
+      overlayCacheSalvar({ lojaId, hashes, images: imagens, at: Date.now() });
+      if(mudou) rerenderOverlaysPortal();
+      return;
+    }
+    // Portal indisponível: aplica a última arte baixada desta loja.
+    if(cacheAtual && cacheAtual.images){
+      for(const tipo of OVERLAY_PORTAL_TIPOS){
+        const img = cacheAtual.images[tipo];
+        if(img && config.setOverlayImage(tipo, img)) mudou = true;
+      }
+      if(mudou) rerenderOverlaysPortal();
+    }
+  }finally{
+    overlaysPortalCarregando = false;
+    if(overlaysPortalPendente){
+      overlaysPortalPendente = false;
+      setTimeout(carregarOverlaysPortal, 0);
+    }
+  }
+}
+
 /* ---------------- LOGIN (portal com fallback offline) ---------------- */
 async function tentarLogin(getSelecionado){
   await garantirIdentidade().catch(()=>null);
@@ -3897,10 +3994,14 @@ function htmlQrDigital(codigo, titulo){
 }
 function statusDigitalTexto(d){
   const fotos = Number(d && d.fotos) || 0;
+  const total = Math.max(Number(d && d.total) || 0, fotos);
   const enviadas = Number(d && d.enviadas) || 0;
-  const pendentes = Math.max(0, fotos - enviadas);
+  const faltamArquivos = Math.max(0, total - fotos);
+  const faltamEnviar = Math.max(0, fotos - enviadas);
   if(d && d.manifestoEnviado) return `✅ ${fotos} foto${fotos === 1 ? '' : 's'} disponível${fotos === 1 ? '' : 'is'} no servidor`;
-  if(d && d.pendente) return `◌ ${pendentes || 1} foto${(pendentes || 1) === 1 ? '' : 's'} pendente${(pendentes || 1) === 1 ? '' : 's'} — sem internet. Envia sozinho quando a conexão voltar.`;
+  if(faltamArquivos > 0) return `◌ ${faltamArquivos} de ${total} foto${total === 1 ? '' : 's'} ainda não chegaram ao PDV — confira a venda.`;
+  if(faltamEnviar > 0) return `◌ ${faltamEnviar} de ${total} foto${total === 1 ? '' : 's'} pendente${faltamEnviar === 1 ? '' : 's'} — sem internet. Envia sozinho quando a conexão voltar.`;
+  if(d && d.pendente) return `✓ ${fotos} foto${fotos === 1 ? '' : 's'} no PDV — publicando no servidor. Envia sozinho quando a conexão voltar.`;
   if(d && d.error) return `⚠ ${d.error}`;
   return '⏳ Preparando o envio…';
 }
@@ -3918,6 +4019,14 @@ async function enviarDigitais(pedidoId, codigo, itens){
   let enviadas = 0;
   let erro = '';
   const total = itens.length;
+  // Marca a venda como finalizada ANTES dos uploads. O sidecar só publica o
+  // manifesto quando todas as fotos chegaram ao disco; se o app fechar no meio,
+  // a galeria não fica órfã e o worker termina o envio sozinho.
+  try{
+    await natalApi.finalizarGaleria(codigo, { total, pedidoId });
+  }catch(e){
+    erro = (e && e.message) || String(e);
+  }
   for(let i = 0; i < itens.length; i++){
     const item = itens[i];
     try{
@@ -3933,7 +4042,7 @@ async function enviarDigitais(pedidoId, codigo, itens){
       const up = await natalApi.enviarGaleria(codigo, i + 1, blob);
       if(!up || (up.error && !up.salvo)) throw new Error((up && up.error) || 'Falha no envio');
       enviadas++;
-      atualizarStatusDigital(codigo, { fotos: total, enviadas, ...up });
+      atualizarStatusDigital(codigo, { total, enviadas, ...up });
     }catch(e){
       erro = (e && e.message) || String(e);
     }
@@ -3941,12 +4050,14 @@ async function enviarDigitais(pedidoId, codigo, itens){
   try{
     const fin = await natalApi.finalizarGaleria(codigo, { total, pedidoId });
     if(fin && !fin.error){
-      atualizarStatusDigital(codigo, { ...fin, fotos: total, enviadas: fin.enviadas != null ? fin.enviadas : enviadas });
+      const status = { ...fin, total: fin.total || total, enviadas: fin.enviadas != null ? fin.enviadas : enviadas };
+      if(erro) status.error = erro;
+      atualizarStatusDigital(codigo, status);
     } else {
-      atualizarStatusDigital(codigo, { pendente: true, fotos: total, enviadas, error: erro });
+      atualizarStatusDigital(codigo, { pendente: true, total, fotos: enviadas, enviadas, error: erro });
     }
   }catch(e){
-    atualizarStatusDigital(codigo, { pendente: true, fotos: total, enviadas, error: erro || ((e && e.message) || String(e)) });
+    atualizarStatusDigital(codigo, { pendente: true, total, fotos: enviadas, enviadas, error: erro || ((e && e.message) || String(e)) });
   }
   return { enviadas, total, erro };
 }
@@ -3981,11 +4092,15 @@ async function renderDigitalConfigPanel(){
   }
   list.innerHTML = itens.map(i => {
     const fotos = Number(i.fotos) || 0;
+    const total = Math.max(Number(i.total) || 0, fotos);
     const enviadas = Number(i.enviadas) || 0;
-    const falta = Math.max(0, fotos - enviadas);
-    const situacao = falta > 0
-      ? `${falta} de ${fotos} foto${fotos === 1 ? '' : 's'} pendente${falta === 1 ? '' : 's'}`
-      : 'fotos enviadas — falta publicar';
+    const faltamArquivos = Math.max(0, total - fotos);
+    const faltaEnviar = Math.max(0, fotos - enviadas);
+    const situacao = faltamArquivos > 0
+      ? `faltam ${faltamArquivos} de ${total} foto${total === 1 ? '' : 's'} no PDV`
+      : faltaEnviar > 0
+        ? `${faltaEnviar} de ${total} foto${total === 1 ? '' : 's'} pendente${faltaEnviar === 1 ? '' : 's'} de internet`
+        : 'fotos enviadas — falta publicar no servidor';
     return `<button type="button" data-sync-digital="${i.codigo}" style="display:flex;flex-direction:column;gap:2px;align-items:flex-start;text-align:left;padding:10px 14px;border:1px solid var(--amber-500);border-radius:8px;background:rgba(245,158,11,.08);color:var(--slate-200);font-size:12.5px;cursor:pointer;font-family:Arial,sans-serif;width:100%;">
       <b style="font-size:13px;color:var(--gold-300);">🔄 Sincronizar ${i.codigo}</b>
       <span style="color:var(--slate-400);">${situacao}</span>
@@ -9407,6 +9522,7 @@ async function INIT(){
   });
   setTimeout(emparelharKiosk, 0); // identifica o kiosk no portal (não bloqueia o boot)
   setTimeout(carregarPrecosPortal, 0); // preços da loja vêm do portal (fallback: catálogo local)
+  setTimeout(carregarOverlaysPortal, 0); // overlays 10x15/15x20 da loja (cache local p/ offline)
   setInterval(() => {
     if(!window.kioskPair || !window.kioskPair.ok) emparelharKiosk(); // re-tenta até o admin cadastrar o código
   }, 30000);
@@ -9461,6 +9577,14 @@ async function INIT(){
     }catch{ /* sidecar no boot ainda */ }
   }, 15000); // sessões importadas da pasta chegam sozinhas
   setInterval(carregarPrecosPortal, 60000); // preço muda no portal → PDV aberto atualiza sozinho
+  setInterval(carregarOverlaysPortal, 60000); // overlay muda no portal → PDV aberto atualiza sozinho
+  // Internet voltou: não espera o ciclo de 60s para subir as fotos digitais.
+  window.addEventListener('online', ()=>{
+    natalApi.sincronizarGaleria().then(()=>{
+      renderDigitalConfigPanel();
+      renderSyncChip();
+    }).catch(()=>{});
+  });
   /* eventos em tempo real: mudança em sessão/pedido/caixa re-renderiza a tela ativa */
   connectSSE((key, data) => {
     carregarSessoes().then(()=> renderDateSelect()); // mantém o seletor por dia sincronizado

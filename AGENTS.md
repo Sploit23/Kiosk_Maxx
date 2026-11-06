@@ -143,6 +143,8 @@ Autenticação pública por usuário; ações admin exigem header `X-Token` (ou 
 | `login` | `lojaId`, `usuario`, `senha` | Valida loja + usuário (usuário ou nome) + senha → `{ user, loja }` |
 | `equipe` | `lojaId` | Lista usuários ativos da loja: `{ loja, usuarios }` |
 | `precos` | `lojaId` | Catálogo + preços da loja (fonte de verdade do PDV): `{ ok, lojaId, precos, catalogo }` — `precos` = mapa chave→valor (compat. PDVs antigos), `catalogo` = `{ tamanhos, extras, combos }` já recortado para a loja (item com `lojas` só aparece nas lojas marcadas; sem `lojas` = todas). Usa o catálogo mestre `precos.json['__catalogo']`; sem ele, cai no catálogo antigo/default (`CATALOGO_DEFAULT`) |
+| `overlays` | `lojaId` | Metadados dos overlays efetivos da loja (`10x15`/`15x20`): `{ ok, lojaId, overlays: { '10x15': { hash, width, height, updatedAt, scope } \| null, '15x20': ... } }`. Precedência: arte própria da loja → arte global (`__global`) → `null` (o PDV usa o PNG bundled) |
+| `overlays.image` | `lojaId`, `tipo` (`10x15`/`15x20`), `v` (hash, opcional) | Binário PNG do overlay efetivo, com `Content-Type: image/png`, `ETag` e cache imutável. É público (o PDV não manda token); o arquivo fica em `data/overlays/` (bloqueado pelo `.htaccess`) e só sai por esta ação. Sem arte customizada, serve `backend/overlays/default-<tipo>.png` |
 | `kiosk.seed` | `kioskCode`, `nome` (+ `pdvNome`, `machineId`, `machineName`, `lojaId`, `lojaNome`, `ip`) | Registra o PDV em `db.pendentes[kioskCode]` para o admin autorizar sem copiar código (não cria loja — senão o `kiosk.pair` casaria cedo demais) → `{ ok, pendente }`; loja já existente com o código (confere `kioskCodes`) → `{ ok, jaRegistrado }`; `DADOS_INCOMPLETOS`/`NOME_INVALIDO` |
 | `kiosk.pair` | `kioskCode` (+ `pdvNome`, `machineId`; legado `lojaId`+`pairingCode`) | Emparelha o kiosk com a loja. **Primeiro** resolve pelo registro permanente `devices[machineId]` (não depende mais do código local); senão resolve pelo código exibido NA TELA do PDV, grava `pareamento` + `devices`, e bloqueia máquina já usada por outra loja (`KIOSK_NAO_EMPARELELHADO`, `MAQUINA_JA_EMPARELHADA`) → `{ loja, pareamento }` |
 | `vendas.push` | `lojaId`, `machineId`, `data` (YYYY-MM-DD) + snapshot | PDV → portal: snapshot diário de vendas por loja. Exige `machineId` == `pareamento.machineId` da loja (`LOJA_NAO_EMPARELELHADA` 403, com delay anti-bruteforce). Upsert em `data/vendas.json` por loja+data: `lojaNome`, `pdvNome`, `totalVendido`, `pedidos`, `sessoesCriadas`, `sessoesVendidas`, `taxacombo`, `ribbonRestante`, `papel10x15`/`papel15x20` (papel REAL da impressora via checkPrinter, `null` se sem resposta), `meios {dinheiro,debito,credito,pix}`, `ultimaVenda`, `caixa {numero,aberto}`, `enviadoEm` |
@@ -181,6 +183,14 @@ com `catalogo` valida `sanitizarCatalogo()` — exige os tamanhos `10x15` e
 catálogo inválido → `CATALOGO_INVALIDO`; sem catálogo, valores vazios resetam
 para os defaults),
 `precos.list` (overlay bruto + `defaults` + `catalogoDefault` — admin/backup),
+`overlays.list` (`{ lojas, overlays, dimensoes }` — metadados crus de
+`data/overlays.json` para a aba “Overlay das fotos”; `lojas` só com
+`id`/`nome`/`pdv`/`ativo`), `overlays.save` (`{ lojas:[id...|'__global'],
+overlays:{ '10x15': dataURL_PNG | null, '15x20': ... } }` — grava/remove a arte
+por loja ou global; `null` remove o arquivo e volta ao fallback. Valida PNG real
+via `getimagesizefromstring`, tamanho ≤ 5 MB e proporção 1864×1228 / 2422×1864
+(tolerância 0.02); arquivos em `data/overlays/`, metadados em
+`data/overlays.json`; atualiza `updatedAt` e apaga o arquivo anterior),
 `vendas.resumo` (todos os snapshots de `data/vendas.json`, data desc → lojaId asc →
 `{ ok, vendas }`), `pedido.list` (pedidos consolidados de `data/pedidos.json`,
 filtros `lojaId`/`dataIni`/`dataFim`/`q`/`status` — `status` é case-insensitive,
@@ -257,8 +267,9 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 │   ├── natal/               # Página pública /natal (código → fotos digitais)
 │   │   ├── index.php        # consulta do código + downloads (sem cache)
 │   │   └── fotos/           # JPEGs <CODIGO>_<n>.jpg + manifesto <CODIGO>.json
+│   ├── overlays/            # PNGs padrão 10x15/15x20 (amostra/fallback do portal)
 │   ├── publish.ps1          # Deploy FTP (HostGator) — portal + /natal
-│   └── data/                # JSONs (bloqueado por .htaccess)
+│   └── data/                # JSONs + data/overlays/ (bloqueado por .htaccess)
 ├── impressora/
 │   ├── native_libs/picgo-ask400/   # DLLs da ASK-400 + perfil ICC
 │   └── status_ok/                   # Sidecar Java (build/, build.ps1, RESUMO.md)
@@ -698,3 +709,8 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   é usado nas confirmações).
 - **`php` CLI não existe nesta máquina** — lint/validação do `backend/api.php`
   é manual (na web ou com PHP instalado).
+- **Overlay do portal é offline-first:** o PDV baixa o PNG uma vez e guarda o
+  data URL em `localStorage` (`natal-overlays-v1:<lojaId>`, junto com os hashes).
+  A cada 60s ele consulta `overlays`; hash igual não baixa de novo. Sem portal,
+  usa a última arte baixada ou o PNG bundled. Trocar de loja usa outra chave de
+  cache e volta ao padrão se não houver arte baixada para a nova loja.

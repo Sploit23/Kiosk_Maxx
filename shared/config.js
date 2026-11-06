@@ -134,6 +134,14 @@ const FOTO_FORMATS = {
   },
 };
 
+// Overlays gerenciáveis pelo portal. Guardamos a imagem bundled original para
+// poder voltar ao padrão quando o admin remove a arte personalizada da loja.
+const OVERLAY_PORTAL_KEYS = ['10x15', '15x20'];
+const OVERLAY_DEFAULT_IMAGES = {
+  '10x15': FOTO_FORMATS['10x15'].overlay.image,
+  '15x20': FOTO_FORMATS['15x20'].overlay.image,
+};
+
 // ─── Produtos físicos (não impressos — estoque/contagem) ──
 // Chaves canônicas do portal (PRECOS_DEFAULT do api.php) — o overlay que o
 // admin altera em "Catálogo de produtos" cai aqui via aplicarPrecos().
@@ -402,6 +410,23 @@ const config = {
     if (!base) return null;
     const variant = this.getOverlayVariants(key).find(v => v.id === String(variantId));
     return variant ? { ...base, ...variant } : base;
+  },
+
+  // Arte personalizada vinda do portal (data URL) ou `null` para voltar ao PNG
+  // bundled. Só 10x15/15x20 são gerenciáveis; bolinha/polaroide continuam
+  // usando os moldes fixos do aplicativo.
+  setOverlayImage(key, image) {
+    if (OVERLAY_PORTAL_KEYS.indexOf(key) < 0) return false;
+    const f = FOTO_FORMATS[key];
+    if (!f || !f.overlay) return false;
+    const next = (typeof image === 'string' && image) ? image : OVERLAY_DEFAULT_IMAGES[key];
+    if (f.overlay.image === next) return false;
+    f.overlay.image = next;
+    return true;
+  },
+
+  getOverlayDefault(key) {
+    return OVERLAY_DEFAULT_IMAGES[key] || null;
   },
 
   // Box de enquadramento na tela, em px de CSS. Ver EDITOR_BOX_H acima.

@@ -1017,8 +1017,20 @@ function readBody(req, maxBytes = 200 * 1024 * 1024) {
 // fica na pasta local e um worker reenvia sozinho (60s + gatilhos). A venda
 // nunca depende do envio ter dado certo.
 const GALERIA_SYNC_MS = 60000;
-const galeriaLocks = new Set();
+const GALERIA_FTP_TIMEOUT_MS = 60000;
+const GALERIA_LOCK_MS = 5 * 60000;
+const GALERIA_RECUPERACAO_MS = 90000;
+const galeriaLocks = new Map();
 let _galeriaWorkerRodando = false;
+let _galeriaWorkerInicio = 0;
+
+function comTimeout(promise, ms, mensagem) {
+  let timer;
+  const limite = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(mensagem)), ms);
+  });
+  return Promise.race([promise, limite]).finally(() => clearTimeout(timer));
+}
 
 function galeriaCodigoValido(codigo) {
   return /^[A-Z0-9]{4,12}$/.test(String(codigo || ''));
@@ -1026,11 +1038,17 @@ function galeriaCodigoValido(codigo) {
 function galeriaCodigoDir(codigo) { return path.join(GALERIA_DIR, sanitizeSegment(String(codigo || '').toUpperCase())); }
 function galeriaMetaPath(codigo) { return path.join(galeriaCodigoDir(codigo), 'meta.json'); }
 function lerGaleriaMeta(codigo) { return readJson(galeriaMetaPath(codigo), null); }
-function salvarGaleriaMeta(meta) { writeJson(galeriaMetaPath(meta.codigo), meta); }
+function salvarGaleriaMeta(meta) {
+  fs.mkdirSync(galeriaCodigoDir(meta.codigo), { recursive: true });
+  writeJson(galeriaMetaPath(meta.codigo), meta);
+}
 function galeriaArquivoRemoto(codigo, seq) { return `${codigo}_${seq}.jpg`; }
 function galeriaPendente(meta) {
   if (!meta) return false;
-  if ((meta.fotos || []).some((f) => !f.enviadoEm)) return true;
+  const fotos = Array.isArray(meta.fotos) ? meta.fotos : [];
+  if (fotos.some((f) => !f.enviadoEm)) return true;
+  // finalizou com mais fotos do que chegaram ao disco: não publica pela metade.
+  if (Number(meta.total || 0) > fotos.length) return true;
   // o manifesto só vale DEPOIS que o PDV finaliza a venda (todas as fotos já
   // chegaram) — evita publicar uma venda pela metade se uma foto falhar.
   return !!meta.finalizadoEm && !meta.manifestoEnviadoEm;
@@ -1048,13 +1066,18 @@ function listarGalerias() {
 }
 function galeriaStatusUI(meta) {
   const fotos = Array.isArray(meta.fotos) ? meta.fotos : [];
+  const total = Math.max(Number(meta.total || 0) || 0, fotos.length);
   return {
     codigo: meta.codigo,
     pedidoId: meta.pedidoId || null,
     criadoEm: meta.criadoEm || null,
+    total,
     fotos: fotos.length,
+    faltamFotos: Math.max(0, total - fotos.length),
     enviadas: fotos.filter((f) => f.enviadoEm).length,
+    finalizado: !!meta.finalizadoEm,
     manifestoEnviado: !!meta.manifestoEnviadoEm,
+    recuperado: !!meta.recuperadoEm,
     pendente: galeriaPendente(meta),
     tentativas: meta.tentativas || 0,
     ultimoErro: meta.ultimoErro || '',
@@ -1163,13 +1186,18 @@ function ftpUpload({ host, port = 21, user, pass, folder = '', filename, buffer,
 async function sincronizarGaleria(codigo, { forcar = false } = {}) {
   const c = String(codigo || '').toUpperCase();
   if (!galeriaCodigoValido(c)) return { success: false, error: 'Código inválido' };
-  if (galeriaLocks.has(c)) return { success: false, sincronizando: true, pendente: true };
+  const lockAtual = galeriaLocks.get(c);
+  if (lockAtual && Date.now() - lockAtual < GALERIA_LOCK_MS) {
+    return { success: false, sincronizando: true, pendente: true };
+  }
+  if (lockAtual) galeriaLocks.delete(c); // lock órfão de um envio que travou
   let meta = lerGaleriaMeta(c);
   if (!meta) return { success: false, error: 'Código desconhecido' };
   if (!galeriaPendente(meta) && !forcar) {
     return { success: true, jaEnviado: true, pendente: false, codigo: c, fotos: (meta.fotos || []).length, manifestoEnviado: true };
   }
-  galeriaLocks.add(c);
+  const lockToken = { at: Date.now() };
+  galeriaLocks.set(c, lockToken);
   const ftp = getFtpConfig();
   let falhou = false;
   let ultimoErro = '';
@@ -1181,7 +1209,12 @@ async function sincronizarGaleria(codigo, { forcar = false } = {}) {
       try {
         const file = path.join(galeriaCodigoDir(c), `${foto.seq}.jpg`);
         const buffer = fs.readFileSync(file);
-        await ftpUpload({ host: ftp.host, port: ftp.port, user: ftp.user, pass: ftp.pass, folder: ftp.folder, filename: galeriaArquivoRemoto(c, foto.seq), buffer });
+        lockToken.at = Date.now();
+        await comTimeout(
+          ftpUpload({ host: ftp.host, port: ftp.port, user: ftp.user, pass: ftp.pass, folder: ftp.folder, filename: galeriaArquivoRemoto(c, foto.seq), buffer }),
+          GALERIA_FTP_TIMEOUT_MS,
+          'Timeout no envio da foto (FTP)'
+        );
         foto.enviadoEm = Date.now();
         foto.erro = '';
         salvarGaleriaMeta(meta);
@@ -1205,7 +1238,12 @@ async function sincronizarGaleria(codigo, { forcar = false } = {}) {
         fotos: fotos.map((f) => ({ seq: f.seq, arquivo: galeriaArquivoRemoto(c, f.seq) })),
       };
       try {
-        await ftpUpload({ host: ftp.host, port: ftp.port, user: ftp.user, pass: ftp.pass, folder: ftp.folder, filename: `${c}.json`, buffer: Buffer.from(JSON.stringify(manifesto), 'utf-8') });
+        lockToken.at = Date.now();
+        await comTimeout(
+          ftpUpload({ host: ftp.host, port: ftp.port, user: ftp.user, pass: ftp.pass, folder: ftp.folder, filename: `${c}.json`, buffer: Buffer.from(JSON.stringify(manifesto), 'utf-8') }),
+          GALERIA_FTP_TIMEOUT_MS,
+          'Timeout no envio do manifesto (FTP)'
+        );
         meta.manifestoEnviadoEm = Date.now();
         meta.ultimoErro = '';
         salvarGaleriaMeta(meta);
@@ -1220,7 +1258,7 @@ async function sincronizarGaleria(codigo, { forcar = false } = {}) {
     falhou = true;
     ultimoErro = (e && e.message) || String(e);
   } finally {
-    galeriaLocks.delete(c);
+    if (galeriaLocks.get(c) === lockToken) galeriaLocks.delete(c);
   }
   meta = lerGaleriaMeta(c) || meta;
   meta.atualizadoEm = Date.now();
@@ -1242,13 +1280,63 @@ async function sincronizarGaleria(codigo, { forcar = false } = {}) {
   };
 }
 
+function pedidoDaGaleria(meta) {
+  if (!meta) return null;
+  const lista = Array.isArray(pedidos) ? pedidos : readJson(PEDIDOS_FILE, []);
+  const codigo = String(meta.codigo || '').toUpperCase();
+  return lista.find((p) => {
+    if (!p) return false;
+    if (meta.pedidoId && String(p.id || '') === String(meta.pedidoId)) return true;
+    return codigo && String(p.codigoDigital || '').toUpperCase() === codigo;
+  }) || null;
+}
+
+// Galerias antigas podiam ficar com todas as fotos no disco mas sem
+// finalizadoEm (o PDV fechou antes do /finalizar ou o FTP travou o request).
+// Se a venda existe e está paga, recupera o marcador e deixa o worker publicar.
+function recuperarGaleriasOrfas() {
+  const agora = Date.now();
+  for (const meta of listarGalerias()) {
+    if (!meta || meta.finalizadoEm || meta.manifestoEnviadoEm) continue;
+    const fotos = Array.isArray(meta.fotos) ? meta.fotos : [];
+    if (!fotos.length || !fotos.every((f) => f.enviadoEm)) continue;
+    if (agora - Number(meta.atualizadoEm || meta.criadoEm || 0) < GALERIA_RECUPERACAO_MS) continue;
+    const pedido = pedidoDaGaleria(meta);
+    if (!pedido) continue;
+    const status = String(pedido.status || '').toLowerCase();
+    if (status !== 'pago' && status !== 'impresso') continue;
+    const digitais = (Array.isArray(pedido.produtos) ? pedido.produtos : [])
+      .filter((p) => p && p.key === 'foto-digital')
+      .reduce((s, p) => s + Math.max(1, Number(p.qty) || 1), 0);
+    const esperado = Math.max(Number(meta.total || 0) || 0, digitais, fotos.length);
+    meta.total = esperado;
+    meta.pedidoId = meta.pedidoId || pedido.id || null;
+    if (fotos.length < esperado) {
+      // faltam arquivos locais: mantém visível na fila, mas não publica pela metade.
+      if (!meta.ultimoErro) meta.ultimoErro = `Faltam ${esperado - fotos.length} foto(s) no disco do PDV`;
+      meta.atualizadoEm = agora;
+      salvarGaleriaMeta(meta);
+      continue;
+    }
+    meta.finalizadoEm = Number(pedido.pagoEm || pedido.criadoEm) || agora;
+    meta.recuperadoEm = agora;
+    meta.atualizadoEm = agora;
+    salvarGaleriaMeta(meta);
+    console.log(`[natal-core] Galeria recuperada: ${meta.codigo} (venda ${pedido.id})`);
+  }
+}
+
 async function sincronizarGaleriasPendentes() {
-  if (_galeriaWorkerRodando) return;
+  if (_galeriaWorkerRodando && Date.now() - _galeriaWorkerInicio < 10 * 60000) return;
   _galeriaWorkerRodando = true;
+  _galeriaWorkerInicio = Date.now();
   try {
+    recuperarGaleriasOrfas();
     for (const meta of listarGalerias()) {
       if (!galeriaPendente(meta)) continue;
-      try { await sincronizarGaleria(meta.codigo); } catch {}
+      try {
+        await comTimeout(sincronizarGaleria(meta.codigo), 4 * 60000, `Timeout ao sincronizar ${meta.codigo}`);
+      } catch {}
     }
   } finally {
     _galeriaWorkerRodando = false;
@@ -1924,23 +2012,30 @@ const server = http.createServer(async (req, res) => {
       const buffer = await readBody(req, 16 * 1024 * 1024);
       const r = galeriaReceberFoto(codigo, seq, buffer);
       if (r.error) return sendJson(res, 400, { success: false, error: r.error });
-      const sync = await sincronizarGaleria(codigo);
-      return sendJson(res, 200, { success: true, salvo: true, ...sync });
+      // Salvar no disco é o que importa para a venda. O FTP roda em background:
+      // internet lenta/offline nunca pode segurar o caixa nem perder a foto.
+      setImmediate(() => { sincronizarGaleria(codigo).catch(() => {}); });
+      return sendJson(res, 200, { success: true, salvo: true, ...galeriaStatusUI(r.meta) });
     }
     const galeriaFinalizar = p.match(/^\/api\/galeria\/finalizar\/([^/]+)$/);
     if (method === 'POST' && galeriaFinalizar) {
       const codigo = String(galeriaFinalizar[1] || '').toUpperCase();
       if (!galeriaCodigoValido(codigo)) return sendJson(res, 400, { success: false, error: 'Código inválido' });
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
-      const meta = lerGaleriaMeta(codigo);
-      if (!meta) return sendJson(res, 404, { success: false, error: 'Código desconhecido' });
+      let meta = lerGaleriaMeta(codigo);
+      if (!meta) {
+        meta = {
+          codigo, criadoEm: Date.now(), pedidoId: null, total: 0,
+          fotos: [], manifestoEnviadoEm: null, tentativas: 0, ultimoErro: '',
+        };
+      }
       meta.total = Math.max(Number(body.total || 0) || 0, (meta.fotos || []).length);
       meta.finalizadoEm = meta.finalizadoEm || Date.now();
       if (body.pedidoId) meta.pedidoId = String(body.pedidoId);
       meta.atualizadoEm = Date.now();
       salvarGaleriaMeta(meta);
-      const sync = await sincronizarGaleria(codigo, { forcar: true });
-      return sendJson(res, 200, { success: true, ...sync });
+      setImmediate(() => { sincronizarGaleria(codigo).catch(() => {}); });
+      return sendJson(res, 200, { success: true, salvo: true, ...galeriaStatusUI(meta) });
     }
     if (method === 'GET' && p === '/api/galeria/fila') {
       const itens = listarGalerias().map(galeriaStatusUI);
@@ -1960,8 +2055,9 @@ const server = http.createServer(async (req, res) => {
         if (raw.length) body = JSON.parse(raw.toString('utf-8') || '{}');
       } catch {}
       const codigo = String(body.codigo || '').trim().toUpperCase();
+      recuperarGaleriasOrfas();
       if (codigo && galeriaCodigoValido(codigo)) {
-        await sincronizarGaleria(codigo); // só o código pedido (respeita o que já subiu)
+        await comTimeout(sincronizarGaleria(codigo), 4 * 60000, 'Timeout ao sincronizar'); // só o código pedido (respeita o que já subiu)
       } else {
         await sincronizarGaleriasPendentes();
       }

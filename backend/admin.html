@@ -227,6 +227,33 @@ select.form-input{appearance:none;}
 .cat-lojas-line:not(.restrito) .cat-lojas-opts .cat-chk{opacity:.55;}
 .cat-lojas-mand{font-size:10.5px;color:var(--slate-500);}
 .cat-hint{font-size:11px;color:var(--slate-500);line-height:1.5;margin-top:6px;}
+/* gerenciador de overlays */
+.ov-grid{display:grid;grid-template-columns:minmax(260px,.85fr) minmax(360px,1.15fr);gap:14px;align-items:start;}
+.ov-lojas{max-height:430px;overflow:auto;border:1px solid var(--navy-line);border-radius:9px;background:var(--navy-850);padding:6px;}
+.ov-loja-row{display:flex;align-items:center;gap:9px;padding:8px;border-radius:7px;cursor:pointer;border-bottom:1px dashed rgba(255,255,255,.05);}
+.ov-loja-row:last-child{border-bottom:none;}
+.ov-loja-row:hover{background:rgba(255,255,255,.03);}
+.ov-loja-row input{accent-color:var(--gold-500);flex:none;}
+.ov-loja-nome{flex:1;font-size:12.5px;color:var(--cream-100);line-height:1.35;min-width:0;}
+.ov-loja-nome small{display:block;color:var(--slate-500);font-size:10.5px;}
+.ov-badges{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;}
+.ov-todas{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--gold-300);font-weight:600;padding:2px 2px 10px;cursor:pointer;}
+.ov-todas input{accent-color:var(--gold-500);}
+.ov-artes{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.ov-card{display:flex;flex-direction:column;gap:9px;min-width:0;}
+.ov-prev{position:relative;border:1px solid var(--navy-line);border-radius:10px;overflow:hidden;background-color:#1b1f2a;background-image:linear-gradient(45deg,#2a2f3c 25%,transparent 25%),linear-gradient(-45deg,#2a2f3c 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#2a2f3c 75%),linear-gradient(-45deg,transparent 75%,#2a2f3c 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0;}
+.ov-prev img{display:block;width:100%;height:auto;}
+.ov-prev-cap{position:absolute;left:8px;bottom:8px;right:8px;background:rgba(8,12,20,.82);border:1px solid rgba(255,255,255,.14);color:var(--cream-100);font-size:10.5px;padding:3px 7px;border-radius:5px;line-height:1.35;}
+.ov-drop{border:1px dashed var(--navy-line);border-radius:9px;padding:10px;background:var(--navy-850);}
+.ov-drop input[type=file]{width:100%;font-size:11px;color:var(--slate-400);}
+.ov-download{display:inline-block;margin-top:6px;font-size:11px;color:var(--gold-300);text-decoration:none;}
+.ov-download:hover{text-decoration:underline;}
+.ov-status{min-height:17px;font-size:11px;line-height:1.45;color:var(--slate-500);}
+.ov-actions{display:flex;gap:9px;flex-wrap:wrap;align-items:center;}
+.ov-actions .btn{flex:1;min-width:180px;}
+.ov-help{font-size:11px;color:var(--slate-500);line-height:1.6;margin-top:6px;}
+@media(max-width:980px){.ov-grid{grid-template-columns:1fr;}}
+@media(max-width:640px){.ov-artes{grid-template-columns:1fr;}}
 .pair-status{font-size:11.5px;color:var(--green-500);background:rgba(79,174,127,.1);border:1px solid rgba(79,174,127,.25);border-radius:8px;padding:8px 10px;margin-bottom:14px;}
 .pair-status.muted{color:var(--slate-500);background:var(--navy-850);border-color:var(--navy-line);}
 .pair-tutorial{font-size:12px;color:var(--slate-400);background:var(--navy-850);border:1px solid var(--navy-line);border-radius:8px;padding:10px 12px;margin-bottom:14px;}
@@ -529,6 +556,7 @@ select.form-input{appearance:none;}
     <div class="sb-item" data-screen="fluxo"><span class="ico">💧</span> Fluxo de Caixa</div>
     <div class="sb-item" data-screen="estoque"><span class="ico">📦</span> Estoque</div>
     <div class="sb-item" data-screen="precos"><span class="ico">🛍</span> Catálogo de produtos</div>
+    <div class="sb-item" data-screen="overlays"><span class="ico">🖼</span> Overlay das fotos</div>
     <div class="sb-section">Equipe</div>
     <div class="sb-item" data-screen="equipe"><span class="ico">👥</span> Colaboradores</div>
     <div class="sb-item" data-screen="ranking"><span class="ico">🏆</span> Ranking</div>
@@ -899,6 +927,69 @@ select.form-input{appearance:none;}
       </div>
     </div>
 
+    <!-- ====== OVERLAY DAS FOTOS (arte PNG por loja/PDV) ====== -->
+    <div class="screen" id="screen-overlays">
+      <div class="section-head">
+        <div>
+          <h2>Overlay das fotos</h2>
+          <p>Troque a arte PNG usada por cima das fotos no 10x15 e no 15x20 — por loja/PDV ou para todas. O PDV aplica em até 60s.</p>
+        </div>
+        <button class="btn btn-ghost" id="ov-recarregar">↻ Recarregar</button>
+      </div>
+      <div class="ov-grid">
+        <div class="card" style="margin-bottom:0;">
+          <h3>1. Escolha as lojas (PDVs)</h3>
+          <p class="cat-hint" style="margin-bottom:10px;">A arte própria da loja tem prioridade; se ela não tiver, vale a arte “Todas as lojas”. Sem nenhuma das duas, o PDV usa a arte padrão instalada no aplicativo.</p>
+          <label class="ov-todas"><input type="checkbox" id="ov-todas"> Todas as lojas (inclui lojas novas)</label>
+          <div class="ov-lojas" id="ov-lojas"></div>
+          <div class="ov-help" id="ov-selecao-info">Nenhuma loja selecionada.</div>
+        </div>
+        <div class="card" style="margin-bottom:0;">
+          <h3>2. Envie as artes</h3>
+          <p class="cat-hint" style="margin-bottom:10px;">Use PNG com transparência. A prévia é uma amostra reduzida; o PDV aplica a arte real na impressão.</p>
+          <div class="ov-artes">
+            <div class="ov-card">
+              <div class="ov-prev">
+                <img id="ov-img-10x15" alt="Prévia do overlay 10x15">
+                <span class="ov-prev-cap" id="ov-prev-10x15">10x15</span>
+              </div>
+              <div class="ov-drop">
+                <label class="form-label" for="ov-file-10x15">Overlay 10x15 · 1864 × 1228 px</label>
+                <input type="file" id="ov-file-10x15" accept="image/png">
+                <a class="ov-download" href="overlays/default-10x15.png" download="overlay-10x15-1864x1228.png">Baixar modelo PNG</a>
+              </div>
+              <div class="ov-status" id="ov-status-10x15"></div>
+            </div>
+            <div class="ov-card">
+              <div class="ov-prev">
+                <img id="ov-img-15x20" alt="Prévia do overlay 15x20">
+                <span class="ov-prev-cap" id="ov-prev-15x20">15x20</span>
+              </div>
+              <div class="ov-drop">
+                <label class="form-label" for="ov-file-15x20">Overlay 15x20 · 2422 × 1864 px</label>
+                <input type="file" id="ov-file-15x20" accept="image/png">
+                <a class="ov-download" href="overlays/default-15x20.png" download="overlay-15x20-2422x1864.png">Baixar modelo PNG</a>
+              </div>
+              <div class="ov-status" id="ov-status-15x20"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <div class="ov-actions">
+          <button class="btn btn-primary" id="ov-salvar" disabled>Salvar overlay nos selecionados</button>
+          <button class="btn btn-ghost" id="ov-resetar" disabled>Restaurar padrão nos selecionados</button>
+        </div>
+        <div class="alert-item info" style="margin-top:14px;">
+          <span class="alert-ico">💡</span>
+          <div class="alert-body">
+            <div class="a-title">Como funciona</div>
+            <div class="a-sub">A loja pode ter uma arte própria para cada tamanho. “Todas as lojas” serve de fallback para quem não tem arte própria (e para lojas novas). Restaurar o padrão remove a arte daquele tamanho, voltando para a global ou para a padrão do app. Dimensões erradas são recusadas para evitar foto cortada ou esticada.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /content -->
 </div><!-- /main -->
 </div><!-- /app -->
@@ -992,7 +1083,7 @@ function healthPing(){
 // ——— NAVEGAÇÃO ———
 var titles = {
   dashboard:'Dashboard', lojas:'Lojas', equipe:'Colaboradores', ranking:'Ranking',
-  precos:'Catálogo de produtos',
+  precos:'Catálogo de produtos', overlays:'Overlay das fotos',
   financeiro:'Financeiro', fluxo:'Fluxo de Caixa',
   estoque:'Estoque'
 };
@@ -1016,6 +1107,7 @@ function goScreen(name){
   if(name==='lojas') renderLojas();
   if(name==='equipe') renderEquipe();
   if(name==='precos') renderPrecos();
+  if(name==='overlays') ovCarregar();
   if(name==='financeiro') renderFinanc();
   if(name==='fluxo') renderFluxo();
   if(name==='estoque') renderEstoque();
@@ -3663,6 +3755,305 @@ $('#btn-recargar-precos').addEventListener('click', renderPrecos);
 $('#cat-add-tamanho').addEventListener('click', function(){ abrirNovoCatalogo('tamanho'); });
 $('#cat-add-extra').addEventListener('click', function(){ abrirNovoCatalogo('extra'); });
 $('#cat-add-combo').addEventListener('click', function(){ abrirNovoCatalogo('combo'); });
+
+// ——— OVERLAY DAS FOTOS (arte PNG por loja/PDV) ———
+var OV_DIMS = { '10x15':{w:1864,h:1228}, '15x20':{w:2422,h:1864} };
+var OV_TIPOS = ['10x15','15x20'];
+var ov = { carregado:false, carregando:false, lojas:[], raw:{}, sel:{}, todas:false, pending:{} };
+
+function ovSelecionadas(){
+  return Object.keys(ov.sel).filter(function(id){ return ov.sel[id]; });
+}
+function ovNomeLoja(id){
+  var all = ov.lojas.length ? ov.lojas : (state.lojas||[]);
+  for(var i=0;i<all.length;i++){ if(all[i].id===id) return all[i].nome || id; }
+  return id;
+}
+function ovMetaEfetiva(lojaId, tipo){
+  if(lojaId!=='__global' && ov.raw[lojaId] && ov.raw[lojaId][tipo]){
+    return { meta:ov.raw[lojaId][tipo], scope:'loja' };
+  }
+  if(ov.raw['__global'] && ov.raw['__global'][tipo]){
+    return { meta:ov.raw['__global'][tipo], scope:'global' };
+  }
+  return null;
+}
+function ovPreviewAlvo(){
+  if(ov.todas) return '__global';
+  var ids = ovSelecionadas();
+  return ids.length ? ids[0] : '__global';
+}
+function ovStatusPill(id, tipo){
+  var own = ov.raw[id] && ov.raw[id][tipo];
+  var global = ov.raw['__global'] && ov.raw['__global'][tipo];
+  if(own) return '<span class="pill pill-green">'+tipo+' loja</span>';
+  if(global) return '<span class="pill pill-slate">'+tipo+' global</span>';
+  return '<span class="pill pill-amber">'+tipo+' padrão</span>';
+}
+function ovRenderLojas(){
+  var box = $('#ov-lojas');
+  if(!box) return;
+  if(!ov.lojas.length){
+    box.innerHTML = '<div class="ov-help" style="padding:12px;">Nenhuma loja cadastrada. Você ainda pode definir a arte global em “Todas as lojas”.</div>';
+    return;
+  }
+  box.innerHTML = ov.lojas.map(function(l){
+    var checked = ov.todas || !!ov.sel[l.id];
+    return '<label class="ov-loja-row">'+
+      '<input type="checkbox" class="ov-loja-check" value="'+escAttr(l.id)+'"'+(checked?' checked':'')+(ov.todas?' disabled':'')+'>'+
+      '<span class="ov-loja-nome">'+esc(l.nome||l.id)+(l.pdv?'<small>'+esc(l.pdv)+'</small>':'')+'</span>'+
+      '<span class="ov-badges">'+ovStatusPill(l.id,'10x15')+ovStatusPill(l.id,'15x20')+'</span>'+
+    '</label>';
+  }).join('');
+}
+function ovAtualizarSelecaoInfo(){
+  var el = $('#ov-selecao-info');
+  if(!el) return;
+  if(ov.todas){
+    el.textContent = 'Aplicando em todas as lojas (inclui lojas novas).';
+    return;
+  }
+  var ids = ovSelecionadas();
+  if(!ids.length){
+    el.textContent = 'Nenhuma loja selecionada. A prévia mostra a arte global ou a padrão.';
+    return;
+  }
+  var nomes = ids.slice(0,3).map(ovNomeLoja);
+  var txt = 'Selecionada'+(ids.length>1?'s':'')+': '+nomes.join(', ');
+  if(ids.length>3) txt += ' e mais '+(ids.length-3);
+  if(ids.length>1) txt += ' · prévia da primeira';
+  el.textContent = txt;
+}
+function ovAtualizarPreview(){
+  OV_TIPOS.forEach(function(tipo){
+    var img = $('#ov-img-'+tipo);
+    var cap = $('#ov-prev-'+tipo);
+    if(!img || !cap) return;
+    img.onerror = function(){
+      img.onerror = null;
+      img.src = 'overlays/default-'+tipo+'.png';
+      cap.textContent = 'Padrão do app (arte indisponível) · '+OV_DIMS[tipo].w+' × '+OV_DIMS[tipo].h+' px';
+    };
+    var p = ov.pending[tipo];
+    if(p){
+      img.src = p.dataUrl;
+      cap.textContent = 'Nova arte · '+p.w+' × '+p.h+' px';
+      return;
+    }
+    var alvo = ovPreviewAlvo();
+    var e = ovMetaEfetiva(alvo, tipo);
+    if(e){
+      img.src = api+'?action=overlays.image&lojaId='+encodeURIComponent(alvo)+'&tipo='+encodeURIComponent(tipo)+'&v='+encodeURIComponent(e.meta.hash||'');
+      var onde = e.scope==='loja' ? ('loja '+ovNomeLoja(alvo)) : 'todas as lojas';
+      cap.textContent = 'Atual ('+onde+') · '+(e.meta.width||OV_DIMS[tipo].w)+' × '+(e.meta.height||OV_DIMS[tipo].h)+' px';
+    } else {
+      img.src = 'overlays/default-'+tipo+'.png';
+      cap.textContent = 'Padrão do app · '+OV_DIMS[tipo].w+' × '+OV_DIMS[tipo].h+' px';
+    }
+  });
+}
+function ovAtualizarBotoes(){
+  var alvos = ov.todas ? 1 : ovSelecionadas().length;
+  var temNova = OV_TIPOS.some(function(t){ return !!ov.pending[t]; });
+  var invalida = OV_TIPOS.some(function(t){ return ov.pending[t] && !ov.pending[t].ratioOk; });
+  var salvar = $('#ov-salvar');
+  var resetar = $('#ov-resetar');
+  if(salvar) salvar.disabled = !alvos || !temNova || invalida;
+  if(resetar) resetar.disabled = !alvos;
+}
+function ovRender(){
+  var salvar = $('#ov-salvar');
+  var resetar = $('#ov-resetar');
+  if(salvar) salvar.textContent = ov.todas ? 'Salvar overlay global' : 'Salvar overlay nos selecionados';
+  if(resetar) resetar.textContent = ov.todas ? 'Restaurar arte global' : 'Restaurar padrão nos selecionados';
+  ovRenderLojas();
+  ovAtualizarSelecaoInfo();
+  ovAtualizarPreview();
+  ovAtualizarBotoes();
+}
+async function ovCarregar(){
+  if(ov.carregando) return;
+  ov.carregando = true;
+  var btn = $('#ov-recarregar');
+  if(btn) btn.disabled = true;
+  try {
+    var res = await call('overlays.list', {});
+    if(!res || !res.ok) throw new Error((res&&res.error)||'falha ao carregar');
+    ov.lojas = Array.isArray(res.lojas) ? res.lojas : [];
+    ov.raw = (res.overlays && typeof res.overlays==='object') ? res.overlays : {};
+    var ids = {};
+    ov.lojas.forEach(function(l){ ids[l.id] = true; });
+    Object.keys(ov.sel).forEach(function(id){ if(!ids[id]) delete ov.sel[id]; });
+    ov.carregado = true;
+    ovRender();
+  } catch(e) {
+    toast('Falha ao carregar overlays: '+(e&&e.message?e.message:e), true);
+  } finally {
+    ov.carregando = false;
+    if(btn) btn.disabled = false;
+  }
+}
+function ovLerArquivo(tipo, file){
+  var exp = OV_DIMS[tipo];
+  var status = $('#ov-status-'+tipo);
+  var input = $('#ov-file-'+tipo);
+  if(!file){
+    ov.pending[tipo] = null;
+    if(status) status.textContent = '';
+    if(input) input.value = '';
+    ovAtualizarPreview();
+    ovAtualizarBotoes();
+    return;
+  }
+  if(file.type!=='image/png' && !/\.png$/i.test(file.name||'')){
+    ov.pending[tipo] = null;
+    if(input) input.value = '';
+    if(status) status.textContent = '';
+    toast('Selecione um arquivo PNG.', true);
+    ovAtualizarPreview();
+    ovAtualizarBotoes();
+    return;
+  }
+  if(file.size > 5*1024*1024){
+    ov.pending[tipo] = null;
+    if(input) input.value = '';
+    if(status) status.textContent = '';
+    toast('PNG muito grande (máx. 5 MB).', true);
+    ovAtualizarPreview();
+    ovAtualizarBotoes();
+    return;
+  }
+  var fr = new FileReader();
+  fr.onload = function(){
+    var dataUrl = String(fr.result||'');
+    var im = new Image();
+    im.onload = function(){
+      var w = im.naturalWidth, h = im.naturalHeight;
+      var ratioOk = h>0 && Math.abs((w/h)-(exp.w/exp.h)) <= 0.02;
+      ov.pending[tipo] = { dataUrl:dataUrl, w:w, h:h, ratioOk:ratioOk };
+      if(status){
+        if(!ratioOk){
+          status.innerHTML = '<span style="color:var(--red-400)">Proporção incorreta: '+w+' × '+h+' px. Use '+exp.w+' × '+exp.h+' px ('+(exp.w/exp.h).toFixed(2)+':1).</span>';
+        } else if(w!==exp.w || h!==exp.h){
+          status.innerHTML = '<span style="color:var(--amber-500)">Proporção ok, mas o recomendado é '+exp.w+' × '+exp.h+' px (300 DPI).</span>';
+        } else {
+          status.innerHTML = '<span style="color:var(--green-500)">Tamanho correto: '+w+' × '+h+' px.</span>';
+        }
+      }
+      ovAtualizarPreview();
+      ovAtualizarBotoes();
+    };
+    im.onerror = function(){
+      ov.pending[tipo] = null;
+      if(input) input.value = '';
+      if(status) status.textContent = '';
+      toast('Não foi possível ler o PNG.', true);
+      ovAtualizarPreview();
+      ovAtualizarBotoes();
+    };
+    im.src = dataUrl;
+  };
+  fr.onerror = function(){
+    ov.pending[tipo] = null;
+    if(input) input.value = '';
+    if(status) status.textContent = '';
+    toast('Não foi possível ler o arquivo.', true);
+    ovAtualizarPreview();
+    ovAtualizarBotoes();
+  };
+  fr.readAsDataURL(file);
+}
+async function ovSalvar(){
+  var alvos = ov.todas ? ['__global'] : ovSelecionadas();
+  if(!alvos.length){ toast('Selecione ao menos uma loja/PDV.', true); return; }
+  var enviar = {};
+  OV_TIPOS.forEach(function(t){ if(ov.pending[t]) enviar[t] = ov.pending[t].dataUrl; });
+  if(!Object.keys(enviar).length){ toast('Escolha ao menos uma arte PNG.', true); return; }
+  var btn = $('#ov-salvar');
+  btn.disabled = true;
+  btn.textContent = 'Salvando…';
+  try {
+    var res = await call('overlays.save', { lojas:alvos, overlays:enviar });
+    if(!res || !res.ok) throw new Error((res&&res.error)||'falha ao salvar');
+    ov.raw = (res.overlays && typeof res.overlays==='object') ? res.overlays : ov.raw;
+    OV_TIPOS.forEach(function(t){
+      ov.pending[t] = null;
+      var f = $('#ov-file-'+t); if(f) f.value = '';
+      var s = $('#ov-status-'+t); if(s) s.textContent = '';
+    });
+    toast('Overlay salvo. O PDV aplica em até 60s.');
+    ovRender();
+  } catch(e) {
+    toast('Erro ao salvar: '+(e&&e.message?e.message:e), true);
+  } finally {
+    btn.textContent = ov.todas ? 'Salvar overlay global' : 'Salvar overlay nos selecionados';
+    ovAtualizarBotoes();
+  }
+}
+function ovRestaurar(){
+  var alvos = ov.todas ? ['__global'] : ovSelecionadas();
+  if(!alvos.length){ toast('Selecione ao menos uma loja/PDV.', true); return; }
+  var onde = ov.todas ? 'todas as lojas' : (alvos.length===1 ? ('a loja '+ovNomeLoja(alvos[0])) : (alvos.length+' lojas'));
+  var titulo = ov.todas ? 'Restaurar arte global?' : 'Restaurar padrão?';
+  var rotulo = ov.todas ? 'Restaurar arte global' : 'Restaurar padrão';
+  var explica = ov.todas
+    ? 'Remove a arte global usada como fallback pelas lojas que não têm arte própria. As lojas com arte própria continuam com a delas; sem a global, o PDV usa a arte padrão do aplicativo.'
+    : 'Remove a arte própria de <b style="color:var(--cream-100);">'+esc(onde)+'</b> no 10x15 e no 15x20. Se houver uma arte global, ela passa a valer; senão, o PDV volta para a arte padrão do aplicativo.';
+  openPortalModal(
+    '<h3 style="margin:0 0 10px;font-family:Fraunces,serif;font-weight:400;color:var(--gold-100);">'+titulo+'</h3>'+
+    '<p style="font-size:12.5px;line-height:1.6;color:var(--slate-400);margin:0 0 16px;">'+explica+'</p>'+
+    '<div style="display:flex;justify-content:flex-end;gap:9px;">'+
+      '<button class="btn btn-ghost" id="ov-reset-cancelar">Cancelar</button>'+
+      '<button class="btn btn-primary" id="ov-reset-confirmar">'+rotulo+'</button>'+
+    '</div>'
+  );
+  $('#ov-reset-cancelar').addEventListener('click', closePortalModal);
+  $('#ov-reset-confirmar').addEventListener('click', async function(){
+    var b = this;
+    b.disabled = true;
+    b.textContent = 'Restaurando…';
+    try {
+      var res = await call('overlays.save', { lojas:alvos, overlays:{ '10x15':null, '15x20':null } });
+      if(!res || !res.ok) throw new Error((res&&res.error)||'falha ao restaurar');
+      ov.raw = (res.overlays && typeof res.overlays==='object') ? res.overlays : ov.raw;
+      OV_TIPOS.forEach(function(t){
+        ov.pending[t] = null;
+        var f = $('#ov-file-'+t); if(f) f.value = '';
+        var s = $('#ov-status-'+t); if(s) s.textContent = '';
+      });
+      closePortalModal();
+      toast((ov.todas ? 'Arte global restaurada.' : 'Padrão restaurado.') + ' O PDV aplica em até 60s.');
+      ovRender();
+    } catch(e) {
+      toast('Erro ao restaurar: '+(e&&e.message?e.message:e), true);
+      b.disabled = false;
+      b.textContent = rotulo;
+    }
+  });
+}
+$('#ov-lojas').addEventListener('change', function(e){
+  var cb = e.target.closest('.ov-loja-check');
+  if(!cb) return;
+  if(cb.checked) ov.sel[cb.value] = true;
+  else delete ov.sel[cb.value];
+  ovAtualizarSelecaoInfo();
+  ovAtualizarPreview();
+  ovAtualizarBotoes();
+});
+$('#ov-todas').addEventListener('change', function(){
+  ov.todas = !!this.checked;
+  if(ov.todas) ov.sel = {};
+  ovRender();
+});
+OV_TIPOS.forEach(function(tipo){
+  $('#ov-file-'+tipo).addEventListener('change', function(){
+    var f = this.files && this.files[0];
+    ovLerArquivo(tipo, f || null);
+  });
+});
+$('#ov-salvar').addEventListener('click', ovSalvar);
+$('#ov-resetar').addEventListener('click', ovRestaurar);
+$('#ov-recarregar').addEventListener('click', ovCarregar);
 
 // ——— NOTIFICAÇÕES UI ———
 $('#btn-notif').addEventListener('click', function(e){

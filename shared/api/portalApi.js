@@ -105,6 +105,38 @@ const portalApi = {
     return post('precos', { lojaId: portalApi.lojaIdAtivo() });
   },
 
+  // Metadados dos overlays efetivos da loja (10x15 / 15x20). O binário é
+  // baixado por `overlayImage` e guardado como data URL para a impressão
+  // continuar funcionando mesmo se o portal cair depois.
+  overlays() {
+    return post('overlays', { lojaId: portalApi.lojaIdAtivo() });
+  },
+
+  async overlayImage(tipo, hash = '') {
+    const lojaId = portalApi.lojaIdAtivo();
+    const ctrl = typeof window !== 'undefined' && window.AbortController ? new window.AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 10000) : null;
+    try {
+      const res = await fetch(
+        `${PORTAL_URL}?action=overlays.image&lojaId=${encodeURIComponent(lojaId)}&tipo=${encodeURIComponent(tipo)}&v=${encodeURIComponent(hash)}`,
+        { signal: ctrl ? ctrl.signal : undefined }
+      );
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      if (!blob || !/^image\//.test(blob.type || '')) return null;
+      return await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result || ''));
+        fr.onerror = () => reject(new Error('Falha ao ler overlay'));
+        fr.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  },
+
   // Sobe o snapshot diário de vendas da loja (vendas.push). O portal só aceita
   // de máquina PAREADA com a loja (machineId do pareamento). Depois de
   // emparelhado, o PDV envia a cada evento de venda/fechamento de caixa e em

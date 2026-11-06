@@ -35,7 +35,10 @@ if (-not ($fields.host -and $fields.user -and $fields.pass -and $fields.folder))
     Write-Error 'Campos insuficientes em credencial.txt'
 }
 
-$files = @('index.html', 'api.php', 'config.php', 'admin.html', '.htaccess', 'data/.htaccess')
+$files = @(
+    'index.html', 'api.php', 'config.php', 'admin.html', '.htaccess', 'data/.htaccess',
+    'overlays/default-10x15.png', 'overlays/default-15x20.png'
+)
 $folder = $fields.folder.TrimStart('/').TrimEnd('/')
 $failed = $false
 

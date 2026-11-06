@@ -37,6 +37,12 @@ mb_internal_encoding('UTF-8');
 
 define('APP_VERSION', '1.0.0');
 
+// Dimensões oficiais das artes de overlay (300 DPI). 10x15 = 4x6in, 15x20 = 6x8in.
+define('OVERLAY_TIPOS', [
+    '10x15' => ['w' => 1864, 'h' => 1228],
+    '15x20' => ['w' => 2422, 'h' => 1864],
+]);
+
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
@@ -115,6 +121,50 @@ function saveJson(string $name, array $data): bool
         fclose($fp);
     }
     return $ok;
+}
+
+function overlayDir(): string
+{
+    $dir = APP_DATA_DIR . '/overlays';
+    if (!is_dir($dir)) @mkdir($dir, 0775, true);
+    return $dir;
+}
+
+function overlayMeta(): array
+{
+    $meta = loadJson('overlays.json', []);
+    return is_array($meta) ? $meta : [];
+}
+
+function overlayApagarArquivo(array $meta, string $lojaId, string $tipo): array
+{
+    $file = (string) ($meta[$lojaId][$tipo]['file'] ?? '');
+    if ($file !== '') {
+        $path = overlayDir() . '/' . basename($file);
+        if (is_file($path)) @unlink($path);
+    }
+    unset($meta[$lojaId][$tipo]);
+    if (isset($meta[$lojaId]) && (!is_array($meta[$lojaId]) || count($meta[$lojaId]) === 0)) {
+        unset($meta[$lojaId]);
+    }
+    return $meta;
+}
+
+function overlayEfetivo(array $meta, string $lojaId): array
+{
+    $out = [];
+    foreach (OVERLAY_TIPOS as $tipo => $dim) {
+        $item = null;
+        if ($lojaId !== '' && $lojaId !== '__global' && isset($meta[$lojaId][$tipo]['file'])) {
+            $item = $meta[$lojaId][$tipo];
+            $item['scope'] = 'loja';
+        } elseif (isset($meta['__global'][$tipo]['file'])) {
+            $item = $meta['__global'][$tipo];
+            $item['scope'] = 'global';
+        }
+        $out[$tipo] = $item;
+    }
+    return $out;
 }
 
 function FUNCOES(): array
@@ -1277,6 +1327,63 @@ try {
             ]);
         }
 
+        // Metadados dos overlays efetivos do PDV (próprio da loja > global > padrão).
+        // Não expõe caminhos de arquivo, apenas hash/dimensões para cache e prévia.
+        case 'overlays': {
+            $lojaId = trim((string) ($p['lojaId'] ?? ''));
+            $ef = overlayEfetivo(overlayMeta(), $lojaId);
+            $out = [];
+            foreach (OVERLAY_TIPOS as $tipo => $dim) {
+                $it = $ef[$tipo] ?? null;
+                $out[$tipo] = $it ? [
+                    'hash' => (string) ($it['hash'] ?? ''),
+                    'width' => (int) ($it['width'] ?? 0),
+                    'height' => (int) ($it['height'] ?? 0),
+                    'updatedAt' => (string) ($it['updatedAt'] ?? ''),
+                    'scope' => (string) ($it['scope'] ?? ''),
+                ] : null;
+            }
+            respond(['ok' => true, 'lojaId' => $lojaId, 'overlays' => $out]);
+        }
+
+        // Binário do overlay. Público (o PDV não manda token), mas o arquivo fica
+        // fora do docroot via data/.htaccess; só sai por este endpoint com hash.
+        case 'overlays.image': {
+            $lojaId = trim((string) ($p['lojaId'] ?? ''));
+            $tipo = trim((string) ($p['tipo'] ?? ''));
+            if (!isset(OVERLAY_TIPOS[$tipo])) {
+                http_response_code(404);
+                exit;
+            }
+            $ef = overlayEfetivo(overlayMeta(), $lojaId);
+            $it = $ef[$tipo] ?? null;
+            $path = '';
+            if ($it && (string) ($it['file'] ?? '') !== '') {
+                $path = overlayDir() . '/' . basename((string) $it['file']);
+            }
+            if ($path === '' || !is_file($path)) {
+                $path = __DIR__ . '/overlays/default-' . $tipo . '.png';
+                $it = null;
+            }
+            if (!is_file($path)) {
+                http_response_code(404);
+                exit;
+            }
+            header('Content-Type: image/png');
+            header('Cache-Control: public, max-age=31536000, immutable');
+            if ($it && (string) ($it['hash'] ?? '') !== '') {
+                $etag = '"' . (string) $it['hash'] . '"';
+                header('ETag: ' . $etag);
+                if (($_SERVER['HTTP_IF_NONE_MATCH'] ?? '') === $etag) {
+                    http_response_code(304);
+                    exit;
+                }
+            }
+            header('Content-Length: ' . (string) filesize($path));
+            readfile($path);
+            exit;
+        }
+
         // Snapshot diário de vendas enviado pelo PDV (só aceita de máquina
         // pareada com a loja — protege contra push de dados de fora).
         case 'vendas.push': {
@@ -1978,6 +2085,14 @@ try {
                 }
                 if (count($filtradas) !== count($linhas)) saveJson($arquivo, $filtradas);
             }
+            // Overlays da loja saem junto (a arte global continua valendo).
+            $metaOverlays = overlayMeta();
+            if (isset($metaOverlays[$id])) {
+                foreach (array_keys(OVERLAY_TIPOS) as $tipoOverlay) {
+                    $metaOverlays = overlayApagarArquivo($metaOverlays, $id, $tipoOverlay);
+                }
+                saveJson('overlays.json', $metaOverlays);
+            }
             // Catálogo/preços NÃO são apagados: são fixos para todos os PDVs
             // (o ajuste por loja é opcional e o padrão global continua valendo).
             respond(['ok' => true, 'removidos' => $removidos]);
@@ -2024,6 +2139,17 @@ try {
                 }
                 if (count($filtradas) !== count($linhas)) saveJson($arquivo, $filtradas);
             }
+            // Overlays de lojas que não existem mais também são órfãos.
+            $metaOverlays = overlayMeta();
+            $mudouOverlays = false;
+            foreach (array_keys($metaOverlays) as $lidOverlay) {
+                if ($lidOverlay === '__global' || isset($ids[$lidOverlay])) continue;
+                foreach (array_keys(OVERLAY_TIPOS) as $tipoOverlay) {
+                    $metaOverlays = overlayApagarArquivo($metaOverlays, $lidOverlay, $tipoOverlay);
+                }
+                $mudouOverlays = true;
+            }
+            if ($mudouOverlays) saveJson('overlays.json', $metaOverlays);
             // Catálogo/preços ficam intactos (padrão global + ajustes por loja).
             respond(['ok' => true, 'removidos' => $removidos]);
         }
@@ -2108,6 +2234,95 @@ try {
             $dados = loadJson('precos.json', []);
             if (!is_array($dados)) $dados = [];
             respond(['ok' => true, 'precos' => $dados, 'defaults' => PRECOS_DEFAULT, 'catalogoDefault' => CATALOGO_DEFAULT]);
+        }
+
+        case 'overlays.list': {
+            $db = db();
+            $lojas = [];
+            foreach (($db['lojas'] ?? []) as $l) {
+                $lojas[] = [
+                    'id' => (string) ($l['id'] ?? ''),
+                    'nome' => (string) ($l['nome'] ?? ''),
+                    'pdv' => (string) ($l['pdv'] ?? ''),
+                    'ativo' => !empty($l['ativo']),
+                ];
+            }
+            respond([
+                'ok' => true,
+                'lojas' => $lojas,
+                'overlays' => overlayMeta(),
+                'dimensoes' => OVERLAY_TIPOS,
+            ]);
+        }
+
+        case 'overlays.save': {
+            $lojas = $p['lojas'] ?? [];
+            if (!is_array($lojas)) $lojas = [$lojas];
+            $lojas = array_map(function ($v) {
+                return is_scalar($v) ? trim((string) $v) : '';
+            }, $lojas);
+            $lojas = array_values(array_unique(array_filter($lojas, function ($v) {
+                return $v !== '';
+            })));
+            $overlays = $p['overlays'] ?? [];
+            if (!is_array($overlays) || count($lojas) === 0) {
+                fail('DADOS_INCOMPLETOS: informe lojas e overlays');
+            }
+            $ids = lojaIdsExistentes(db());
+            foreach ($lojas as $lid) {
+                if ($lid !== '__global' && !isset($ids[$lid])) {
+                    fail('LOJA_INVALIDA: ' . $lid, 400);
+                }
+            }
+            $meta = overlayMeta();
+            foreach ($lojas as $lid) {
+                foreach (array_keys(OVERLAY_TIPOS) as $tipo) {
+                    if (!array_key_exists($tipo, $overlays)) continue;
+                    $val = $overlays[$tipo];
+                    if ($val === null || $val === '') {
+                        $meta = overlayApagarArquivo($meta, $lid, $tipo);
+                        continue;
+                    }
+                    if (!is_string($val) || !preg_match('#^data:image/png;base64,#i', $val)) {
+                        fail('ENVIE_PNG: a arte precisa ser um PNG');
+                    }
+                    $comma = strpos($val, ',');
+                    $b64 = $comma === false ? '' : substr($val, $comma + 1);
+                    $bytes = base64_decode($b64, true);
+                    if ($bytes === false || $bytes === '') fail('ARQUIVO_INVALIDO');
+                    if (strlen($bytes) > 5 * 1024 * 1024) fail('ARQUIVO_MUITO_GRANDE: maximo 5 MB');
+                    $info = @getimagesizefromstring($bytes);
+                    if (!$info || (int) ($info[2] ?? 0) !== IMAGETYPE_PNG) {
+                        fail('ENVIE_PNG: a arte precisa ser um PNG');
+                    }
+                    $w = (int) ($info[0] ?? 0);
+                    $h = (int) ($info[1] ?? 0);
+                    $dim = OVERLAY_TIPOS[$tipo];
+                    if ($w <= 0 || $h <= 0 || abs(($w / $h) - ($dim['w'] / $dim['h'])) > 0.02) {
+                        fail('PROPORCAO_INVALIDA: use ' . $dim['w'] . 'x' . $dim['h'] . ' px');
+                    }
+                    $hash = hash('sha256', $bytes);
+                    $file = substr(hash('sha256', $lid . '|' . $tipo), 0, 10) . '-' . $tipo . '-' . substr($hash, 0, 12) . '.png';
+                    $dir = overlayDir();
+                    if (@file_put_contents($dir . '/' . $file, $bytes) === false) {
+                        fail('FALHA_AO_SALVAR', 500);
+                    }
+                    $anterior = (string) ($meta[$lid][$tipo]['file'] ?? '');
+                    if ($anterior !== '' && $anterior !== $file) {
+                        $old = $dir . '/' . basename($anterior);
+                        if (is_file($old)) @unlink($old);
+                    }
+                    $meta[$lid][$tipo] = [
+                        'file' => $file,
+                        'hash' => $hash,
+                        'width' => $w,
+                        'height' => $h,
+                        'updatedAt' => gmdate('c'),
+                    ];
+                }
+            }
+            if (!saveJson('overlays.json', $meta)) fail('FALHA_AO_SALVAR', 500);
+            respond(['ok' => true, 'overlays' => $meta]);
         }
 
         case 'vendas.resumo': {
