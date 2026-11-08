@@ -838,7 +838,16 @@ select.form-input{appearance:none;}
           <label style="font-size:11px;color:var(--slate-400);">Loja<br>
             <select id="estoque-loja-select" style="min-width:220px;margin-top:4px;"></select>
           </label>
+          <label style="font-size:11px;color:var(--slate-400);">Controle no PDV<br>
+            <select id="estoque-modo-select" style="min-width:170px;margin-top:4px;">
+              <option value="warn">Avisar, mas vender</option>
+              <option value="off">Desligado</option>
+              <option value="block">Bloquear no saldo zero</option>
+            </select>
+          </label>
           <button class="btn btn-primary" id="estoque-salvar">Salvar contagem</button>
+          <button class="btn" id="estoque-modo-salvar">Salvar controle</button>
+          <button class="btn" id="estoque-resetar">Resetar contadores dos PDVs</button>
           <span id="estoque-produtos-msg" style="font-size:11px;color:var(--slate-400);"></span>
         </div>
         <div style="max-height:430px;overflow-y:auto;">
@@ -1010,7 +1019,7 @@ var FN_LABEL = { vendedor:'Vendedora', fotografo:'Fotógrafo', admin:'Administra
 var FN_ACESSO = { vendedor:'Kiosk', fotografo:'Kiosk', admin:'Total', gerente:'Regional' };
 
 var token = sessionStorage.getItem('nac_token') || '';
-var state = { currentUser:null, lojas:[], usuarios:[], pendentes:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje', estoqueLoja:'', estoqueItens:[], _estoqueAt:0 };
+var state = { currentUser:null, lojas:[], usuarios:[], pendentes:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje', estoqueLoja:'', estoqueItens:[], estoqueConfig:null, _estoqueAt:0 };
 var notificacoes = [];
 var currentScreen = 'dashboard';
 
@@ -1339,8 +1348,9 @@ function getEstoque(lojaId){
     state._estoqueLojaKey = key;
     state._estoqueProm = call('estoque.list', {lojaId:lojaId}).then(function(res){
       state.estoqueItens = (res && res.ok && Array.isArray(res.itens)) ? res.itens : [];
+      state.estoqueConfig = (res && res.ok && res.config) ? res.config : null;
       return state.estoqueItens;
-    }).catch(function(){ state.estoqueItens = []; return state.estoqueItens; });
+    }).catch(function(){ state.estoqueItens = []; state.estoqueConfig = null; return state.estoqueItens; });
   }
   return state._estoqueProm;
 }
@@ -2320,6 +2330,9 @@ function efetivoTxt(v){
     ? ' <span class="pill pill-amber" style="font-size:9px;padding:1px 5px;">contador</span>'
     : '');
 }
+function estoqueModoLabel(m){
+  return m === 'off' ? 'Desligado' : (m === 'block' ? 'Bloquear no saldo zero' : 'Avisar, mas vender');
+}
 async function renderEstoqueProdutos(){
   var sel = $('#estoque-loja-select');
   if(!sel) return;
@@ -2359,32 +2372,72 @@ async function renderEstoqueProdutos(){
     });
   }
 
+  var selModo = $('#estoque-modo-select');
+  var btnModo = $('#estoque-modo-salvar');
+  var btnReset = $('#estoque-resetar');
+  if(btnModo && !btnModo.dataset.bound){
+    btnModo.dataset.bound = '1';
+    btnModo.addEventListener('click', async function(){
+      var lojaId = state.estoqueLoja;
+      if(!lojaId){ toast('Cadastre uma loja antes de configurar o estoque.'); return; }
+      btnModo.disabled = true;
+      var res = await call('estoque.config.save', { lojaId: lojaId, modo: selModo ? selModo.value : 'warn' });
+      btnModo.disabled = false;
+      if(!res || !res.ok){ toast('Falha ao salvar controle: '+((res&&res.error)||'erro')); return; }
+      toast('Controle do PDV: '+estoqueModoLabel((res.config&&res.config.modo)||'warn'));
+      state._estoqueAt = 0;
+      renderEstoqueProdutos();
+    });
+  }
+  if(btnReset && !btnReset.dataset.bound){
+    btnReset.dataset.bound = '1';
+    btnReset.addEventListener('click', async function(){
+      var lojaId = state.estoqueLoja;
+      if(!lojaId){ toast('Cadastre uma loja antes de resetar.'); return; }
+      if(!confirm('Resetar os contadores locais dos PDVs desta loja? A contagem do portal não será apagada.')) return;
+      btnReset.disabled = true;
+      var res = await call('estoque.config.save', { lojaId: lojaId, modo: selModo ? selModo.value : 'warn', reset: true });
+      btnReset.disabled = false;
+      if(!res || !res.ok){ toast('Falha ao resetar: '+((res&&res.error)||'erro')); return; }
+      toast('Reset gerado. Os PDVs limpam o contador antigo no próximo sync.');
+      state._estoqueAt = 0;
+      renderEstoqueProdutos();
+    });
+  }
+
   var tb = $('#estoque-produtos');
   var msg = $('#estoque-produtos-msg');
   if(!state.estoqueLoja){
-    tb.innerHTML = '<tr><td class="empty" colspan="7">Cadastre uma loja para controlar o estoque.</td></tr>';
+    tb.innerHTML = '<tr><td class="empty" colspan="9">Cadastre uma loja para controlar o estoque.</td></tr>';
     if(msg) msg.textContent = '';
     return;
   }
   await getEstoque(state.estoqueLoja);
   var itens = state.estoqueItens || [];
-  if(msg) msg.textContent = itens.filter(function(i){ return i.configurado; }).length + ' de ' + itens.length + ' produto(s) com contagem registrada';
+  var cfg = state.estoqueConfig || {modo:'warn'};
+  if(selModo) selModo.value = cfg.modo || 'warn';
+  if(msg) msg.textContent = itens.filter(function(i){ return i.configurado; }).length + ' de ' + itens.length + ' produto(s) com contagem registrada' +
+    ' • Controle: ' + estoqueModoLabel(cfg.modo || 'warn') +
+    (cfg.resetEm ? ' • Último reset: ' + fmtDt(cfg.resetEm) : '');
   if(!itens.length){
-    tb.innerHTML = '<tr><td class="empty" colspan="7">Nenhum produto no catálogo desta loja.</td></tr>';
+    tb.innerHTML = '<tr><td class="empty" colspan="9">Nenhum produto no catálogo desta loja.</td></tr>';
     return;
   }
-  tb.innerHTML = '<tr><th>Produto</th><th>Grupo</th><th>Preço</th><th>Contagem</th><th>Vendidos</th><th>Saldo</th><th>Contado em</th></tr>' +
+  tb.innerHTML = '<tr><th>Produto</th><th>Grupo</th><th>Preço</th><th>Contagem</th><th>Vendidos desde</th><th>Vendidos total</th><th>Saldo</th><th>Última venda</th><th>Contado em</th></tr>' +
     itens.map(function(it){
       var saldo = Number(it.saldo)||0;
       var cls = saldo < 0 ? 'pill-red' : (saldo <= 5 ? 'pill-amber' : 'pill-green');
       var contado = it.contadoEm ? fmtDt(it.contadoEm) : 'nunca contado';
+      var ultima = it.ultimaVendaEm ? fmtDt(it.ultimaVendaEm) : '—';
       return '<tr>'+
         '<td><b>'+esc(it.label||it.produtoId)+'</b><div style="font-size:10px;color:var(--slate-500);">'+esc(it.produtoId)+'</div></td>'+
         '<td style="font-size:11px;color:var(--slate-400);">'+esc(it.grupo||'')+'</td>'+
         '<td>'+fmtBRL(toNum(it.preco))+'</td>'+
         '<td><input data-produto="'+escAttr(it.produtoId)+'" type="number" min="0" step="1" value="'+(Number(it.quantidade)||0)+'" style="width:90px;padding:5px 7px;border:1px solid var(--slate-700);border-radius:6px;background:var(--ink-900);color:var(--slate-100);"></td>'+
         '<td>'+(Number(it.vendidos)||0)+'</td>'+
+        '<td>'+(Number(it.vendidosTotal)||0)+'</td>'+
         '<td><span class="pill '+cls+'">'+saldo+'</span></td>'+
+        '<td style="font-size:11px;color:var(--slate-400);">'+esc(ultima)+'</td>'+
         '<td style="font-size:11px;color:var(--slate-400);">'+esc(contado)+'</td></tr>';
     }).join('');
 }

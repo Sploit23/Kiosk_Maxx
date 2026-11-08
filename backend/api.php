@@ -12,7 +12,7 @@
  *   usuarios.delete, admin.changePassword, admin.limparDados,
  *   catalogo.get, precos.save, precos.list, vendas.resumo, pedido.list, auditoria.list,
  *   despesas.list, despesas.save, despesas.delete,
- *   estoque.list, estoque.save, parametros.get, parametros.save
+ *   estoque.list, estoque.save, estoque.config.save, parametros.get, parametros.save
  *
  * Pareamento sem copiar código (fluxo principal):
  *   1) o PDV registra `pendentes[kioskCode]` via kiosk.seed com nome do local,
@@ -1005,6 +1005,96 @@ function catalogoEfetivo(string $lojaId): array
     return $cat;
 }
 
+// Modos do estoque físico no PDV:
+//   off  = não mostra nem bloqueia
+//   warn = mostra aviso, mas permite vender (padrão)
+//   block = bloqueia quando o saldo real do portal fica abaixo da quantidade
+const ESTOQUE_MODOS = ['off', 'warn', 'block'];
+
+function estoqueConfigLoja(string $lojaId): array
+{
+    $all = loadJson('estoque-config.json', []);
+    if (!is_array($all)) $all = [];
+    $cfg = (isset($all[$lojaId]) && is_array($all[$lojaId])) ? $all[$lojaId] : [];
+    $modo = strtolower(trim((string) ($cfg['modo'] ?? 'warn')));
+    if (!in_array($modo, ESTOQUE_MODOS, true)) $modo = 'warn';
+    return [
+        'modo' => $modo,
+        'resetToken' => (string) ($cfg['resetToken'] ?? ''),
+        'resetEm' => (string) ($cfg['resetEm'] ?? ''),
+    ];
+}
+
+// Calcula o estoque de produtos de UMA loja. A contagem física é o ponto de
+// partida; as vendas pagas/impressas desde `contadoEm` reduzem o saldo. Quando
+// ainda não existe contagem, `vendidos` mostra TODAS as vendas do produto (em
+// vez de zero), para o portal não esconder o movimento real do PDV.
+function estoqueLojaCalculado(string $lojaId): array
+{
+    $cat = catalogoEfetivo($lojaId);
+    $estoque = loadJson('estoque.json', []);
+    if (!is_array($estoque)) $estoque = [];
+    $atual = (isset($estoque[$lojaId]) && is_array($estoque[$lojaId])) ? $estoque[$lojaId] : [];
+
+    $vendas = [];
+    $pedidos = loadJson('pedidos.json', []);
+    if (!is_array($pedidos)) $pedidos = [];
+    foreach ($pedidos as $pedido) {
+        if (!is_array($pedido) || ($pedido['lojaId'] ?? '') !== $lojaId) continue;
+        $status = strtolower(trim((string) ($pedido['status'] ?? '')));
+        if (!in_array($status, ['pago', 'impresso'], true)) continue;
+        $quando = strtotime((string) ($pedido['pagoEm'] ?? '')) ?: strtotime((string) ($pedido['criadoEm'] ?? ''));
+        if (!$quando) $quando = 0;
+        foreach ((array) ($pedido['itens'] ?? []) as $item) {
+            if (!is_array($item)) continue;
+            $tipo = trim((string) ($item['tipo'] ?? ''));
+            if (!in_array($tipo, ['tamanho', 'extra'], true)) continue;
+            $produtoId = trim((string) ($item['produtoId'] ?? ''));
+            $qtd = max(0, (int) ($item['qtd'] ?? 0));
+            if ($produtoId === '' || $qtd <= 0) continue;
+            $vendas[] = ['produtoId' => $produtoId, 'qtd' => $qtd, 'ts' => $quando];
+        }
+    }
+
+    $saida = [];
+    foreach (['tamanhos' => 'Tamanhos', 'extras' => 'Extras'] as $grupo => $grupoLabel) {
+        foreach ((array) ($cat[$grupo] ?? []) as $produto) {
+            if (!is_array($produto) || !empty($produto['digital'])) continue;
+            $produtoId = trim((string) ($produto['id'] ?? ''));
+            if ($produtoId === '') continue;
+            $registro = (isset($atual[$produtoId]) && is_array($atual[$produtoId])) ? $atual[$produtoId] : null;
+            $quantidade = $registro !== null ? (int) ($registro['quantidade'] ?? 0) : 0;
+            $contadoEm = $registro !== null ? (string) ($registro['contadoEm'] ?? '') : '';
+            $limite = $contadoEm !== '' ? strtotime($contadoEm) : false;
+            $vendidos = 0;
+            $vendidosTotal = 0;
+            $ultimaVendaTs = 0;
+            foreach ($vendas as $venda) {
+                if ($venda['produtoId'] !== $produtoId) continue;
+                $vendidosTotal += $venda['qtd'];
+                if ($venda['ts'] > $ultimaVendaTs) $ultimaVendaTs = (int) $venda['ts'];
+                if ($limite && $venda['ts'] >= $limite) $vendidos += $venda['qtd'];
+            }
+            // Sem contagem registrada, mostra o vendido total em vez de 0.
+            if (!$limite) $vendidos = $vendidosTotal;
+            $saida[] = [
+                'produtoId' => $produtoId,
+                'label' => trim((string) ($produto['label'] ?? $produtoId)),
+                'grupo' => $grupoLabel,
+                'preco' => round((float) ($produto['preco'] ?? 0), 2),
+                'quantidade' => $quantidade,
+                'contadoEm' => $contadoEm,
+                'vendidos' => $vendidos,
+                'vendidosTotal' => $vendidosTotal,
+                'saldo' => $quantidade - $vendidos,
+                'ultimaVendaEm' => $ultimaVendaTs ? gmdate('c', $ultimaVendaTs) : '',
+                'configurado' => $contadoEm !== '',
+            ];
+        }
+    }
+    return ['itens' => $saida, 'config' => estoqueConfigLoja($lojaId)];
+}
+
 // Nome do PDV que aparece no portal: usa o valor enviado pelo PDV; se vier
 // vazio (o PDV sempre envia a chave, mesmo sem configurar pdvNome), cai no
 // nome 'pdv' da loja cadastrada no portal em vez de gravar string vazia.
@@ -1319,11 +1409,18 @@ try {
 
         case 'precos': {
             $lojaId = trim((string) ($p['lojaId'] ?? ''));
+            $calc = estoqueLojaCalculado($lojaId);
             respond([
                 'ok' => true,
                 'lojaId' => $lojaId,
                 'precos' => precosEfetivos($lojaId),
                 'catalogo' => catalogoEfetivo($lojaId),
+                'estoque' => [
+                    'modo' => $calc['config']['modo'],
+                    'resetToken' => $calc['config']['resetToken'],
+                    'resetEm' => $calc['config']['resetEm'],
+                    'itens' => $calc['itens'],
+                ],
             ]);
         }
 
@@ -1564,7 +1661,7 @@ try {
                 'numero' => (string) ($pd['numero'] ?? $id),
                 'lojaId' => $loja['id'],
                 'lojaNome' => lojaNomePush($p, $loja),
-                'pdvNome' => resolverPdvNome($pd['pdvNome'], $loja),
+                'pdvNome' => resolverPdvNome($pd['pdvNome'] ?? '', $loja),
                 'machineId' => trim((string) ($p['machineId'] ?? '')),
                 'data' => trim((string) ($pd['data'] ?? '')),
                 'criadoEm' => (string) ($pd['criadoEm'] ?? gmdate('c')),
@@ -2427,62 +2524,13 @@ try {
             $lojaId = trim((string) ($p['lojaId'] ?? ''));
             $ids = lojaIdsExistentes(db());
             if ($lojaId === '' || !isset($ids[$lojaId])) fail('LOJA_INVALIDA');
-
-            $cat = catalogoEfetivo($lojaId);
-            $estoque = loadJson('estoque.json', []);
-            if (!is_array($estoque)) $estoque = [];
-            $atual = (isset($estoque[$lojaId]) && is_array($estoque[$lojaId])) ? $estoque[$lojaId] : [];
-
-            $vendas = [];
-            $pedidos = loadJson('pedidos.json', []);
-            if (!is_array($pedidos)) $pedidos = [];
-            foreach ($pedidos as $pedido) {
-                if (!is_array($pedido) || ($pedido['lojaId'] ?? '') !== $lojaId) continue;
-                $status = strtolower(trim((string) ($pedido['status'] ?? '')));
-                if (!in_array($status, ['pago', 'impresso'], true)) continue;
-                $quando = strtotime((string) ($pedido['pagoEm'] ?? '')) ?: strtotime((string) ($pedido['criadoEm'] ?? ''));
-                if (!$quando) continue;
-                foreach ((array) ($pedido['itens'] ?? []) as $item) {
-                    if (!is_array($item)) continue;
-                    $tipo = trim((string) ($item['tipo'] ?? ''));
-                    if (!in_array($tipo, ['tamanho', 'extra'], true)) continue;
-                    $produtoId = trim((string) ($item['produtoId'] ?? ''));
-                    $qtd = max(0, (int) ($item['qtd'] ?? 0));
-                    if ($produtoId === '' || $qtd <= 0) continue;
-                    $vendas[] = ['produtoId' => $produtoId, 'qtd' => $qtd, 'ts' => $quando];
-                }
-            }
-
-            $saida = [];
-            foreach (['tamanhos' => 'Tamanhos', 'extras' => 'Extras'] as $grupo => $grupoLabel) {
-                foreach ((array) ($cat[$grupo] ?? []) as $produto) {
-                    if (!is_array($produto) || !empty($produto['digital'])) continue;
-                    $produtoId = trim((string) ($produto['id'] ?? ''));
-                    if ($produtoId === '') continue;
-                    $registro = (isset($atual[$produtoId]) && is_array($atual[$produtoId])) ? $atual[$produtoId] : null;
-                    $quantidade = $registro !== null ? (int) ($registro['quantidade'] ?? 0) : 0;
-                    $contadoEm = $registro !== null ? (string) ($registro['contadoEm'] ?? '') : '';
-                    $limite = $contadoEm !== '' ? strtotime($contadoEm) : false;
-                    $vendidos = 0;
-                    if ($limite) {
-                        foreach ($vendas as $venda) {
-                            if ($venda['produtoId'] === $produtoId && $venda['ts'] >= $limite) $vendidos += $venda['qtd'];
-                        }
-                    }
-                    $saida[] = [
-                        'produtoId' => $produtoId,
-                        'label' => trim((string) ($produto['label'] ?? $produtoId)),
-                        'grupo' => $grupoLabel,
-                        'preco' => round((float) ($produto['preco'] ?? 0), 2),
-                        'quantidade' => $quantidade,
-                        'contadoEm' => $contadoEm,
-                        'vendidos' => $vendidos,
-                        'saldo' => $quantidade - $vendidos,
-                        'configurado' => $contadoEm !== '',
-                    ];
-                }
-            }
-            respond(['ok' => true, 'lojaId' => $lojaId, 'itens' => $saida]);
+            $calc = estoqueLojaCalculado($lojaId);
+            respond([
+                'ok' => true,
+                'lojaId' => $lojaId,
+                'itens' => $calc['itens'],
+                'config' => $calc['config'],
+            ]);
         }
 
         case 'estoque.save': {
@@ -2526,6 +2574,34 @@ try {
             }
             if (!saveJson('estoque.json', $estoque)) fail('FALHA_AO_SALVAR', 500);
             respond(['ok' => true, 'salvos' => $salvos]);
+        }
+
+        // Configuração do controle de estoque físico por loja + reset remoto
+        // dos contadores locais dos PDVs (token muda -> PDV limpa o legado).
+        case 'estoque.config.save': {
+            $lojaId = trim((string) ($p['lojaId'] ?? ''));
+            $ids = lojaIdsExistentes(db());
+            if ($lojaId === '' || !isset($ids[$lojaId])) fail('LOJA_INVALIDA');
+            $modo = strtolower(trim((string) ($p['modo'] ?? 'warn')));
+            if (!in_array($modo, ESTOQUE_MODOS, true)) fail('MODO_INVALIDO');
+
+            $all = loadJson('estoque-config.json', []);
+            if (!is_array($all)) $all = [];
+            if (!isset($all[$lojaId]) || !is_array($all[$lojaId])) $all[$lojaId] = [];
+            $cfg = $all[$lojaId];
+            $cfg['modo'] = $modo;
+            if (!empty($p['reset'])) {
+                $cfg['resetToken'] = bin2hex(random_bytes(8));
+                $cfg['resetEm'] = gmdate('c');
+            }
+            $cfg['atualizadoEm'] = gmdate('c');
+            $all[$lojaId] = $cfg;
+            if (!saveJson('estoque-config.json', $all)) fail('FALHA_AO_SALVAR', 500);
+            respond([
+                'ok' => true,
+                'config' => estoqueConfigLoja($lojaId),
+                'reset' => !empty($p['reset']),
+            ]);
         }
 
         // Parâmetros globais (DRE/estoque) — leitura e gravação pela gestão.
