@@ -36,8 +36,16 @@ contextBridge.exposeInMainWorld('natal', {
     logoTexto: config.logoTexto || 'SHOPPING PALLADIUM',
   }),
   selectFolder: () => ipcRenderer.invoke('natal:selectFolder'),
-  saveConfig: (partial) => ipcRenderer.invoke('natal:saveConfig', partial),
-  printBematech: (texto) => ipcRenderer.invoke('natal:printBematech', { texto }),
+  listPrinters: () => ipcRenderer.invoke('natal:listPrinters'),
+  saveConfig: async (partial) => {
+    const res = await ipcRenderer.invoke('natal:saveConfig', partial);
+    if (res && res.success) config = { ...config, ...(partial || {}) };
+    return res;
+  },
+  printBematech: (payload) => ipcRenderer.invoke(
+    'natal:printBematech',
+    typeof payload === 'string' ? { texto: payload } : (payload || {})
+  ),
   restartImporter: () => ipcRenderer.invoke('natal:restartImporter'),
   importerInfo: () => ipcRenderer.invoke('natal:importerInfo'),
   openImporterLog: () => ipcRenderer.invoke('natal:openImporterLog'),

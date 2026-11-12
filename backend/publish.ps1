@@ -37,7 +37,9 @@ if (-not ($fields.host -and $fields.user -and $fields.pass -and $fields.folder))
 
 $files = @(
     'index.html', 'api.php', 'config.php', 'admin.html', '.htaccess', 'data/.htaccess',
-    'overlays/default-10x15.png', 'overlays/default-15x20.png'
+    'overlays/default-10x15.png', 'overlays/default-15x20.png',
+    'manifest.webmanifest', 'sw.js',
+    'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png'
 )
 $folder = $fields.folder.TrimStart('/').TrimEnd('/')
 $failed = $false

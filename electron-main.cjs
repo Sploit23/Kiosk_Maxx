@@ -1,7 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 const net = require('net');
 const http = require('http');
 const crypto = require('crypto');
@@ -34,6 +33,11 @@ function getSidecarPath() {
   if (app.isPackaged) return path.join(process.resourcesPath, 'natal-core.cjs');
   return path.join(__dirname, 'sidecar', 'natal-core.cjs');
 }
+function getThermalPrintPath() {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'thermal-print.cjs');
+  return path.join(__dirname, 'sidecar', 'thermal-print.cjs');
+}
+const { printBematech } = require(getThermalPrintPath());
 
 // ─── Config (fora do pacote em produção) ────────────────────
 const CONFIG_PATH = app.isPackaged
@@ -146,6 +150,7 @@ async function spawnSidecar(sidecarPath, expectedBuild) {
     ELECTRON_RUN_AS_NODE: '1',
     NATAL_DATA_DIR: app.getPath('userData'),
     NATAL_PHOTOS_FOLDER: (config.photosFolder || '').trim(),
+    NATAL_WEB_DIR: app.isPackaged ? getResourcePath('web') : path.join(__dirname, 'dist'),
   };
   sidecarProcess = spawn(process.execPath, [sidecarPath], { env, windowsHide: true });
   sidecarProcess.stdout.on('data', (d) => console.log(`[Sidecar] ${d}`.trim()));
@@ -633,7 +638,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1366,
     height: 900,
-    fullscreen: true,
+    fullscreen: false,
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
@@ -642,6 +647,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
     },
   });
+  mainWindow.maximize();
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173/vendas.html');
   } else {
@@ -657,12 +663,27 @@ function createWindow() {
     if (lv === 'error' || lv === 'warn') console.error(`[renderer:${lv}] ${line}`);
     else console.log(`[renderer] ${line}`);
   });
+  /* Se a atualização já baixou (ou está baixando) quando a tela recarrega,
+     reavisa o renderer para o aviso de "Instalar agora" continuar aparecendo. */
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (updateReady) enviarUpdate('natal:updateReady', { version: updateVersion });
+    else if (updateDownload) enviarUpdate('natal:updateAvailable', { version: updateVersion, downloading: true });
+  });
+  mainWindow.on('focus', () => { performAutoUpdate(); });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 // ─── 4. IPC: fullscreen ─────────────────────────────────────
 ipcMain.handle('natal:exitFullscreen', () => {
-  if (mainWindow?.isFullScreen()) mainWindow.setFullScreen(false);
+  if (!mainWindow) return;
+  if (mainWindow.isFullScreen()) {
+    mainWindow.once('leave-full-screen', () => {
+      if (mainWindow && !mainWindow.isMaximized()) mainWindow.maximize();
+    });
+    mainWindow.setFullScreen(false);
+  } else if (!mainWindow.isMaximized()) {
+    mainWindow.maximize();
+  }
 });
 ipcMain.handle('natal:enterFullscreen', () => {
   if (mainWindow && !mainWindow.isFullScreen()) mainWindow.setFullScreen(true);
@@ -671,6 +692,22 @@ ipcMain.handle('natal:appVersion', () => app.getVersion());
 
 // ─── IPC: config + folder picker ──────────────────────────────
 ipcMain.handle('natal:getConfig', () => ({ ...config }));
+ipcMain.handle('natal:listPrinters', async (event) => {
+  try {
+    const printers = await event.sender.getPrintersAsync();
+    return {
+      success: true,
+      printers: (printers || []).map((p) => ({
+        name: p.name,
+        displayName: p.displayName || p.name,
+        isDefault: !!p.isDefault,
+        status: p.status,
+      })),
+    };
+  } catch (e) {
+    return { success: false, error: e.message, printers: [] };
+  }
+});
 ipcMain.handle('natal:selectFolder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory', 'createDirectory'],
@@ -780,22 +817,47 @@ ipcMain.handle('natal:printGuia', async (event, { html, printerName } = {}) => {
 
 // ─── 6. Auto-update (electron-updater, feed do Render) ──────
 const { autoUpdater } = require('electron-updater');
-autoUpdater.autoDownload = false;
+autoUpdater.autoDownload = false;   // baixamos aqui para controlar o estado/UI
 autoUpdater.autoInstallOnAppQuit = false;
 
 let isIdle = false;
 let isUpdating = false;
 let updateReady = false;
+let updateVersion = '';
+let updateDownload = null;      // Promise do download em andamento
+let ultimaVerificacao = 0;
+const UPDATE_CHECK_MS = 5 * 60 * 1000; // procura sozinho a cada 5 min (qualquer tela)
+const UPDATE_CHECK_MIN_MS = 60 * 1000; // nao repete antes de 1 min (foco/reabertura)
+
+function enviarUpdate(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+function baixarAtualizacao() {
+  if (!updateDownload) {
+    updateDownload = autoUpdater.downloadUpdate()
+      .then(() => { updateReady = true; return true; })
+      .catch((e) => { updateDownload = null; throw e; });
+  }
+  return updateDownload;
+}
 
 ipcMain.on('natal:setIdle', (_, idle) => { isIdle = idle; });
 
+ipcMain.handle('natal:updateStatus', () => ({
+  ready: updateReady,
+  version: updateVersion,
+  downloading: !!updateDownload && !updateReady,
+  checking: isUpdating,
+}));
+
 ipcMain.handle('natal:updateApp', async (event) => {
   try {
-    if (isUpdating) return { success: false, error: 'Verificacao em andamento' };
     if (updateReady) {
-      setTimeout(() => autoUpdater.quitAndInstall(false, true), 1500);
+      setTimeout(() => autoUpdater.quitAndInstall(false, true), 1200);
       return { success: true, installing: true };
     }
+    if (isUpdating) return { success: true, downloading: true };
     isUpdating = true;
     event.sender.send('natal:updateProgress', 'Verificando atualizacoes...');
     const result = await autoUpdater.checkForUpdates();
@@ -805,10 +867,12 @@ ipcMain.handle('natal:updateApp', async (event) => {
       event.sender.send('natal:updateProgress', 'App ja esta atualizado');
       return { success: true, upToDate: true };
     }
-    event.sender.send('natal:updateProgress', `Baixando v${result.updateInfo.version}...`);
-    await autoUpdater.downloadUpdate();
+    updateVersion = result.updateInfo.version;
+    event.sender.send('natal:updateProgress', `Baixando v${updateVersion}...`);
+    await baixarAtualizacao();
     updateReady = true;
     isUpdating = false;
+    event.sender.send('natal:updateProgress', 'Atualizacao pronta. Reiniciando...');
     setTimeout(() => autoUpdater.quitAndInstall(false, true), 1500);
     return { success: true, installing: true };
   } catch (e) {
@@ -819,23 +883,36 @@ ipcMain.handle('natal:updateApp', async (event) => {
 
 autoUpdater.on('update-available', (info) => {
   isUpdating = false;
-  if (mainWindow) mainWindow.webContents.send('natal:updateAvailable', { version: info.version });
+  updateVersion = (info && info.version) || updateVersion;
+  enviarUpdate('natal:updateAvailable', { version: updateVersion, downloading: true });
+  /* baixa em segundo plano: quando terminar, avisa o renderer em qualquer tela */
+  baixarAtualizacao().catch((e) => {
+    updateDownload = null;
+    enviarUpdate('natal:updateError', { error: e.message || 'Falha ao baixar atualizacao' });
+  });
 });
 autoUpdater.on('update-not-available', () => {
   isUpdating = false;
-  if (mainWindow) mainWindow.webContents.send('natal:updateNotAvailable');
+  enviarUpdate('natal:updateNotAvailable', { version: updateVersion });
 });
-autoUpdater.on('update-downloaded', () => {
+autoUpdater.on('update-downloaded', (info) => {
   updateReady = true;
   isUpdating = false;
+  if (info && info.version) updateVersion = info.version;
+  enviarUpdate('natal:updateReady', { version: updateVersion });
 });
 autoUpdater.on('error', (err) => {
   console.error('[AutoUpdate] Erro:', err.message);
   isUpdating = false;
+  updateDownload = null;
+  enviarUpdate('natal:updateError', { error: err.message });
 });
 
-function performAutoUpdate() {
-  if (isUpdating || updateReady) return;
+async function performAutoUpdate(force = false) {
+  if (updateReady || isUpdating || (updateDownload && !updateReady)) return;
+  const agora = Date.now();
+  if (!force && agora - ultimaVerificacao < UPDATE_CHECK_MIN_MS) return;
+  ultimaVerificacao = agora;
   isUpdating = true;
   autoUpdater.checkForUpdates().catch((e) => {
     console.error('[AutoUpdate] Erro:', e.message);
@@ -852,150 +929,32 @@ app.whenReady().then(() => {
   setTimeout(startImporter, 4000);
   startImporterWatchdog();
 
-  setTimeout(() => {
-    performAutoUpdate();
-    setInterval(() => { if (isIdle && !isUpdating) performAutoUpdate(); }, 60000);
-  }, 10000);
+  /* Verifica no boot e continua procurando sozinho em qualquer tela (intervalo
+     curto; performAutoUpdate aplica o throttle de 1 min). */
+  setTimeout(() => performAutoUpdate(true), 10000);
+  setInterval(() => performAutoUpdate(true), UPDATE_CHECK_MS);
 
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
 
 
-ipcMain.handle('natal:printBematech', async (_event, { texto, qr, titulo, subtitulo, telefone, qrLabel } = {}) => {
-  let qrPath = '';
-  const limparQr = () => { if (qrPath) { try { fs.unlinkSync(qrPath); } catch(e){} qrPath = ''; } };
+ipcMain.handle('natal:printBematech', async (_event, payload = {}) => {
   try {
-    const txt = typeof texto === 'string' ? texto : '';
-    if (!txt || txt.trim().length === 0) {
-      try { logMain('[ImpressaoBematech] texto vazio'); } catch(e){}
-      return { success: false, error: 'texto vazio' };
+    const printerName = String(payload.printerName || config.thermalPrinterName || '').trim();
+    if (!printerName) {
+      return { success: false, error: 'IMPRESSORA_TERMICA_NAO_CONFIGURADA' };
     }
-    // QR opcional (data URL ou base64 puro) — vira um GIF temporário que o GDI
-    // desenha abaixo do texto. Sem isso a Bematech só imprimiria texto puro.
-    if (typeof qr === 'string' && qr.trim()) {
-      const m = qr.match(/^data:image\/[a-z0-9.+-]+;base64,(.+)$/i);
-      const b64qr = (m ? m[1] : qr).replace(/\s+/g, '');
-      const buf = Buffer.from(b64qr, 'base64');
-      if (buf.length > 0) {
-        qrPath = path.join(os.tmpdir(), 'natal-qr-' + process.pid + '-' + Date.now() + '.gif');
-        fs.writeFileSync(qrPath, buf);
-      }
-    }
-    const printer = 'MP-4200 TH';
-    const safe = txt.replace(/\r/g, '').replace(/\n/g, '\r\n');
-    const b64 = Buffer.from(safe + '\r\n\r\n\r\n', 'utf8').toString('base64');
-    const tituloB64 = Buffer.from(typeof titulo === 'string' ? titulo : '', 'utf8').toString('base64');
-    const subtituloB64 = Buffer.from(typeof subtitulo === 'string' ? subtitulo : '', 'utf8').toString('base64');
-    const telefoneB64 = Buffer.from(typeof telefone === 'string' ? telefone : '', 'utf8').toString('base64');
-    const qrLabelB64 = Buffer.from(typeof qrLabel === 'string' ? qrLabel : '', 'utf8').toString('base64');
-    const qrSafe = qrPath.replace(/'/g, "''");
-    const ps = [
-      "Add-Type -AssemblyName System.Drawing;",
-      "Add-Type -AssemblyName System.Windows.Forms;",
-      "$pd = New-Object System.Drawing.Printing.PrintDocument;",
-      "$pd.PrinterSettings.PrinterName = '" + printer.replace(/'/g, "''") + "';",
-      "$pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins -ArgumentList 0,0,0,0;",
-      "$txt = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + b64 + "'));",
-      "$titulo = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + tituloB64 + "'));",
-      "$subtitulo = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + subtituloB64 + "'));",
-      "$telefone = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + telefoneB64 + "'));",
-      "$qrLabel = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + qrLabelB64 + "'));",
-      "$qrPath = '" + qrSafe + "';",
-      "$pd.Add_PrintPage({ param($s,$ev);",
-      "  $ev.Graphics.PageUnit = [System.Drawing.GraphicsUnit]::Pixel;",
-      "  $base = 12.0;",
-      "  $f0 = New-Object System.Drawing.Font('Courier New', $base, [System.Drawing.FontStyle]::Bold);",
-      "  $widest = (($txt -split ([Environment]::NewLine)) | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum;",
-      "  $sample = ('0' * [int]$widest);",
-      "  $sz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $sample, $f0);",
-      "  $visW = $ev.Graphics.VisibleClipBounds.Width;",
-      "  $target = $visW * 0.98; if ($target -le 0) { $target = 576 };",
-      "  $scale = 1.0; if ($sz.Width -gt 0) { $scale = $target / $sz.Width };",
-      "  $newSize = [float]([Math]::Max(8.0, [Math]::Min(30.0, $base * $scale)));",
-      "  $f = New-Object System.Drawing.Font('Courier New', $newSize, [System.Drawing.FontStyle]::Bold);",
-      "  $lineH = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, 'Ag', $f).Height;",
-      "  $y = 4.0;",
-      "  if ($titulo) {",
-      "    $hSize = [float]($newSize * 1.7);",
-      "    $hFont = New-Object System.Drawing.Font('Arial', $hSize, [System.Drawing.FontStyle]::Bold);",
-      "    $hSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $titulo, $hFont);",
-      "    if ($hSz.Width -gt $target) {",
-      "      $hSize = [float]($hSize * ($target / $hSz.Width));",
-      "      $hFont = New-Object System.Drawing.Font('Arial', $hSize, [System.Drawing.FontStyle]::Bold);",
-      "      $hSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $titulo, $hFont);",
-      "    }",
-      "    $hx = [Math]::Max(0, ($visW - $hSz.Width) / 2);",
-      "    [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $titulo, $hFont, ([System.Drawing.Point]::new([int]$hx, [int]$y)), [System.Drawing.Color]::Black);",
-      "    $y += $hSz.Height + 2;",
-      "    if ($subtitulo) {",
-      "      $sSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $subtitulo, $f);",
-      "      $sx = [Math]::Max(0, ($visW - $sSz.Width) / 2);",
-      "      [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $subtitulo, $f, ([System.Drawing.Point]::new([int]$sx, [int]$y)), [System.Drawing.Color]::Black);",
-      "      $y += $sSz.Height + 6;",
-      "    }",
-      "    if ($telefone) {",
-      "      $tSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $telefone, $f);",
-      "      $tx = [Math]::Max(0, ($visW - $tSz.Width) / 2);",
-      "      [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $telefone, $f, ([System.Drawing.Point]::new([int]$tx, [int]$y)), [System.Drawing.Color]::Black);",
-      "      $y += $tSz.Height + 6;",
-      "    }",
-      "    $sepLine = ('-' * 32);",
-      "    [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $sepLine, $f, ([System.Drawing.Point]::new(4, [int]$y)), [System.Drawing.Color]::Black);",
-      "    $y += $lineH + 2;",
-      "  }",
-      "  [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $txt, $f, ([System.Drawing.Point]::new(4, [int]$y)), [System.Drawing.Color]::Black);",
-      "  if ($qrPath -and (Test-Path -LiteralPath $qrPath)) {",
-      "    try {",
-      "      $img = [System.Drawing.Image]::FromFile($qrPath);",
-      "      $maxW = $visW * 0.8;",
-      "      $iw = [double]$img.Width; $ih = [double]$img.Height;",
-      "      if ($iw -gt $maxW) { $ih = $ih * ($maxW / $iw); $iw = $maxW };",
-      "      $lines = ($txt.TrimEnd() -split ([Environment]::NewLine)).Count;",
-      "      $ty = $y + ($lineH * $lines) + 24;",
-      "      if ($qrLabel) {",
-      "        $qSize = [float]($newSize * 1.35);",
-      "        $qFont = New-Object System.Drawing.Font('Arial', $qSize, [System.Drawing.FontStyle]::Bold);",
-      "        $qSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $qrLabel, $qFont);",
-      "        if ($qSz.Width -gt $target) {",
-      "          $qSize = [float]($qSize * ($target / $qSz.Width));",
-      "          $qFont = New-Object System.Drawing.Font('Arial', $qSize, [System.Drawing.FontStyle]::Bold);",
-      "          $qSz = [System.Windows.Forms.TextRenderer]::MeasureText($ev.Graphics, $qrLabel, $qFont);",
-      "        }",
-      "        $qx = [Math]::Max(0, ($visW - $qSz.Width) / 2);",
-      "        [System.Windows.Forms.TextRenderer]::DrawText($ev.Graphics, $qrLabel, $qFont, ([System.Drawing.Point]::new([int]$qx, [int]$ty)), [System.Drawing.Color]::Black);",
-      "        $ty += $qSz.Height + 6;",
-      "      }",
-      "      $x = ($visW - $iw) / 2;",
-      "      $ev.Graphics.DrawImage($img, [float]$x, [float]$ty, [float]$iw, [float]$ih);",
-      "      $img.Dispose();",
-      "    } catch { }",
-      "  }",
-      "  [Console]::WriteLine('PRINT widest=' + $widest + ' measured=' + $sz.Width + ' target=' + [Math]::Round($target,1) + ' scale=' + [Math]::Round($scale,3) + ' size=' + [Math]::Round($newSize,2) + ' titulo=' + $titulo + ' qrPath=' + $qrPath + ' visW=' + [Math]::Round($visW,1) + ' dpiY=' + $ev.Graphics.DpiY)",
-      "});",
-      "$pd.Print();"
-    ].join('\n');
-    const { spawn } = require('child_process');
-    return await new Promise((resolve) => {
-      try {
-        try { logMain('[ImpressaoBematech] enviando para ' + printer + ' (' + txt.length + ' chars' + (qrPath ? ', com QR' : '') + ')'); } catch(e){}
-        const psp = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], { windowsHide: true });
-        psp.stdout.on('data', (d) => { try { logMain('[ImpressaoBematech] out: ' + String(d).trim()); } catch(e){} });
-        psp.stderr.on('data', (d) => { try { logMain('[ImpressaoBematech] err: ' + String(d).trim()); } catch(e){} });
-        let done = false;
-        const fim = (r) => { if (!done) { done = true; limparQr(); resolve(r); } };
-        const t = setTimeout(() => { try { psp.kill(); } catch(e){} fim({ success: false, error: 'timeout', printer }); }, 20000);
-        psp.on('error', (e) => { clearTimeout(t); try { logMain('[ImpressaoBematech] erro: ' + e.message); } catch(e2){} fim({ success: false, error: e.message, printer }); });
-        psp.on('close', (code) => { clearTimeout(t); if (code === 0) { try { logMain('[ImpressaoBematech] ok'); } catch(e){} fim({ success: true, printer }); } else { try { logMain('[ImpressaoBematech] ps_exit_' + code); } catch(e){} fim({ success: false, error: 'ps_exit_' + code, printer }); } });
-      } catch (e) {
-        try { logMain('[ImpressaoBematech] exc: ' + e.message); } catch(e2){}
-        limparQr();
-        resolve({ success: false, error: e.message, printer });
-      }
-    });
+    const result = await printBematech({ ...payload, printerName });
+    try {
+      logMain('[ImpressaoBematech] ' + (result && result.success ? 'ok' : 'falha')
+        + ' printer=' + printerName
+        + ' doc=' + ((result && result.documentName) || '')
+        + (result && result.error ? ' erro=' + result.error : ''));
+    } catch (e) {}
+    return result;
   } catch (e) {
-    try { logMain('[ImpressaoBematech] exc2: ' + e.message); } catch(e2){}
-    limparQr();
+    try { logMain('[ImpressaoBematech] exc: ' + e.message); } catch (e2) {}
     return { success: false, error: e.message };
   }
 });

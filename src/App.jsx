@@ -129,9 +129,9 @@ export default function App() {
   useEffect(() => {
     connectSSE((evt, data) => {
       if (evt === 'sessao:status' || evt === 'sessao:criada' || evt === 'sessao:concluida') refreshSessoes();
-      if (evt === 'caixa:aberto' || evt === 'caixa:fechado') { refreshCaixa(); portalSync.agendarSnapshotVendas(2500); }
-      if (evt === 'pedido:criado' || evt === 'pedido:pago') refreshSessoes();
-      if (evt === 'pedido:pago') { portalSync.agendarPedidosPortal(800); portalSync.agendarSnapshotVendas(2500); }
+      if (evt === 'caixa:aberto' || evt === 'caixa:fechado' || evt === 'caixa:corrigido') { refreshCaixa(); portalSync.agendarSnapshotVendas(2500); }
+      if (evt === 'pedido:criado' || evt === 'pedido:pago' || evt === 'pedido:atualizado') refreshSessoes();
+      if (evt === 'pedido:pago' || evt === 'pedido:atualizado') { portalSync.agendarPedidosPortal(800); portalSync.agendarSnapshotVendas(2500); }
       if (evt === 'print-start') setPrintState({ current: 0, total: data.total || 0, status: 'starting' });
       if (evt === 'printer:progress') setPrintState((p) => ({ ...(p || {}), current: data.current, total: data.total, status: 'printing' }));
       if (evt === 'print-complete') setPrintState((p) => ({ ...(p || {}), done: true, success: data.success, error: data.error }));

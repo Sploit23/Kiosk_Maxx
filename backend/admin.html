@@ -2,8 +2,16 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Maxx Foto — Portal de Gestão</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#071222">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Maxx Gestão">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,700;1,300&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -112,6 +120,8 @@ button{cursor:pointer;font-family:inherit;}
 .period-tab:hover{color:var(--gold-300);}
 .period-tab.active{background:rgba(212,162,76,.12);border-color:var(--gold-500);color:var(--gold-300);}
 .period-tab:disabled{opacity:.5;cursor:default;}
+#screen-dashboard #dash-dia{width:140px;padding:4px 8px;font-size:11.5px;}
+.fin2-input[type=date]{color-scheme:dark;}
 .grid4-pay{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
 .pay-total-box{background:var(--navy-850);border:1px solid var(--navy-line);border-radius:12px;padding:16px;}
 .pay-total-box .pt-ico{font-size:20px;margin-bottom:6px;}
@@ -293,6 +303,16 @@ select.form-input{appearance:none;}
 .pill-red{background:rgba(193,102,107,.18);color:var(--red-400);}
 .pill-amber{background:rgba(232,168,60,.18);color:var(--amber-500);}
 .pill-slate{background:rgba(74,122,155,.18);color:var(--slate-300);}
+
+/* Toggle global dos relatórios: loja de teste fica oculta por padrão. */
+.test-toggle{
+  display:flex;align-items:center;gap:7px;font-size:11px;color:var(--slate-400);
+  border:1px solid var(--navy-line);border-radius:20px;padding:5px 10px;
+  cursor:pointer;user-select:none;white-space:nowrap;
+}
+.test-toggle input{accent-color:var(--amber-500);margin:0;cursor:pointer;}
+.test-toggle:hover{border-color:var(--amber-500);color:var(--slate-300);}
+@media(max-width:760px){.test-toggle span{display:none;}}
 
 .section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
 .section-head h2{font-family:'Fraunces',serif;font-size:18px;font-weight:300;color:var(--gold-100);}
@@ -521,6 +541,100 @@ select.form-input{appearance:none;}
   .fin2-row{display:block;padding:8px;}
   .fin2-track{margin-top:7px;height:25px;}
 }
+
+/* ——— NOTAS / CONFERÊNCIA ——— */
+.screen-note{
+  font-size:11.5px;line-height:1.55;color:var(--slate-400);
+  background:var(--navy-850);border:1px solid var(--navy-line);
+  border-radius:8px;padding:9px 12px;margin:0 0 12px;
+}
+.screen-note b{color:var(--gold-300);font-weight:600;}
+.screen-note .warn{color:var(--amber-500);}
+.screen-note .bad{color:var(--red-400);}
+.table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+
+/* ——— MOBILE / PWA ——— */
+.sb-toggle,.sb-backdrop{display:none;}
+.tb-left{display:flex;align-items:center;gap:10px;min-width:0;}
+.tb-left h2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.install-btn{display:none;width:100%;margin-top:9px;padding:8px 10px;font-size:11.5px;}
+#app{height:100vh;height:100dvh;}
+
+@media(max-width:900px){
+  .sidebar{
+    position:fixed;left:0;top:0;bottom:0;z-index:110;
+    width:min(286px,84vw);min-width:0;max-width:84vw;
+    transform:translateX(-104%);transition:transform .22s ease;
+    box-shadow:18px 0 42px rgba(0,0,0,.5);
+  }
+  body.nav-open .sidebar{transform:translateX(0);}
+  .sb-backdrop{
+    display:block;position:fixed;inset:0;z-index:100;
+    background:rgba(2,7,14,.64);opacity:0;pointer-events:none;transition:opacity .2s;
+  }
+  body.nav-open .sb-backdrop{opacity:1;pointer-events:auto;}
+  .sb-toggle{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:36px;height:36px;flex:none;border-radius:9px;
+    background:var(--navy-850);border:1px solid var(--navy-line);
+    color:var(--gold-100);font-size:20px;line-height:1;
+  }
+  .sb-toggle:hover{border-color:var(--gold-500);color:var(--gold-300);}
+  .main{width:100%;min-width:0;}
+  .topbar{
+    height:auto;min-height:calc(54px + env(safe-area-inset-top));
+    padding:env(safe-area-inset-top) 13px 0;
+    gap:8px;
+  }
+  .topbar h2{font-size:16px;}
+  .topbar .tb-right{gap:8px;flex:none;}
+  #tb-clock{display:none;}
+  .btn-user-chip,#btn-user-chip{max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .notif-panel{position:fixed;top:calc(58px + env(safe-area-inset-top));left:10px;right:10px;width:auto;max-height:72vh;}
+  .content{padding:16px 13px calc(32px + env(safe-area-inset-bottom));}
+  .section-head{flex-direction:column;align-items:flex-start;gap:10px;}
+  .section-head .period-tabs{flex-wrap:wrap;}
+  .section-head .btn{font-size:12px;}
+  .kpi-grid{grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
+  .kpi{padding:13px 14px;}
+  .kpi .k-val{font-size:22px;}
+  .grid2,.grid3,.grid4-pay{grid-template-columns:1fr;gap:12px;margin-bottom:12px;}
+  .card{padding:14px;border-radius:10px;margin-bottom:12px;}
+  .card h3{font-size:11px;}
+  .table-wrap{margin:0 -2px;}
+  .table-wrap table{width:max-content;min-width:100%;}
+  .table-wrap th,.table-wrap td{white-space:nowrap;}
+  .donut-row{flex-wrap:wrap;}
+  .donut-legend{min-width:170px;}
+  .form-row-h{flex-wrap:wrap;}
+  .precos-grid{grid-template-columns:1fr;}
+  .cat-box{overflow-x:auto;}
+  .modal-box{max-height:92vh;max-height:92dvh;padding:18px;}
+  .ov-actions .btn{min-width:0;width:100%;}
+  .login-box{width:100%;max-width:calc(100vw - 28px);padding:26px 20px;}
+  .login-box h1{font-size:19px;}
+  .fin2-head-actions{margin-left:0;}
+}
+@media(max-width:520px){
+  .topbar h2{font-size:15px;}
+  .live-badge{display:none;}
+  .kpi .k-val{font-size:24px;}
+  .section-head p{font-size:11.5px;}
+  .screen-note{font-size:11px;}
+  .card{padding:12px;}
+  .period-tab{padding:5px 11px;font-size:11px;}
+  #btn-user-chip{max-width:36vw;font-size:11px;padding:6px 9px;}
+  .notif-btn{padding:6px 9px;}
+}
+@media(max-width:360px){
+  .kpi-grid{grid-template-columns:1fr;}
+}
+@media(max-width:900px){
+  .table-wrap th:first-child,.table-wrap td:first-child{
+    position:sticky;left:0;z-index:2;background:var(--navy-900);
+  }
+  .table-wrap tr:hover td:first-child{background:var(--navy-850);}
+}
 </style>
 </head>
 <body>
@@ -543,7 +657,7 @@ select.form-input{appearance:none;}
 <div id="app" style="display:none;">
 
 <!-- ====== SIDEBAR ====== -->
-<nav class="sidebar">
+<nav class="sidebar" id="sidebar">
   <div class="sb-logo">
     <div class="mark">M</div>
     <div><div class="name">Maxx Foto</div><div class="sub">Portal de Gestão</div></div>
@@ -563,14 +677,22 @@ select.form-input{appearance:none;}
   </div>
   <div class="sb-footer">
     <div class="user"><strong id="footer-user">—</strong><span id="footer-acesso">Acesso total</span></div>
+    <button class="btn btn-ghost install-btn" id="btn-install" type="button">📲 Instalar app</button>
   </div>
 </nav>
+<div class="sb-backdrop" id="sb-backdrop"></div>
 
 <!-- ====== MAIN ====== -->
 <div class="main">
   <div class="topbar">
-    <h2 id="page-title">Dashboard</h2>
+    <div class="tb-left">
+      <button class="sb-toggle" id="btn-menu" type="button" aria-label="Abrir menu" aria-controls="sidebar" aria-expanded="false">☰</button>
+      <h2 id="page-title">Dashboard</h2>
+    </div>
     <div class="tb-right">
+      <label class="test-toggle" title="Mostrar vendas, pedidos e caixas da loja de teste">
+        <input type="checkbox" id="toggle-teste"><span>Mostrar dados de teste</span>
+      </label>
       <div class="live-badge" id="live-badge"><span class="live-dot"></span><span id="live-text">API online</span></div>
       <span id="tb-clock" style="font-family:'JetBrains Mono';font-size:12px;color:var(--slate-400);"></span>
       <div class="notif-wrap">
@@ -591,9 +713,11 @@ select.form-input{appearance:none;}
         <div><h2>Dashboard</h2><p>Status da rede de kiosks · cadastro, vendas e operadores</p></div>
         <div class="period-tabs" id="dash-periodo">
           <button class="period-tab active" data-period="hoje">Hoje</button>
+          <button class="period-tab" data-period="ontem">Ontem</button>
           <button class="period-tab" data-period="7d">7 dias</button>
           <button class="period-tab" data-period="mes">Este mês</button>
           <button class="period-tab" data-period="temporada">Temporada</button>
+          <input class="fin2-input" type="date" id="dash-dia" title="Filtrar um dia específico" style="min-height:29px;">
         </div>
       </div>
       <div class="kpi-grid" id="dash-kpis"></div>
@@ -800,7 +924,7 @@ select.form-input{appearance:none;}
       <div class="section-head">
         <div>
           <h2>Fluxo de Caixa</h2>
-          <p>Entradas dia a dia por loja — fato do dia informado por cada PDV</p>
+          <p>Vendas do dia e conferência de caixa — não é o lucro; para despesas e resultado use Financeiro</p>
         </div>
         <div class="period-tabs" id="fluxo-periodo">
           <button class="period-tab active" data-period="hoje">Hoje</button>
@@ -811,14 +935,17 @@ select.form-input{appearance:none;}
       </div>
       <div class="card">
         <h3>Entradas por dia — período selecionado</h3>
+        <p class="screen-note" id="fluxo-entradas-nota">Fonte: snapshot diário de cada PDV. Se o PDV não enviar o snapshot final do dia, o total pode ficar menor que os pedidos reais.</p>
         <div class="bar-chart" id="fluxo-bars" style="height:90px;"></div>
       </div>
       <div class="card">
         <h3>Detalhamento dia × loja</h3>
+        <p class="screen-note" id="fluxo-tabela-nota">Total = snapshot do PDV. “Último caixa” mostra apenas o caixa mais recente daquele snapshot; um dia pode ter mais de um turno. A conferência oficial é feita na tabela de caixas fechados abaixo.</p>
         <table id="fluxo-tabela"></table>
       </div>
       <div class="card">
-        <h3>Abertura e fechamento de caixa <em style="color:var(--slate-400);font-size:11px;font-weight:400;">(quem abriu/fechou, fundo, conferência e diferença)</em></h3>
+        <h3>Abertura e fechamento de caixa <em style="color:var(--slate-400);font-size:11px;font-weight:400;">(fundo, vendas do sistema, valores declarados e diferença)</em></h3>
+        <p class="screen-note" id="fluxo-caixas-nota">Vendido, Dinheiro, Débito, Crédito e PIX são calculados pelo sistema. <b>Recebido</b> é a soma declarada pelo operador; <b>Esperado</b> = vendas + fundo; <b>Diferença</b> = recebido − esperado. Dinheiro esperado inclui o fundo; cartões/PIX não. <b>Envelope</b> é a sangria e <b>Saldo</b> é o dinheiro declarado menos o envelope. No celular, arraste a tabela para o lado para ver todas as colunas.</p>
         <table id="fluxo-caixas"></table>
       </div>
     </div>
@@ -1019,12 +1146,24 @@ var FN_LABEL = { vendedor:'Vendedora', fotografo:'Fotógrafo', admin:'Administra
 var FN_ACESSO = { vendedor:'Kiosk', fotografo:'Kiosk', admin:'Total', gerente:'Regional' };
 
 var token = sessionStorage.getItem('nac_token') || '';
-var state = { currentUser:null, lojas:[], usuarios:[], pendentes:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje', estoqueLoja:'', estoqueItens:[], estoqueConfig:null, _estoqueAt:0 };
+var state = { currentUser:null, lojas:[], usuarios:[], pendentes:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', vendasDate:'', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje', estoqueLoja:'', estoqueItens:[], estoqueConfig:null, _estoqueAt:0, incluirTeste:false };
 var notificacoes = [];
 var currentScreen = 'dashboard';
 
 var $ = function(s){ return document.querySelector(s); };
 var $$ = function(s){ return Array.prototype.slice.call(document.querySelectorAll(s)); };
+
+function wrapTables(root){
+  var list = (root||document).querySelectorAll('table');
+  Array.prototype.forEach.call(list, function(t){
+    if(t.parentElement && t.parentElement.classList.contains('table-wrap')) return;
+    var w = document.createElement('div');
+    w.className = 'table-wrap';
+    t.parentNode.insertBefore(w, t);
+    w.appendChild(t);
+  });
+}
+wrapTables();
 
 function esc(s){
   return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1039,19 +1178,43 @@ function toast(msg, err){
 }
 function openPortalModal(html){
   $('#modal-box').innerHTML = html;
+  wrapTables($('#modal-box'));
   $('#modal-overlay').classList.add('active');
 }
 function closePortalModal(){ $('#modal-overlay').classList.remove('active'); }
 function ago(t){ return t; }
 
 // ——— API ———
+// Ações de relatório escondem a loja de teste no servidor por padrão; quando o
+// toggle está ligado, mandamos incluirTeste=1 para vê-la.
+var REPORT_ACTIONS = { 'vendas.resumo':1, 'pedido.list':1, 'caixa.list':1, 'despesas.list':1, 'auditoria.list':1 };
 function call(action, data){
   var headers = {'Content-Type':'application/json'};
   if(token) headers['X-Token'] = token;
+  var payload = Object.assign({}, data||{}, {action:action});
+  if(REPORT_ACTIONS[action] && state.incluirTeste) payload.incluirTeste = 1;
   return fetch(api+'?action='+encodeURIComponent(action),{
     method:'POST', headers: headers,
-    body: JSON.stringify(Object.assign({}, data||{}, {action:action}))
+    body: JSON.stringify(payload)
   }).then(function(r){ return r.json(); });
+}
+// Lojas visíveis nos relatórios/seletores: a de teste só aparece com o toggle.
+function lojasVisiveis(){
+  return (state.lojas || []).filter(function(l){ return state.incluirTeste || !l.teste; });
+}
+function setIncluirTeste(on){
+  state.incluirTeste = !!on;
+  state._vendasProm = null; state._vendasAt = 0;
+  state._pedProm = null; state._pedAt = 0;
+  state._despProm = null; state._despAt = 0;
+  state._estoqueAt = 0;
+  var cb = $('#toggle-teste'); if(cb) cb.checked = state.incluirTeste;
+  goScreen(currentScreen);
+}
+var toggleTeste = $('#toggle-teste');
+if(toggleTeste){
+  toggleTeste.checked = !!state.incluirTeste;
+  toggleTeste.addEventListener('change', function(){ setIncluirTeste(toggleTeste.checked); });
 }
 
 function notif(ico, titulo, sub, tempo){
@@ -1104,7 +1267,22 @@ $$('.sb-item[data-screen]').forEach(function(item){
 $$('.sb-item.soon').forEach(function(item){
   item.addEventListener('click', function(){ toast('Disponível em breve — aguardando integração com os kiosks.'); });
 });
+function setMenu(open){
+  document.body.classList.toggle('nav-open', !!open);
+  var b = $('#btn-menu');
+  if(b) b.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+$('#btn-menu').addEventListener('click', function(e){
+  e.stopPropagation();
+  setMenu(!document.body.classList.contains('nav-open'));
+});
+$('#sb-backdrop').addEventListener('click', function(){ setMenu(false); });
+document.addEventListener('keydown', function(e){ if(e.key === 'Escape') setMenu(false); });
+window.addEventListener('resize', function(){
+  if(window.innerWidth > 900) setMenu(false);
+});
 function goScreen(name){
+  if(window.innerWidth <= 900) setMenu(false);
   currentScreen = name;
   $$('.sb-item[data-screen]').forEach(function(i){ i.classList.remove('active'); });
   var item = document.querySelector('.sb-item[data-screen="'+name+'"]');
@@ -1245,7 +1423,7 @@ window.nacCloseModal = closePortalModal;
 
 // ——— DASHBOARD ———
 function renderDashboard(){
-  var lojas = state.lojas || [];
+  var lojas = lojasVisiveis();
   var users = state.usuarios || [];
   var ativas = lojas.filter(function(l){ return l.ativo; });
   var onlineCount = ativas.filter(function(l){ return l.online; }).length;
@@ -1302,6 +1480,16 @@ function fmtBRL(v){
 }
 function fmtInt(v){
   return String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+}
+function horasDesde(iso){
+  var t = Date.parse(iso || '');
+  if(!isFinite(t)) return 0;
+  return Math.max(0, (Date.now() - t) / 3600000);
+}
+function idadeTxt(horas){
+  var h = Math.floor(horas);
+  if(h < 24) return h + 'h';
+  return Math.floor(h/24) + 'd';
 }
 // Cache curto: o PDV envia vendas/pedidos a cada evento (e no máximo a cada
 // 5 min). 20s garante que o portal mostre a venda nova sem recarregar a página.
@@ -1398,6 +1586,19 @@ function periodCutoff(period){
   if(period==='mes') return new Date(now.getFullYear(), now.getMonth(), 1);
   return null; // temporada = tudo
 }
+function periodDay(period){
+  if(period==='ontem'){
+    var d = new Date();
+    d.setDate(d.getDate() - 1);
+    return dayStr(d);
+  }
+  if(period==='dia') return state.vendasDate || '';
+  return '';
+}
+function dayLabel(iso){
+  var p = String(iso||'').split('-');
+  return p.length===3 ? (p[2]+'/'+p[1]+'/'+p[0]) : String(iso||'');
+}
 function aggVendas(list){
   var a = { total:0, pedidos:0, sc:0, sv:0, tc:0, tcn:0, meios:{ dinheiro:0, debito:0, credito:0, pix:0 }, ultimaVenda:null };
   list.forEach(function(v){
@@ -1415,7 +1616,7 @@ function aggVendas(list){
   return a;
 }
 function typeVal(v, period){
-  var m = { hoje:'hoje', '7d':'7 dias', mes:'este mês', temporada:'período' };
+  var m = { hoje:'hoje', ontem:'ontem', '7d':'7 dias', mes:'este mês', temporada:'período', dia:'dia' };
   return m[period] || 'período';
 }
 
@@ -1423,19 +1624,21 @@ function typeVal(v, period){
 function renderDashSales(){
   var el = $('#dash-kpis');
   if(!el) return;
-  var lojas = state.lojas || [];
+  var lojas = lojasVisiveis();
   var users = state.usuarios || [];
   var ativas = lojas.filter(function(l){ return l.ativo; });
   var onlineCount = ativas.filter(function(l){ return l.online; }).length;
   var porFuncao = function(f){ return users.filter(function(u){ return u.funcao===f && u.ativo; }).length; };
   getVendas().then(function(){
     var period = state.vendasPeriod;
-    var cut = periodCutoff(period);
+    var exact = periodDay(period);
+    var cut = exact ? null : periodCutoff(period);
     var rows = state.vendasRaw.filter(function(v){
+      if(exact) return (v.data||'') === exact;
       return cut ? ((v.data||'') >= dayStr(cut)) : true;
     });
     var a = aggVendas(rows);
-    var label = typeVal(null, period);
+    var label = exact ? dayLabel(exact) : typeVal(null, period);
 
     // ——— KPIs (base + vendas) ———
     var ticket = a.pedidos ? a.total/a.pedidos : 0;
@@ -1526,9 +1729,31 @@ $$('#dash-periodo .period-tab').forEach(function(btn){
   btn.addEventListener('click', function(){
     $$('#dash-periodo .period-tab').forEach(function(b){ b.classList.toggle('active', b===btn); });
     state.vendasPeriod = btn.dataset.period;
+    if(btn.dataset.period !== 'dia'){
+      state.vendasDate = '';
+      var dia = $('#dash-dia');
+      if(dia) dia.value = '';
+    }
     renderDashSales();
   });
 });
+(function(){
+  var dia = $('#dash-dia');
+  if(!dia) return;
+  dia.max = dayStr(new Date());
+  dia.addEventListener('change', function(){
+    if(dia.value){
+      state.vendasPeriod = 'dia';
+      state.vendasDate = dia.value;
+      $$('#dash-periodo .period-tab').forEach(function(b){ b.classList.remove('active'); });
+    } else {
+      state.vendasPeriod = 'hoje';
+      state.vendasDate = '';
+      $$('#dash-periodo .period-tab').forEach(function(b){ b.classList.toggle('active', b.dataset.period==='hoje'); });
+    }
+    renderDashSales();
+  });
+})();
 
 // ——— HELPERS DE AGRUPAMENTO (Financeiro / Fluxo de Caixa) ———
 function aggPorLoja(rows){
@@ -1810,10 +2035,11 @@ function fin2InitFiltros(){
     if(!dataEl.value || (fora && document.activeElement !== dataEl)) dataEl.value = alvo;
   }
   var lojaSel = $('#f-desp-loja');
-  if(lojaSel && lojaSel.options.length !== state.lojas.length + 1){
+  var lojasDesp = lojasVisiveis();
+  if(lojaSel && lojaSel.options.length !== lojasDesp.length + 1){
     var lojaAtual = lojaSel.value;
     lojaSel.innerHTML = '<option value="">Geral / despesa da operação</option>' +
-      state.lojas.map(function(l){ return '<option value="'+escAttr(l.id)+'">'+esc(l.nome)+'</option>'; }).join('');
+      lojasDesp.map(function(l){ return '<option value="'+escAttr(l.id)+'">'+esc(l.nome)+'</option>'; }).join('');
     lojaSel.value = lojaAtual;
   }
   if(state._fin2Bound) return;
@@ -2187,7 +2413,7 @@ async function renderFluxo(){
   });
   var tb = $('#fluxo-tabela');
   if(ordenadas.length){
-    tb.innerHTML = '<tr><th>Data</th><th>Loja</th><th>PDV</th><th>Total</th><th>Dinheiro</th><th>Débito</th><th>Crédito</th><th>PIX</th><th>Pedidos</th><th>Sessões</th><th>Estoque papel</th><th>Caixa</th></tr>' +
+    tb.innerHTML = '<tr><th>Data</th><th>Loja</th><th>PDV</th><th>Total</th><th>Dinheiro</th><th>Débito</th><th>Crédito</th><th>PIX</th><th>Pedidos</th><th>Sessões</th><th>Estoque papel</th><th>Último caixa</th></tr>' +
       ordenadas.map(function(v){
         var m = v.meios || {};
         return '<tr><td style="white-space:nowrap;">'+v.data+'</td>'+
@@ -2198,7 +2424,7 @@ async function renderFluxo(){
           '<td>'+fmtInt(v.pedidos||0)+'</td>'+
           '<td>'+(v.sessoesVendidas||0)+'/'+(v.sessoesCriadas||0)+'</td>'+
           '<td>'+efetivoTxt(v)+'</td>'+
-          '<td>'+esc((v.caixa&&v.caixa.numero)||'—')+(v.caixa&&v.caixa.aberto?' <span class="pill pill-green">aberto</span>':'')+'</td></tr>';
+          '<td title="Último caixa registrado no snapshot; pode haver mais de um turno no dia">'+esc((v.caixa&&v.caixa.numero)||'—')+(v.caixa&&v.caixa.aberto?' <span class="pill pill-green">aberto</span>':'')+'</td></tr>';
       }).join('');
   } else {
     tb.innerHTML = '<tr><td class="empty" colspan="12">Sem snapshots no período.</td></tr>';
@@ -2209,13 +2435,26 @@ async function renderFluxo(){
     var rc = await call('caixa.list', cut ? { dataIni: dayStr(cut) } : {});
     caixas = (rc && rc.ok && Array.isArray(rc.caixas)) ? rc.caixas : [];
   } catch(e) { caixas = []; }
+  var nota = $('#fluxo-caixas-nota');
+  if(nota){
+    var abertos = caixas.filter(function(c){ return c.status==='aberto'; });
+    var antigos = abertos.filter(function(c){ return horasDesde(c.abertoEm) >= 12; });
+    nota.innerHTML = 'Vendido, Dinheiro, Débito, Crédito e PIX são calculados pelo sistema. <b>Recebido</b> é a soma declarada pelo operador; <b>Esperado</b> = vendas + fundo; <b>Diferença</b> = recebido − esperado. Dinheiro esperado inclui o fundo; cartões/PIX não. <b>Envelope</b> é a sangria e <b>Saldo</b> é o valor informado para ficar no caixa (ou o dinheiro declarado menos o envelope).' +
+      (window.innerWidth <= 900 ? ' No celular, arraste a tabela para o lado.' : '') +
+      (antigos.length ? ' <span class="warn">Há '+antigos.length+' caixa(s) aberto(s) há mais de 12h — provavelmente ficaram abertos após reinício do PDV.</span>' : '');
+  }
+
   var tbc = $('#fluxo-caixas');
   if(caixas.length){
-    tbc.innerHTML = '<tr><th>Abertura</th><th>Loja</th><th>Operador</th><th>Fundo</th><th>Fechamento</th><th>Fechado por</th><th>Vendido</th><th>Dinheiro</th><th>Débito</th><th>Crédito</th><th>PIX</th><th>Recebido</th><th>Declarado</th><th>Diferença</th><th>Envelope</th><th>Status</th></tr>' +
+    tbc.innerHTML = '<tr><th>Abertura</th><th>Loja</th><th>Operador</th><th>Fundo</th><th>Fechamento</th><th>Fechado por</th><th>Vendido</th><th>Dinheiro</th><th>Débito</th><th>Crédito</th><th>PIX</th><th>Recebido</th><th>Esperado</th><th>Diferença</th><th>Envelope</th><th>Saldo</th><th>Status</th></tr>' +
       caixas.map(function(c){
-        var m = c.totalPorMeio || {}, d = c.meiosDeclarados || {};
-        var declarado = Object.keys(d).reduce(function(s,k){ return s + toNum(d[k]); }, 0);
+        var m = c.totalPorMeio || {};
         var dif = toNum(c.diferenca);
+        var esperado = toNum(c.totalVendido) + toNum(c.valorInicial);
+        var horas = horasDesde(c.abertoEm);
+        var status = c.status==='aberto'
+          ? (horas >= 12 ? '<span class="pill pill-amber">aberto há '+idadeTxt(horas)+'</span>' : '<span class="pill pill-green">aberto</span>')
+          : '<span class="pill">fechado</span>';
         return '<tr><td style="white-space:nowrap;">'+esc(fmtDt(c.abertoEm))+'</td>'+
           '<td><b>'+esc(c.lojaNome||c.lojaId)+'</b></td><td>'+esc(c.operador||'—')+'</td>'+
           '<td>'+fmtBRL(toNum(c.valorInicial))+'</td>'+
@@ -2223,13 +2462,14 @@ async function renderFluxo(){
           '<td>'+fmtBRL(toNum(c.totalVendido))+'</td>'+
           '<td>'+fmtBRL(toNum(m.dinheiro))+'</td><td>'+fmtBRL(toNum(m.debito))+'</td>'+
           '<td>'+fmtBRL(toNum(m.credito))+'</td><td>'+fmtBRL(toNum(m.pix))+'</td>'+
-          '<td>'+fmtBRL(toNum(c.totalRecebido))+'</td><td>'+fmtBRL(declarado)+'</td>'+
+          '<td>'+fmtBRL(toNum(c.totalRecebido))+'</td><td>'+fmtBRL(esperado)+'</td>'+
           '<td style="color:'+(Math.abs(dif)>0.009?'var(--red,#dc2626)':'inherit')+'">'+fmtBRL(dif)+'</td>'+
           '<td>'+fmtBRL(toNum(c.valorEnvelope))+'</td>'+
-          '<td>'+(c.status==='aberto'?'<span class="pill pill-green">aberto</span>':'<span class="pill">fechado</span>')+'</td></tr>';
+          '<td>'+fmtBRL(toNum(c.saldoRestante))+'</td>'+
+          '<td>'+status+'</td></tr>';
       }).join('');
   } else {
-    tbc.innerHTML = '<tr><td class="empty" colspan="16">Nenhum caixa recebido no período.</td></tr>';
+    tbc.innerHTML = '<tr><td class="empty" colspan="17">Nenhum caixa recebido no período.</td></tr>';
   }
 }
 
@@ -2336,7 +2576,7 @@ function estoqueModoLabel(m){
 async function renderEstoqueProdutos(){
   var sel = $('#estoque-loja-select');
   if(!sel) return;
-  var lojas = state.lojas || [];
+  var lojas = lojasVisiveis();
   if(!state.estoqueLoja || !lojas.some(function(l){ return l.id===state.estoqueLoja; })){
     state.estoqueLoja = lojas.length ? lojas[0].id : '';
     state._estoqueAt = 0;
@@ -2559,6 +2799,7 @@ function modalPedido(p){
     '<div class="mf-box"><div class="mf-key">Operador</div><div>'+esc(p.operador||'—')+'</div></div>'+
     '<div class="mf-box"><div class="mf-key">Loja / PDV</div><div>'+esc(p.lojaNome||p.lojaId||'—')+' · '+esc(p.pdvNome||'—')+'</div></div>'+
     '<div class="mf-box"><div class="mf-key">Caixa</div><div>'+(p.caixaId?esc(p.caixaId):(p.caixa&&p.caixa.numero?esc(p.caixa.numero):'—'))+'</div></div>'+
+    '<div class="mf-box"><div class="mf-key">Origem</div><div>'+esc(p.origemTerminal==='tablet'?'Tablet':(p.origemTerminal==='caixa'?'Caixa':'—'))+'</div></div>'+
     (p.desconto?('<div class="mf-box"><div class="mf-key">Desconto</div><div>−'+fmtBRL(toNum(p.desconto))+'</div></div>'):'')+
     '<div class="mf-box"><div class="mf-key">Fotos 10x15</div><div>'+fmtInt(toNum(p.fotos10x15))+'</div></div>'+
     '<div class="mf-box"><div class="mf-key">Fotos 15x20</div><div>'+fmtInt(toNum(p.fotos15x20))+'</div></div>'+
@@ -2767,7 +3008,7 @@ function renderLojas(){
   t.innerHTML = '<tr><th>ID (kiosk)</th><th>Nome</th><th>PDV</th><th>Operadores</th><th>PDVs / códigos</th><th>Conexão</th><th>Status</th><th></th></tr>' +
     (state.lojas.length ? state.lojas.map(function(l){
       var qtd = state.usuarios.filter(function(u){ return u.lojaId===l.id; }).length;
-      return '<tr><td><b>'+esc(l.id)+'</b></td><td>'+esc(l.nome)+'</td><td>'+esc(l.pdv||'—')+'</td><td>'+qtd+'</td>'+
+      return '<tr><td><b>'+esc(l.id)+'</b></td><td>'+esc(l.nome)+(l.teste?' <span class="pill pill-amber" title="Loja de teste: oculta dos relatórios por padrão">TESTE</span>':'')+'</td><td>'+esc(l.pdv||'—')+'</td><td>'+qtd+'</td>'+
         '<td>'+lojaPdvCell(l)+'</td>'+
         '<td>'+connPill(l)+'</td>'+
         '<td><span class="pill '+(l.ativo?'pill-green':'pill-red')+'">'+(l.ativo?'Ativa':'Inativa')+'</span></td>'+
@@ -2976,6 +3217,10 @@ function modalLoja(l){
     '<select class="form-input" id="f-loja-ativo">'+
     '<option value="1"'+(l.ativo===false?'':' selected')+'>Ativa</option>'+
     '<option value="0"'+(l.ativo===false?' selected':'')+'>Inativa</option></select></div>'+
+    '<div class="form-row" style="display:flex;align-items:center;gap:8px;">'+
+    '<input type="checkbox" id="f-loja-teste" '+(l.teste?'checked':'')+' style="accent-color:var(--amber-500);">'+
+    '<label for="f-loja-teste" class="form-label" style="margin:0;cursor:pointer;">Loja de teste (não entra nos relatórios)</label></div>'+
+    '<div style="font-size:10.5px;color:var(--slate-500);margin:-6px 0 4px 26px;">A loja continua ativa e pareada; os dados dela só aparecem com “Mostrar dados de teste”.</div>'+
     '<div class="modal-actions"><button class="btn btn-primary" id="salvar-loja">Salvar</button>'+
     (l.id?'<button class="btn btn-ghost" id="apagar-loja">Excluir</button>':'')+
     '<button class="btn btn-ghost" onclick="nacCloseModal()">Cancelar</button></div>'
@@ -2988,7 +3233,8 @@ function modalLoja(l){
       nome: $('#f-loja-nome').value.trim(),
       pdv: $('#f-loja-pdv').value.trim(),
       kioskCode: fmtKiosk($('#f-loja-kiosk').value).replace(/-/g,''),
-      ativo: $('#f-loja-ativo').value==='1'
+      ativo: $('#f-loja-ativo').value==='1',
+      teste: $('#f-loja-teste').checked
     };
     if(!payload.id || !payload.nome){ toast('Preencha ID e nome da loja', true); return; }
     var res = await call('lojas.save', payload);
@@ -3223,7 +3469,7 @@ function exportarDados(){
       '<h1>Maxx Foto — Natal 2026 · Exportação de dados</h1>'+
       '<div class="sub">Gerado em '+fmtDt(agora.toISOString())+' · Portal maxxfoto.com.br/natalcontroler</div>'+
       '<div class="resumo">'+
-      '<div class="rs"><b>'+fmtInt(state.lojas.length)+'</b><span>lojas cadastradas</span></div>'+
+      '<div class="rs"><b>'+fmtInt(lojasVisiveis().length)+'</b><span>lojas cadastradas</span></div>'+
       '<div class="rs"><b>'+fmtInt(state.usuarios.length)+'</b><span>operadores na equipe</span></div>'+
       '<div class="rs"><b>'+fmtInt(vendas.length)+'</b><span>snapshots diários</span></div>'+
       '<div class="rs"><b>'+fmtInt(pedidos.length)+'</b><span>pedidos consolidados</span></div>'+
@@ -3233,7 +3479,7 @@ function exportarDados(){
 
     html += '<h2>Lojas</h2>' + expTabela(
       ['ID','Nome','PDV','Operadores','Emparelhado','Conexão','Status'],
-      state.lojas.map(function(l){
+      lojasVisiveis().map(function(l){
         var qtd = state.usuarios.filter(function(u){ return u.lojaId===l.id; }).length;
         return [ esc(l.id), esc(l.nome), esc(l.pdv||'—'), fmtInt(qtd),
           (l.pareamento?esc(l.pareamento.pdvNome||'Sim'):'—'),
@@ -3300,7 +3546,7 @@ function exportarJSON(){
     var agora = new Date();
     var payload = {
       exportadoEm: agora.toISOString(),
-      lojas: state.lojas,
+      lojas: lojasVisiveis(),
       usuarios: state.usuarios,
       vendas: state.vendasRaw,
       pedidos: state.pedidos,
@@ -4119,6 +4365,40 @@ $('#notif-marcar-lidas').addEventListener('click', function(e){
   notificacoes.forEach(function(n){ n.lida=true; });
   renderNotif();
 });
+
+// ——— PWA ———
+var deferredInstall = null;
+var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function mostrarInstalar(show){
+  var b = $('#btn-install');
+  if(b && !isStandalone) b.style.display = show ? 'block' : 'none';
+}
+if(isIOS && !isStandalone) mostrarInstalar(true);
+window.addEventListener('beforeinstallprompt', function(e){
+  e.preventDefault();
+  deferredInstall = e;
+  mostrarInstalar(true);
+});
+$('#btn-install').addEventListener('click', async function(){
+  if(deferredInstall){
+    deferredInstall.prompt();
+    try { await deferredInstall.userChoice; } catch(e) {}
+    deferredInstall = null;
+    mostrarInstalar(false);
+    return;
+  }
+  toast('No iPhone: toque em Compartilhar e escolha “Adicionar à Tela de Início”.');
+});
+window.addEventListener('appinstalled', function(){
+  mostrarInstalar(false);
+  toast('App instalado no dispositivo.');
+});
+if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')){
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+  });
+}
 
 // ——— BOOT ———
 // Atualiza o status de conexão (online/offline) das lojas enquanto telas abertas

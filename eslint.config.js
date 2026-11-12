@@ -19,6 +19,10 @@ export default defineConfig([
     },
   },
   {
+    files: ['backend/sw.js'],
+    languageOptions: { globals: { ...globals.serviceworker, caches: 'readonly' } },
+  },
+  {
     files: ['tools/**/*.js'],
     languageOptions: { globals: globals.node },
   },

@@ -176,7 +176,7 @@ function seed(): array
 {
     return [
         'lojas' => [
-            ['id' => 'teste', 'nome' => 'Kiosk Teste', 'pdv' => 'VENDA-01', 'pairingCode' => 'TESTE26', 'ativo' => true],
+            ['id' => 'teste', 'nome' => 'Kiosk Teste', 'pdv' => 'VENDA-01', 'pairingCode' => 'TESTE26', 'ativo' => true, 'teste' => true],
         ],
         'usuarios' => [
             ['id' => 'u-admin', 'lojaId' => 'teste', 'usuario' => 'admin', 'nome' => 'ADMINISTRADOR', 'funcao' => 'admin', 'senha' => '1234', 'ativo' => true],
@@ -339,6 +339,33 @@ function registroDeLojaExistente(array $ids, array $r, bool $manterSemLoja = fal
     $id = (string) ($r['lojaId'] ?? '');
     if ($id === '') return $manterSemLoja;
     return isset($ids[$id]);
+}
+
+// Lojas marcadas como "teste" (kiosk de homologação): continuam ativas e
+// pareadas, mas ficam fora dos relatórios por padrão. A flag é independente de
+// `ativo` — desativar a loja quebraria login/push do kiosk de teste.
+function lojaIdsTeste(array $db): array
+{
+    $ids = [];
+    foreach (($db['lojas'] ?? []) as $l) {
+        $id = (string) ($l['id'] ?? '');
+        if ($id !== '' && !empty($l['teste'])) $ids[$id] = true;
+    }
+    return $ids;
+}
+
+// Query/body pode mandar incluirTeste=1 (ou true) para ver a loja de teste.
+function incluirTeste(array $p): bool
+{
+    $v = $p['incluirTeste'] ?? null;
+    return $v === true || $v === 1 || $v === '1' || $v === 'true';
+}
+
+function registroDeLojaDeTeste(array $testIds, array $r, bool $manterSemLoja = false): bool
+{
+    $id = (string) ($r['lojaId'] ?? '');
+    if ($id === '') return $manterSemLoja;
+    return isset($testIds[$id]);
 }
 
 // Slug do nome da loja → id estável e legível (Royal Plaza → royal-plaza).
@@ -1164,6 +1191,89 @@ function somaMeios(array $pagamentos): array
     return $meios;
 }
 
+function pedidoContaNoCaixaPortal(array $pedido): bool
+{
+    $status = strtolower(trim((string) ($pedido['status'] ?? '')));
+    return $status === 'pago' || $status === 'impresso';
+}
+
+function totaisPedidosDoCaixaPortal(array $pedidos, string $caixaId): array
+{
+    $total = 0.0;
+    $porMeio = array_fill_keys(MEIOS_CONHECIDOS, 0.0);
+    foreach ($pedidos as $pedido) {
+        if (!is_array($pedido)) continue;
+        if ((string) ($pedido['caixaId'] ?? '') !== $caixaId) continue;
+        if (!pedidoContaNoCaixaPortal($pedido)) continue;
+        $valorPedido = round(max(0, (float) ($pedido['total'] ?? 0)), 2);
+        $total += $valorPedido;
+        $pagamentos = is_array($pedido['pagamentos'] ?? null) ? $pedido['pagamentos'] : [];
+        $soma = somaMeios($pagamentos);
+        if (array_sum($soma) > 0.004) {
+            foreach (MEIOS_CONHECIDOS as $meio) {
+                $porMeio[$meio] = round($porMeio[$meio] + $soma[$meio], 2);
+            }
+        } else {
+            $meio = normalizarMeioPagamento($pedido['meio'] ?? '', $pedido['forma'] ?? '');
+            if (in_array($meio, MEIOS_CONHECIDOS, true)) {
+                $porMeio[$meio] = round($porMeio[$meio] + $valorPedido, 2);
+            }
+        }
+    }
+    $porMeio = array_filter($porMeio, function ($valor) {
+        return abs((float) $valor) > 0.004;
+    });
+    return ['total' => round($total, 2), 'porMeio' => $porMeio];
+}
+
+function reconciliarCaixaComPedidos(array $caixa, array $pedidos): array
+{
+    $fechadoEm = trim((string) ($caixa['fechadoEm'] ?? ''));
+    $declarados = is_array($caixa['meiosDeclarados'] ?? null) ? $caixa['meiosDeclarados'] : [];
+    if ($fechadoEm === '' || !$declarados) return $caixa;
+    $caixaId = trim((string) ($caixa['id'] ?? ''));
+    if ($caixaId === '') return $caixa;
+
+    $calculado = totaisPedidosDoCaixaPortal($pedidos, $caixaId);
+    $totalPedidos = (float) $calculado['total'];
+    if ($totalPedidos <= 0.004) return $caixa;
+
+    $totalAtual = round((float) ($caixa['totalVendido'] ?? 0), 2);
+    if ($totalAtual > $totalPedidos + 0.004) return $caixa;
+
+    $porMeio = $calculado['porMeio'];
+
+    $sistema = array_fill_keys(MEIOS_CONHECIDOS, 0.0);
+    foreach (MEIOS_CONHECIDOS as $meio) {
+        $sistema[$meio] = round((float) ($porMeio[$meio] ?? 0), 2);
+    }
+    $sistema['dinheiro'] = round($sistema['dinheiro'] + (float) ($caixa['valorInicial'] ?? 0), 2);
+
+    $formas = array_unique(array_merge(array_keys($declarados), array_keys($sistema)));
+    $diferenca = 0.0;
+    $totalRecebido = 0.0;
+    foreach ($formas as $forma) {
+        $diferenca += (float) ($declarados[$forma] ?? 0) - (float) ($sistema[$forma] ?? 0);
+    }
+    foreach ($declarados as $valor) {
+        $totalRecebido += max(0, (float) $valor);
+    }
+    $novaDiferenca = round($diferenca, 2);
+    $novoTotalRecebido = round($totalRecebido, 2);
+    $mudou = abs($totalAtual - $totalPedidos) > 0.004
+        || ($caixa['totalPorMeio'] ?? []) != $porMeio
+        || abs((float) ($caixa['totalRecebido'] ?? 0) - $novoTotalRecebido) > 0.004
+        || abs((float) ($caixa['diferenca'] ?? 0) - $novaDiferenca) > 0.004;
+    if (!$mudou && trim((string) ($caixa['reconciliadoEm'] ?? '')) !== '') return $caixa;
+
+    $caixa['totalVendido'] = $totalPedidos;
+    $caixa['totalPorMeio'] = $porMeio;
+    $caixa['totalRecebido'] = $novoTotalRecebido;
+    $caixa['diferenca'] = $novaDiferenca;
+    $caixa['reconciliadoEm'] = gmdate('c');
+    return $caixa;
+}
+
 // Parâmetros globais da operação (Portal define, DRE/Estoque consomem).
 // custoRibbonUnitario = custo real por unidade de ribbon (impressa) — usado
 // no DRE em vez do 18% fixo do protótipo; comissaoVendedor/Fotografo = % sobre
@@ -1679,6 +1789,7 @@ try {
                 'desconto' => $descontoValor,
                 'descontoItens' => $descontoItens,
                 'caixaId' => (string) ($pd['caixaId'] ?? ''),
+                'origemTerminal' => (string) ($pd['origemTerminal'] ?? ''),
                 'origemPedidoId' => (string) ($pd['origemPedidoId'] ?? ''),
                 'guiaImpressa' => !empty($pd['guiaImpressa']),
                 'enviadoEm' => gmdate('c'),
@@ -1739,6 +1850,10 @@ try {
                 'observacoes' => trim((string) ($c['observacoes'] ?? '')),
                 'enviadoEm' => gmdate('c'),
             ];
+
+            $pedidosPortal = loadJson('pedidos.json', []);
+            if (!is_array($pedidosPortal)) $pedidosPortal = [];
+            $registro = reconciliarCaixaComPedidos($registro, $pedidosPortal);
 
             $caixas = loadJson('caixas.json', []);
             if (!is_array($caixas)) $caixas = [];
@@ -1871,6 +1986,7 @@ try {
                     'kioskCodes' => [$kioskCode],
                     'pareamentos' => [],
                     'ativo' => true,
+                    'teste' => false,
                 ];
                 $machineId = trim((string) ($pend['machineId'] ?? ''));
                 if ($machineId !== '') {
@@ -1957,6 +2073,12 @@ try {
                 }
             }
 
+            // Loja de teste: continua ativa/pareada, mas some dos relatórios por
+            // padrão. Preserva a flag quando a edição não a envia (um admin em
+            // cache antigo não limpa sem querer); a UI nova manda 0/1 explícito.
+            $teste = $anterior ? !empty($anterior['loja']['teste']) : false;
+            if (array_key_exists('teste', $p)) $teste = !empty($p['teste']);
+
             $loja = [
                 'id' => $id,
                 'nome' => $nome,
@@ -1965,6 +2087,7 @@ try {
                 'kioskCode' => $kioskCodePrincipal,
                 'kioskCodes' => $codes,
                 'ativo' => !empty($p['ativo']),
+                'teste' => $teste,
             ];
             if ($anterior) {
                 if (isset($anterior['loja']['pareamento'])) $loja['pareamento'] = $anterior['loja']['pareamento'];
@@ -2425,9 +2548,14 @@ try {
         case 'vendas.resumo': {
             $todas = loadJson('vendas.json', []);
             if (!is_array($todas)) $todas = [];
-            $ids = lojaIdsExistentes(db());
-            $todas = array_values(array_filter($todas, function ($r) use ($ids) {
-                return registroDeLojaExistente($ids, $r);
+            $db = db();
+            $ids = lojaIdsExistentes($db);
+            $testIds = lojaIdsTeste($db);
+            $incluirTeste = incluirTeste($p);
+            $todas = array_values(array_filter($todas, function ($r) use ($ids, $testIds, $incluirTeste) {
+                if (!registroDeLojaExistente($ids, $r)) return false;
+                if (!$incluirTeste && registroDeLojaDeTeste($testIds, $r)) return false;
+                return true;
             }));
             usort($todas, function ($a, $b) {
                 return strcmp((string) ($b['data'] ?? ''), (string) ($a['data'] ?? ''))
@@ -2446,10 +2574,14 @@ try {
             $dataFim = trim((string) ($p['dataFim'] ?? ''));
             $q = mb_strtolower(trim((string) ($p['q'] ?? '')), 'UTF-8');
             $status = mb_strtolower(trim((string) ($p['status'] ?? '')), 'UTF-8');
-            $ids = lojaIdsExistentes(db());
+            $db = db();
+            $ids = lojaIdsExistentes($db);
+            $testIds = lojaIdsTeste($db);
+            $incluirTeste = incluirTeste($p);
             $out = [];
             foreach ($todos as $r) {
                 if (!registroDeLojaExistente($ids, $r)) continue;
+                if (!$incluirTeste && registroDeLojaDeTeste($testIds, $r)) continue;
                 if ($lojaId !== '' && ($r['lojaId'] ?? '') !== $lojaId) continue;
                 if ($dataIni !== '' && ($r['data'] ?? '') < $dataIni) continue;
                 if ($dataFim !== '' && ($r['data'] ?? '') > $dataFim) continue;
@@ -2475,20 +2607,33 @@ try {
         case 'caixa.list': {
             $todos = loadJson('caixas.json', []);
             if (!is_array($todos)) $todos = [];
+            $pedidosPortal = loadJson('pedidos.json', []);
+            if (!is_array($pedidosPortal)) $pedidosPortal = [];
             $lojaId = trim((string) ($p['lojaId'] ?? ''));
             $dataIni = trim((string) ($p['dataIni'] ?? ''));
             $dataFim = trim((string) ($p['dataFim'] ?? ''));
-            $ids = lojaIdsExistentes(db());
+            $db = db();
+            $ids = lojaIdsExistentes($db);
+            $testIds = lojaIdsTeste($db);
+            $incluirTeste = incluirTeste($p);
             $out = [];
-            foreach ($todos as $r) {
+            $mudou = false;
+            foreach ($todos as $i => $r) {
                 if (!registroDeLojaExistente($ids, $r)) continue;
+                if (!$incluirTeste && registroDeLojaDeTeste($testIds, $r)) continue;
                 if ($lojaId !== '' && ($r['lojaId'] ?? '') !== $lojaId) continue;
                 $data = (string) ($r['data'] ?? '');
                 if ($data === '') $data = substr((string) ($r['abertoEm'] ?? ''), 0, 10);
                 if ($dataIni !== '' && $data < $dataIni) continue;
                 if ($dataFim !== '' && $data > $dataFim) continue;
-                $out[] = $r;
+                $ajustado = reconciliarCaixaComPedidos($r, $pedidosPortal);
+                if ($ajustado !== $r) {
+                    $todos[$i] = $ajustado;
+                    $mudou = true;
+                }
+                $out[] = $ajustado;
             }
+            if ($mudou) saveJson('caixas.json', $todos);
             usort($out, function ($a, $b) {
                 return strcmp((string) ($b['abertoEm'] ?? ''), (string) ($a['abertoEm'] ?? '')) ?: 0;
             });
@@ -2502,10 +2647,14 @@ try {
             $lojaId = trim((string) ($p['lojaId'] ?? ''));
             $dataIni = trim((string) ($p['dataIni'] ?? ''));
             $dataFim = trim((string) ($p['dataFim'] ?? ''));
-            $ids = lojaIdsExistentes(db());
+            $db = db();
+            $ids = lojaIdsExistentes($db);
+            $testIds = lojaIdsTeste($db);
+            $incluirTeste = incluirTeste($p);
             $out = [];
             foreach ($todos as $r) {
                 if (!registroDeLojaExistente($ids, $r)) continue;
+                if (!$incluirTeste && registroDeLojaDeTeste($testIds, $r)) continue;
                 if ($lojaId !== '' && ($r['lojaId'] ?? '') !== $lojaId) continue;
                 if ($dataIni !== '' && ($r['data'] ?? '') < $dataIni) continue;
                 if ($dataFim !== '' && ($r['data'] ?? '') > $dataFim) continue;
@@ -2627,9 +2776,14 @@ try {
         case 'despesas.list': {
             $todas = loadJson('despesas.json', []);
             if (!is_array($todas)) $todas = [];
-            $ids = lojaIdsExistentes(db());
-            $todas = array_values(array_filter($todas, function ($r) use ($ids) {
-                return registroDeLojaExistente($ids, $r, true); // lojaId vazio = despesa geral
+            $db = db();
+            $ids = lojaIdsExistentes($db);
+            $testIds = lojaIdsTeste($db);
+            $incluirTeste = incluirTeste($p);
+            $todas = array_values(array_filter($todas, function ($r) use ($ids, $testIds, $incluirTeste) {
+                if (!registroDeLojaExistente($ids, $r, true)) return false; // lojaId vazio = despesa geral
+                if (!$incluirTeste && registroDeLojaDeTeste($testIds, $r, true)) return false;
+                return true;
             }));
             usort($todas, function ($a, $b) {
                 return strcmp((string) ($b['data'] ?? ''), (string) ($a['data'] ?? ''))

@@ -7,6 +7,11 @@ import config from '../config';
 
 export const SIDECAR_URL = config.serverUrl;
 
+// Sobe quando um preview já cacheado precisa ser buscado de novo (ex.: iPad com
+// os previews grandes antigos em cache `immutable`). A partir daí o servidor
+// manda ETag e o navegador revalida sozinho quando a migração regrava o JPEG.
+const PREVIEW_CACHE_VERSION = '2';
+
 async function api(method, path, body = null, isBinary = false) {
   const opts = { method, headers: {} };
   if (body !== null) {
@@ -19,6 +24,14 @@ async function api(method, path, body = null, isBinary = false) {
   }
   const res = await fetch(`${SIDECAR_URL}${path}`, opts);
   const text = await res.text();
+  if (res.status === 401) {
+    try {
+      if (typeof window !== 'undefined' && /^\/pdv(\/|$)/.test(String(window.location.pathname || ''))) {
+        window.location.replace('/pdv/');
+      }
+    } catch { /* sem window */ }
+    return { success: false, error: 'PAIRING_REQUIRED', pairing: true, status: 401 };
+  }
   try {
     return JSON.parse(text);
   } catch {
@@ -38,9 +51,12 @@ const natalApi = {
   uploadFoto: (id, type, filename, blob) =>
     api('POST', `/api/sessoes/${encodeURIComponent(id)}/${type}/${encodeURIComponent(filename)}`, blob, true),
 
-  // URLs para exibir fotos (usadas no <img>)
-  fotoUrl: (id, type, filename) =>
-    `${SIDECAR_URL}/api/fotos/${type}/${encodeURIComponent(id)}/${encodeURIComponent(filename)}`,
+  // URLs para exibir fotos (usadas no <img>). Previews e miniaturas levam
+  // `?v=`: invalida o cache antigo e, depois, o servidor revalida por ETag.
+  fotoUrl: (id, type, filename) => {
+    const url = `${SIDECAR_URL}/api/fotos/${type}/${encodeURIComponent(id)}/${encodeURIComponent(filename)}`;
+    return (type === 'previews' || type === 'thumbs') ? `${url}?v=${PREVIEW_CACHE_VERSION}` : url;
+  },
 
   // ─── Pedidos (PDV) ───────────────────────────────────────
   criarPedido: (data) => api('POST', '/api/pedidos', data),
@@ -55,6 +71,7 @@ const natalApi = {
   caixasHistorico: () => api('GET', '/api/pdv/caixas'),
   caixaAbrir: (data) => api('POST', '/api/pdv/caixa/abrir', data),
   caixaFechar: (data) => api('POST', '/api/pdv/caixa/fechar', data),
+  caixaCorrigir: (id, data) => api('PUT', `/api/pdv/caixas/${encodeURIComponent(id)}`, data),
 
   // ─── Auditoria (uso de senha master) ─────────────────────
   auditoriaList: () => api('GET', '/api/auditoria'),
@@ -105,6 +122,12 @@ const natalApi = {
   // ─── Saúde / config ──────────────────────────────────────
   health: () => api('GET', '/api/health'),
   configPdv: () => api('GET', '/api/config'),
+  pdvStatus: () => api('GET', '/api/pdv/status'),
+  pdvLink: () => api('GET', '/api/pdv/link'),
+  pdvRotateLink: () => api('POST', '/api/pdv/link/rotate'),
+  // Cupom texto na impressora termica do PC da venda (Bematech/driver Windows).
+  // No tablet nao existe Electron; o sidecar imprime pelo PC.
+  imprimirThermal: (payload) => api('POST', '/api/printer/thermal', payload),
   // Status real da impressora ASK-400 (proxy do sidecar Java na 8080)
   printerStatus: () => api('GET', '/api/printer/status'),
   // Fila de impressão (lista + limpeza de 1 pedido ou de tudo)

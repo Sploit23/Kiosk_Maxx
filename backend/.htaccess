@@ -4,6 +4,9 @@
 # "XXXX-XXXX", o que quebrava o emparelhamento do PDV. Sem cache = 
 # sempre a versão correta em produção.
 Options -Indexes
+<IfModule mod_mime.c>
+    AddType application/manifest+json .webmanifest
+</IfModule>
 <IfModule mod_headers.c>
     Header set Cache-Control "no-cache, no-store, must-revalidate"
     Header set Pragma "no-cache"

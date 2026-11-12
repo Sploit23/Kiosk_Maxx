@@ -43,8 +43,10 @@ function _openSse() {
   subscribe('pedido:criado');
   subscribe('pedido:pago');
   subscribe('pedido:impresso');
+  subscribe('pedido:atualizado');
   subscribe('caixa:aberto');
   subscribe('caixa:fechado');
+  subscribe('caixa:corrigido');
   subscribe('print-start');
   subscribe('printer:progress');
   subscribe('print-complete');

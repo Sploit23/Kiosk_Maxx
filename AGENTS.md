@@ -191,8 +191,11 @@ por loja ou global; `null` remove o arquivo e volta ao fallback. Valida PNG real
 via `getimagesizefromstring`, tamanho ≤ 5 MB e proporção 1864×1228 / 2422×1864
 (tolerância 0.02); arquivos em `data/overlays/`, metadados em
 `data/overlays.json`; atualiza `updatedAt` e apaga o arquivo anterior),
-`vendas.resumo` (todos os snapshots de `data/vendas.json`, data desc → lojaId asc →
-`{ ok, vendas }`), `pedido.list` (pedidos consolidados de `data/pedidos.json`,
+Os relatórios `vendas.resumo`, `pedido.list`, `caixa.list`, `auditoria.list` e
+`despesas.list` omitem lojas com `teste:true` por padrão; `incluirTeste=1`
+(query ou body) as inclui. `vendas.resumo` (todos os snapshots de
+`data/vendas.json`, data desc → lojaId asc → `{ ok, vendas }`), `pedido.list`
+(pedidos consolidados de `data/pedidos.json`,
 filtros `lojaId`/`dataIni`/`dataFim`/`q`/`status` — `status` é case-insensitive,
 sort criadoEm desc →
 `{ ok, pedidos, total, totalLiquido }` − exclui status `cancelado` do
@@ -334,10 +337,13 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 
 **Portal PHP — `backend/data/app.json`:**
 
-- **Loja:** `{ id, nome, pdv, ativo, kioskCode?, kioskCodes?, pareamentos?,
-  pareamento?, pairingCode? }` — `pareamentos = [{ pdvNome, machineId,
-  kioskCode, emparelhadoEm }]` (1 máquina por item; `pareamento` é o legado =
-  última máquina) gravado por `kiosk.pair`/`lojas.addKiosk`. `kioskCodes` é a
+- **Loja:** `{ id, nome, pdv, ativo, teste?, kioskCode?, kioskCodes?, pareamentos?,
+  pareamento?, pairingCode? }` — `teste: true` marca a loja de homologação: ela
+  continua `ativo:true` e pareada (login/push funcionam), mas fica **fora dos
+  relatórios por padrão** (`incluirTeste` liga a exibição). `pareamentos = [
+  { pdvNome, machineId, kioskCode, emparelhadoEm }]` (1 máquina por item;
+  `pareamento` é o legado = última máquina) gravado por
+  `kiosk.pair`/`lojas.addKiosk`. `kioskCodes` é a
   lista de códigos autorizados (uma loja tem vários PDVs); `kioskCode` é o
   principal (compat.). O código de 8 chars aparece NA TELA do PDV e é único
   entre lojas (`CODIGO_EM_USO`). `pairingCode` é o fluxo legado.
@@ -589,7 +595,10 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   operador logado) a pílula `#login-peer` mostra o mesmo estado e é **clicável**:
   abre o overlay `#receive-overlay` (`abrirRecebimento`/`renderRecebimento`),
   um monitor ao vivo com peer + progresso (baixando/copiando) + últimas sessões,
-  atualizado a cada 2,5s via `/api/import/status` + `/api/sessoes`;
+  atualizado a cada 2,5s via `/api/import/status` + `/api/sessoes`; a pílula
+  `#login-card` (não clicável) mostra `Cartão processado — pode remover` em
+  `ready_existing`/`all_imported`/`finished` (com o número da sessão) e o erro
+  em `copy_error`/`publish_error`;
   **🔒 Sistema** (exige senha **`8694`**, `SENHA_CFG_SISTEMA`, digitada
   num campo dentro do próprio modal — `#cfg-senha-box`; **nunca** usar
   `window.prompt`, que o Electron não implementa e lança erro) = pasta de fotos
@@ -641,12 +650,26 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   estabilidade (`PHOTOS_SETTLE_MS`); cria a sessão `NATAL-XXXXX`, copia as fotos
   (original + preview normalizado `.jpg`), marca `PRONTA` automaticamente e
   registra em `pasta-importadas.json` (chave = caminho absoluto + snapshot do
-  conteúdo, para não reimportar). Na raiz de `photosFolder` são ignoradas as
+  conteúdo, para não reimportar). **Sessão parcial:** enquanto o lote ainda não
+  tem `.natal_done` e o importador confirma o download (`/api/status` →
+  `download`/`peer.batches`), o sidecar cria a sessão `RECEBENDO` mesmo id,
+  importa as fotos que já chegaram e expõe `fotosEsperadas`,
+  `recebendoDesde`, `ultimoProgressoEm` e `importacaoParcial`. Ela vira `PRONTA`
+  quando todas as fotos do marcador estão na sessão; pedido/finalização manual
+  respondem 409 enquanto `RECEBENDO`, e cancelar marca o lote em
+  `pasta-importadas.json` para o watcher não recriá-lo. Na raiz de `photosFolder`
+  são ignoradas as
   pastas `importadas`, a própria pasta do cartão e pastas ocultas (`.tmp_*`).
   `criadaEm` da sessão = o instante em que a subpasta foi criada (birthtime;
   fallback: criação da 1ª foto), e `prontaEm` = instante do import. Arquivos <
   1KB ou com tail `.part/.tmp/.crdownload/.download` são ignorados (cópia pela
   metade). Troca de pasta na config vale na hora.
+- **Loja de teste (admin, `admin.html`)** — `lojas.save` aceita `teste` (checkbox
+  “Loja de teste” no modal); a lista de Lojas mostra o badge `TESTE`. O toggle
+  “Mostrar dados de teste” no topbar (desligado por padrão) manda
+  `incluirTeste=1` para os relatórios e libera a loja nos seletores de
+  Estoque/Despesas. O kiosk continua ativo/pareado; **não** use “Inativa”
+  (quebra login/push).
 - **Financeiro (admin, `admin.html`)** — tela `#screen-financeiro` (`renderFinanc`):
   filtros por mês/intervalo e "Todo o período", cards (faturamento, taxas,
   despesas & custos, líquido), gráfico de barras divergentes "Líquido por loja"
@@ -698,6 +721,10 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   push estranho (`LOJA_INVALIDA`/`LOJA_NAO_EMPARELELHADA`), conferir se a versão
   em `maxxfoto.com.br` tem as mudanças novas (autorização por `machineId`,
   `lojaNome`).
+- **Loja de teste:** a loja `teste`/“Kiosk Teste” deve ficar `ativo:true` com
+  `teste:true`; `teste` só oculta dos relatórios, enquanto `ativo:false`
+  desautoriza o kiosk (`LOJA_INVALIDA`). O toggle “Mostrar dados de teste” é só
+  de visualização e não altera dados.
 - **Senhas em claro no código:** fallback de login em `vendas.html`
   (`FALLBACK_USERS`, senha `0000`) e `SENHA_MASTER_PDV = '1234'` (senha master
   de desconto/perda). O cache offline (TOFU) guarda só sha256.

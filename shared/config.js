@@ -34,12 +34,30 @@ try {
   bridge = null;
 }
 
+function browserServerUrl() {
+  try {
+    if (typeof window === 'undefined' || !window.location) return '';
+    const params = new window.URLSearchParams(window.location.search || '');
+    const override = String(params.get('server') || '').trim();
+    if (override) return override.replace(/\/+$/, '');
+    const proto = String(window.location.protocol || '');
+    if (proto !== 'http:' && proto !== 'https:') return '';
+    const pathname = String(window.location.pathname || '');
+    if (pathname.startsWith('/pdv')) return window.location.origin;
+    if (String(window.location.port || '') === '9877') return window.location.origin;
+  } catch { /* sem window */ }
+  return '';
+}
+
 function resolveConfig() {
-  if (!bridge || typeof bridge.getConfig !== 'function') return DEFAULTS;
+  if (!bridge || typeof bridge.getConfig !== 'function') {
+    const url = browserServerUrl();
+    return url ? { ...DEFAULTS, serverUrl: url } : DEFAULTS;
+  }
   try {
     const cfg = bridge.getConfig() || {};
     return {
-      serverUrl: cfg.serverUrl || DEFAULTS.serverUrl,
+      serverUrl: browserServerUrl() || cfg.serverUrl || DEFAULTS.serverUrl,
       thermalPrinterName: cfg.thermalPrinterName || DEFAULTS.thermalPrinterName,
       pdvNome: cfg.pdvNome || DEFAULTS.pdvNome,
       portalApiUrl: cfg.portalApiUrl || DEFAULTS.portalApiUrl,
@@ -106,6 +124,17 @@ const FOTO_FORMATS = {
     overlay: {
       image: './overlays/bolinha-celula.png',
       grid: { rows: 1, cols: 2 },
+      variants: [
+        { id: '1', label: 'Overlay 1', image: './overlays/bolinha-celula.png' },
+        {
+          id: '2',
+          label: 'Overlay 2',
+          image: './overlays/bolinha-celula 2.png',
+          // O Overlay 2 tem uma janela maior que a do Overlay 1. Coordenadas
+          // medidas no canal alpha do PNG (932x1228), em px da célula.
+          window: { x: 63, y: 117, w: 829, h: 826 },
+        },
+      ],
     },
   },
   polaroide: {

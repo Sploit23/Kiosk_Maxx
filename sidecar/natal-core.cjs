@@ -22,6 +22,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
+const { execFile } = require('node:child_process');
+const { printBematech } = require('./thermal-print.cjs');
 
 const PORT = parseInt(process.env.NATAL_PORT, 10) || 9877;
 const HOST = process.env.NATAL_HOST || '0.0.0.0';
@@ -198,7 +201,7 @@ function sanitizeSegment(s) {
 // ─── Config da máquina ───────────────────────────────────────
 // machineId: gerado pelo PDV no primeiro boot e persistido aqui — identifica
 // a máquina física p/ emparelhamento no portal (kiosk.pair) e carimbos futuros.
-const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', lojaNome: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM', importFolder: '', importSessoes: true };
+const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', lojaNome: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM', importFolder: '', importSessoes: true, tabletToken: '' };
 let machineConfig = { ...MACHINE_DEFAULTS, ...readJson(CONFIG_FILE, {}) };
 // Se o config.json sumiu (pasta de fotos apagada/movida) mas o ponteiro de
 // bootstrap ainda sabe a pasta, devolve a pasta em vez de zerar a config —
@@ -330,27 +333,145 @@ function getFtpConfig() {
   };
 }
 // IP da rede local (para o admin identificar o PC na lista de pendentes).
-function ipLocal() {
+function scoreIpLocal(nome, ip) {
+  if (/^169\.254\./.test(ip)) return -100;
+  let score = 0;
+  if (/^192\.168\./.test(ip)) score += 50;
+  else if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) score += 40;
+  else if (/^10\./.test(ip)) score += 30;
+  else score += 10;
+  const n = String(nome || '').toLowerCase();
+  if (/wi-?fi|wlan|wireless|ethernet|lan|eth|en\d/.test(n)) score += 20;
+  if (/vpn|tailscale|proton|wireguard|openvpn|zerotier|virtual|vmware|virtualbox|hyper-v|vethernet|bluetooth|loopback/.test(n)) score -= 25;
+  return score;
+}
+
+function ipsLocais() {
   try {
     const nets = os.networkInterfaces();
-    let fallback = '';
+    const porIp = new Map();
     for (const nome of Object.keys(nets)) {
       for (const ni of nets[nome] || []) {
         if (ni.family !== 'IPv4' || ni.internal) continue;
-        if (!fallback) fallback = ni.address;
-        if (/^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ni.address)) return ni.address;
+        if (/^169\.254\./.test(ni.address)) continue;
+        const score = scoreIpLocal(nome, ni.address);
+        const atual = porIp.get(ni.address);
+        if (!atual || score > atual.score) porIp.set(ni.address, { ip: ni.address, score });
       }
     }
-    return fallback;
+    return [...porIp.values()].sort((a, b) => b.score - a.score || a.ip.localeCompare(b.ip)).map((x) => x.ip);
   } catch {
-    return '';
+    return [];
   }
+}
+
+function ipLocal() {
+  return ipsLocais()[0] || '';
+}
+
+const PDV_COOKIE = 'natal_pdv';
+const PDV_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
+const PDV_TOKEN_MIN_LEN = 32;
+
+function tokenIgual(a, b) {
+  const alvo = String(b || '');
+  if (!alvo) return false;
+  const ha = crypto.createHash('sha256').update(String(a || '')).digest();
+  const hb = crypto.createHash('sha256').update(alvo).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+function garantirTabletToken(forcar = false) {
+  const atual = String(machineConfig.tabletToken || '').trim();
+  if (!forcar && atual.length >= PDV_TOKEN_MIN_LEN) return atual;
+  const token = crypto.randomBytes(24).toString('hex');
+  machineConfig = { ...machineConfig, tabletToken: token, tabletTokenCriadoEm: Date.now() };
+  try {
+    writeJson(CONFIG_FILE, machineConfig);
+  } catch (e) {
+    console.warn('[natal-core] Falha ao salvar token do tablet:', e.message);
+  }
+  return token;
+}
+
+function tabletLinkUrls(token) {
+  const codigo = encodeURIComponent(token);
+  return ipsLocais().map((ip) => ({ ip, url: `http://${ip}:${PORT}/pdv/?pair=${codigo}` }));
+}
+
+function tabletLinkUrl(token) {
+  const primeiro = tabletLinkUrls(token)[0];
+  return primeiro ? primeiro.url : '';
+}
+
+function isLoopbackReq(req) {
+  const bruto = String((req && req.socket && req.socket.remoteAddress) || '');
+  const ip = bruto.replace(/^::ffff:/i, '').split('%')[0];
+  return ip === '127.0.0.1' || ip === '::1' || ip === 'localhost';
+}
+
+function lerCookie(req, nome) {
+  const bruto = String((req && req.headers && req.headers.cookie) || '');
+  for (const parte of bruto.split(';')) {
+    const i = parte.indexOf('=');
+    if (i < 0) continue;
+    if (parte.slice(0, i).trim() !== nome) continue;
+    const valor = parte.slice(i + 1).trim();
+    try { return decodeURIComponent(valor); } catch { return valor; }
+  }
+  return '';
+}
+
+function tokenDaReq(req) {
+  const cookie = lerCookie(req, PDV_COOKIE);
+  if (cookie) return cookie;
+  const auth = String((req && req.headers && req.headers.authorization) || '');
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1].trim() : '';
+}
+
+function isAutenticado(req) {
+  if (isLoopbackReq(req)) return true;
+  const alvo = String(machineConfig.tabletToken || '').trim();
+  if (alvo.length < PDV_TOKEN_MIN_LEN) return false;
+  return tokenIgual(tokenDaReq(req), alvo);
+}
+
+function isTabletAllowed(method, p) {
+  if (method === 'GET') {
+    if (p === '/api/config' || p === '/api/events' || p === '/api/import/status') return true;
+    if (p === '/api/printer/status' || p === '/api/printer/fila') return true;
+    if (p === '/api/pdv/status' || p === '/api/pdv/caixa' || p === '/api/pdv/caixas') return true;
+    if (p === '/api/sessoes' || /^\/api\/sessoes\/[^/]+$/.test(p)) return true;
+    if (/^\/api\/fotos\/(originais|previews|thumbs)\//.test(p)) return true;
+    if (p === '/api/pedidos' || /^\/api\/pedidos\/[^/]+$/.test(p)) return true;
+    if (p === '/api/auditoria' || p === '/api/testes/status') return true;
+    if (p === '/api/portal/fila' || p === '/api/cache/portal' || p === '/api/galeria/fila') return true;
+    return false;
+  }
+  if (method === 'POST') {
+    if (p === '/api/pedidos' || p === '/api/auditoria') return true;
+    if (p === '/api/printer/thermal') return true;
+    if (/^\/api\/pedidos\/[^/]+\/pagamento$/.test(p)) return true;
+    if (/^\/api\/pedidos\/[^/]+\/impressao\/[^/]+$/.test(p)) return true;
+    if (/^\/api\/pedidos\/[^/]+\/imprimir$/.test(p)) return true;
+    if (/^\/api\/galeria\/upload\/[^/]+\/[^/]+$/.test(p)) return true;
+    if (/^\/api\/galeria\/finalizar\/[^/]+$/.test(p)) return true;
+    if (p === '/api/galeria/fila/sincronizar') return true;
+    if (p === '/api/portal/fila' || p === '/api/portal/fila/confirmar' || p === '/api/portal/fila/erro') return true;
+    if (p === '/api/cache/portal' || p === '/api/cache/portal/conferir') return true;
+    return false;
+  }
+  if (method === 'PUT') return /^\/api\/pedidos\/[^/]+$/.test(p) || /^\/api\/pdv\/caixas\/[^/]+$/.test(p);
+  return false;
 }
 
 // Versão da config segura para o renderer (sem a senha do FTP).
 function configPublica() {
-  const { ftpPass, ...resto } = machineConfig;
+  const { ftpPass, tabletToken, tabletTokenCriadoEm, ...resto } = machineConfig;
   void ftpPass;
+  void tabletToken;
+  void tabletTokenCriadoEm;
   return {
     ...resto,
     machineName: String(process.env.COMPUTERNAME || os.hostname() || '').trim(),
@@ -358,6 +479,7 @@ function configPublica() {
     importFolder: getImportFolder(),
     importFolderCustom: String(machineConfig.importFolder || ''),
     ribbon: getRibbon(),
+    tabletPareado: !!String(machineConfig.tabletToken || '').trim(),
   };
 }
 
@@ -565,9 +687,214 @@ function marcadorLoteCompleto(subPath) {
   return true;
 }
 
+// ─── Lote chegando do outro PC (sessao parcial) ──────────────
+// O importador baixa do outro PC foto a foto e só grava `.natal_done` no
+// fim. Para o vendedor acompanhar, a sessão nasce na primeira foto e vai
+// sendo completada (MESMO id) até o marcador final.
+const IMPORT_STATUS_TTL_MS = 2000;
+const LOTE_PARCIAL_RECENTE_MS = 30 * 60 * 1000;
+let importStatusCache = { at: 0, data: null, promise: null };
+
+async function getImporterStatus(ttlMs = IMPORT_STATUS_TTL_MS) {
+  const agora = Date.now();
+  if (importStatusCache.at && agora - importStatusCache.at < ttlMs) return importStatusCache.data;
+  if (importStatusCache.promise) return importStatusCache.promise;
+  const promessa = (async () => {
+    try {
+      const resp = await fetch('http://127.0.0.1:8099/api/status', {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(1500),
+      });
+      const data = resp.ok ? await resp.json() : null;
+      importStatusCache = { at: Date.now(), data, promise: null };
+      return data;
+    } catch {
+      importStatusCache = { at: Date.now(), data: null, promise: null };
+      return null;
+    }
+  })();
+  importStatusCache.promise = promessa;
+  return promessa;
+}
+
+// O lote só é criado parcialmente se o importador souber que ele existe
+// (download em andamento ou listado pelo outro PC). Isso evita ressuscitar
+// pasta velha/incompleta que ficou na drop zone.
+function loteRecebendoInfo(sub, status) {
+  if (!status || !status.ok) return null;
+  const dl = status.download;
+  if (dl && dl.batch === sub) {
+    const total = Number(dl.total) || 0;
+    return { total: total > 0 ? total : null, count: Number(dl.count) || 0, ativo: true };
+  }
+  const batches = Array.isArray(status.peer && status.peer.batches) ? status.peer.batches : [];
+  const b = batches.find((x) => x && x.name === sub);
+  if (b) return { total: Number(b.count) || null, count: 0, ativo: false };
+  return null;
+}
+
+function nomesDoMarcador(subPath) {
+  try {
+    const data = JSON.parse(fs.readFileSync(path.join(subPath, '.natal_done'), 'utf8'));
+    return data && data.files && typeof data.files === 'object' ? Object.keys(data.files) : [];
+  } catch { return []; }
+}
+
+function nomeDestinoFoto(file, usados) {
+  const ext = path.extname(file).toLowerCase() === '.png' ? '.png' : '.jpg';
+  const base = sanitizeSegment(path.basename(file, path.extname(file))) || 'foto';
+  let nome = base + ext;
+  let n = 2;
+  while (usados.has(nome.toLowerCase())) nome = `${base}-${n++}${ext}`;
+  return nome;
+}
+
+async function copiarFotoParaSessao(id, subPath, file, destino) {
+  const dir = sessaoDir(id);
+  const ext = path.extname(destino).toLowerCase() === '.png' ? '.png' : '.jpg';
+  const origPath = path.join(dir, 'originais', destino);
+  const prevPath = path.join(dir, 'previews', destino);
+  fs.copyFileSync(path.join(subPath, file), origPath);
+  await criarPreviewLeve(origPath, prevPath, ext);
+  await criarThumbLeve(prevPath, path.join(dir, 'thumbs', destino), ext);
+}
+
+// Copia só o que ainda não está na sessão. O mapa reg.fotos (origem -> nome
+// final) é persistido para uma nova varredura/restart nunca duplicar foto.
+async function importarFotosNaSessao(id, subPath, files, reg) {
+  if (!reg.fotos || typeof reg.fotos !== 'object') reg.fotos = {};
+  const dir = sessaoDir(id);
+  const usados = new Set();
+  try {
+    for (const nome of safeReadDir(path.join(dir, 'previews'))) usados.add(nome.toLowerCase());
+  } catch {}
+  for (const destino of Object.values(reg.fotos)) usados.add(String(destino).toLowerCase());
+  const added = [];
+  for (const file of files) {
+    let destino = reg.fotos[file];
+    if (destino && fs.existsSync(path.join(dir, 'previews', destino)) && fs.existsSync(path.join(dir, 'originais', destino))) continue;
+    if (!destino) destino = nomeDestinoFoto(file, usados);
+    try {
+      await copiarFotoParaSessao(id, subPath, file, destino);
+      reg.fotos[file] = destino;
+      usados.add(destino.toLowerCase());
+      added.push(destino);
+    } catch (e) {
+      console.error(`[natal-core] Falha ao importar ${file} (${id}): ${e.message}`);
+    }
+  }
+  return added;
+}
+
+async function criarSessaoParcial(subPath, sub, photos, info) {
+  const id = nextSessionId();
+  const dir = sessaoDir(id);
+  fs.mkdirSync(path.join(dir, 'previews'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'thumbs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'originais'), { recursive: true });
+  const meta = {
+    id,
+    estado: ESTADOS.RECEBENDO,
+    criadaEm: sessionCriadaEm(subPath, photos),
+    fotosEsperadas: info && info.total ? info.total : null,
+    operadorFotografo: 'PASTA',
+    importadaDe: sub,
+    importacaoParcial: true,
+    recebendoDesde: Date.now(),
+    ultimoProgressoEm: Date.now(),
+  };
+  writeJson(sessaoMetaPath(id), meta);
+  const reg = {
+    id,
+    parcial: true,
+    batch: sub,
+    fotos: {},
+    total: meta.fotosEsperadas,
+    criadaEm: meta.criadaEm,
+    snap: snapshotOf(subPath),
+  };
+  pastaImportadas[path.resolve(subPath)] = reg;
+  savePastaImportadas();
+  const added = await importarFotosNaSessao(id, subPath, photos, reg);
+  if (added.length) {
+    meta.ultimoProgressoEm = Date.now();
+    writeJson(sessaoMetaPath(id), meta);
+  }
+  reg.snap = snapshotOf(subPath);
+  savePastaImportadas();
+  dropState.delete('cartao:' + sub);
+  emit('sessao:criada', { id });
+  emit('sessao:status', {
+    id,
+    estado: ESTADOS.RECEBENDO,
+    fotosQtd: getSessao(id).fotosQtd,
+    fotosEsperadas: meta.fotosEsperadas || null,
+  });
+  console.log(`[natal-core] Sessao ${id} recebendo do outro PC (${getSessao(id).fotosQtd}${meta.fotosEsperadas ? '/' + meta.fotosEsperadas : ''}): ${sub}`);
+  return reg;
+}
+
+async function atualizarSessaoParcial(reg, subPath, photos, total) {
+  const meta = readJson(sessaoMetaPath(reg.id), null);
+  if (!meta) return [];
+  let mudou = false;
+  if (total && Number(total) !== Number(reg.total)) {
+    reg.total = Number(total);
+    meta.fotosEsperadas = Number(total);
+    mudou = true;
+  }
+  const added = await importarFotosNaSessao(reg.id, subPath, photos, reg);
+  if (added.length) {
+    meta.ultimoProgressoEm = Date.now();
+    mudou = true;
+  }
+  if (!mudou) return added;
+  writeJson(sessaoMetaPath(reg.id), meta);
+  reg.snap = snapshotOf(subPath);
+  savePastaImportadas();
+  emit('sessao:status', {
+    id: reg.id,
+    estado: ESTADOS.RECEBENDO,
+    fotosQtd: getSessao(reg.id).fotosQtd,
+    fotosEsperadas: meta.fotosEsperadas || null,
+  });
+  return added;
+}
+
+async function finalizarSessaoParcial(reg, subPath) {
+  if (!reg || !reg.id) return false;
+  const meta = readJson(sessaoMetaPath(reg.id), null);
+  if (!meta) return false;
+  const photos = listImageEntries(subPath);
+  await importarFotosNaSessao(reg.id, subPath, photos, reg);
+  const faltando = photos.filter((f) => !reg.fotos[f]);
+  if (faltando.length) return false; // tenta de novo na próxima varredura
+  const marcador = nomesDoMarcador(subPath)
+    .filter((n) => IMAGE_EXTS.has(path.extname(n).toLowerCase()));
+  const importados = new Set(Object.keys(reg.fotos).map((n) => n.toLowerCase()));
+  if (marcador.some((n) => !importados.has(n.toLowerCase()))) return false;
+  const atual = getSessao(reg.id);
+  meta.estado = ESTADOS.PRONTA;
+  meta.fotosEsperadas = atual ? atual.fotosQtd : meta.fotosEsperadas;
+  meta.prontaEm = Date.now();
+  delete meta.importacaoParcial;
+  delete meta.recebendoDesde;
+  writeJson(sessaoMetaPath(reg.id), meta);
+  reg.parcial = false;
+  reg.total = meta.fotosEsperadas;
+  reg.snap = snapshotOf(subPath);
+  reg.importadaEm = Date.now();
+  savePastaImportadas();
+  dropState.delete('cartao:' + reg.batch);
+  console.log(`[natal-core] Sessao ${reg.id} completa (${meta.fotosEsperadas} fotos): ${reg.batch}`);
+  emit('sessao:concluida', { id: reg.id });
+  emit('sessao:status', { id: reg.id, estado: ESTADOS.PRONTA, fotosQtd: meta.fotosEsperadas });
+  return true;
+}
+
 // Cada subpasta com o marcador `.natal_done` (gravado pelo importador DEPOIS
 // de copiar tudo) vira uma sessao PRONTA, sem esperar o programa externo.
-// Sem o marcador, o lote ainda esta sendo copiado -> espera.
+// Sem o marcador, o lote ainda esta sendo copiado -> sessao RECEBENDO.
 async function scanImportFolder(folder) {
   if (importingLock) return;
   const now = Date.now();
@@ -577,38 +904,269 @@ async function scanImportFolder(folder) {
     let st;
     try { st = fs.statSync(subPath); } catch { continue; }
     if (!st.isDirectory()) continue;
-    if (!marcadorLoteCompleto(subPath)) continue; // cópia em andamento
 
     const chave = path.resolve(subPath);
-    const snapAtual = snapshotOf(subPath);
     const jaImportada = pastaImportadas[chave];
-    const mesmoConteudo = !!(jaImportada && typeof jaImportada === 'object' && jaImportada.snap === snapAtual);
-    if (mesmoConteudo) continue;
+    const completo = marcadorLoteCompleto(subPath);
 
-    const stateKey = 'cartao:' + sub;
+    // Sessão parcial existente: vai completando com as fotos que chegaram.
+    if (!completo && jaImportada && typeof jaImportada === 'object' && jaImportada.parcial) {
+      if (jaImportada.cancelada) continue;
+      importingLock = true;
+      try {
+        const status = await getImporterStatus();
+        const info = loteRecebendoInfo(sub, status);
+        const photos = listImageEntries(subPath);
+        if (photos.length) {
+          await atualizarSessaoParcial(jaImportada, subPath, photos, info && info.total);
+        }
+      } catch (e) {
+        console.error(`[natal-core] Parcial ${sub}: ${e.message}`);
+      } finally {
+        importingLock = false;
+      }
+      continue;
+    }
+
+    if (completo) {
+      if (jaImportada && typeof jaImportada === 'object' && jaImportada.cancelada) continue;
+      // Marcador chegou: fecha a mesma sessão que já estava aparecendo.
+      if (jaImportada && typeof jaImportada === 'object' && jaImportada.parcial) {
+        importingLock = true;
+        try {
+          await finalizarSessaoParcial(jaImportada, subPath);
+        } catch (e) {
+          console.error(`[natal-core] Finalizar parcial ${sub}: ${e.message}`);
+        } finally {
+          importingLock = false;
+        }
+        continue;
+      }
+
+      const snapAtual = snapshotOf(subPath);
+      const mesmoConteudo = !!(jaImportada && typeof jaImportada === 'object' && jaImportada.snap === snapAtual);
+      if (mesmoConteudo) continue;
+
+      const stateKey = 'cartao:' + sub;
+      const photos = listImageEntries(subPath);
+      // Lote só com RAW/HEIC/vídeo: o sidecar não sabe servir — ignora (o
+      // fotógrafo precisa exportar JPEG; o importador pode converter no cartao).
+      if (photos.length === 0) continue;
+
+      const prev = dropState.get(stateKey);
+      if (!prev) {
+        dropState.set(stateKey, { first: now, lastChange: now, snap: snapAtual });
+        continue;
+      }
+      if (prev.snap !== snapAtual) {
+        dropState.set(stateKey, { ...prev, lastChange: now, snap: snapAtual });
+        continue;
+      }
+      if (now - prev.lastChange < PHOTOS_SETTLE_MS) continue;
+
+      importingLock = true;
+      try {
+        await importarSubpastaSessao(subPath, sub, photos, !!jaImportada);
+        if (pastaImportadas[chave]) dropState.delete(stateKey);
+      } finally {
+        importingLock = false;
+      }
+      continue;
+    }
+
+    // Sem marcador e sem sessão parcial: cria assim que a primeira foto
+    // terminar e o importador souber que esse lote está chegando.
+    if (jaImportada) continue; // lote antigo sem marcador (não ressuscita)
     const photos = listImageEntries(subPath);
-    // Lote só com RAW/HEIC/vídeo: o sidecar não sabe servir — ignora (o
-    // fotógrafo precisa exportar JPEG; o importador pode converter no cartao).
     if (photos.length === 0) continue;
-
-    const prev = dropState.get(stateKey);
-    if (!prev) {
-      dropState.set(stateKey, { first: now, lastChange: now, snap: snapAtual });
-      continue;
-    }
-    if (prev.snap !== snapAtual) {
-      dropState.set(stateKey, { ...prev, lastChange: now, snap: snapAtual });
-      continue;
-    }
-    if (now - prev.lastChange < PHOTOS_SETTLE_MS) continue;
-
+    if (now - (st.mtimeMs || 0) > LOTE_PARCIAL_RECENTE_MS) continue;
     importingLock = true;
     try {
-      await importarSubpastaSessao(subPath, sub, photos, !!jaImportada);
-      if (pastaImportadas[chave]) dropState.delete(stateKey);
+      const status = await getImporterStatus();
+      const info = loteRecebendoInfo(sub, status);
+      if (info) await criarSessaoParcial(subPath, sub, photos, info);
+    } catch (e) {
+      console.error(`[natal-core] Parcial ${sub}: ${e.message}`);
     } finally {
       importingLock = false;
     }
+  }
+}
+
+// ─── Previews leves (vitrine do iPad) ────────────────────────
+// A impressão e o envio digital usam SEMPRE `originais` (vendas.html), então o
+// preview pode ser pequeno: ele é só o que aparece na tela do tablet. Antes o
+// importador copiava o original inteiro como preview (2–4 MB por foto) e uma
+// sessão de 10 fotos travava o iPad. Aqui reduzimos para um JPEG leve usando o
+// System.Drawing do Windows (sem dependência nova). Se a redução falhar, cai na
+// cópia antiga para nunca deixar a sessão sem preview.
+const PREVIEW_MAX_DIM = Math.max(400, parseInt(process.env.NATAL_PREVIEW_MAX, 10) || 1100);
+const PREVIEW_QUALITY = Math.min(95, Math.max(50, parseInt(process.env.NATAL_PREVIEW_QUALITY, 10) || 80));
+const PREVIEW_SKIP_BYTES = 300 * 1024; // já é leve o bastante; evita reprocessar a cada boot
+const PREVIEW_CONCURRENCY = Math.max(1, parseInt(process.env.NATAL_PREVIEW_CONCURRENCY, 10) || 2);
+const PREVIEW_BIG_BYTES = Math.max(1, parseInt(process.env.NATAL_PREVIEW_BIG_BYTES, 10) || 4 * 1024 * 1024);
+// Miniaturas da vitrine/grade: o iPad não precisa da foto de 1100 px para
+// mostrar um card de 240 px. Geramos um JPEG bem menor a partir do preview
+// (sem decodificar o original de novo). A rota /api/fotos/thumbs cai no
+// preview se a miniatura ainda não existir (migração em background).
+const THUMB_MAX_DIM = Math.max(160, parseInt(process.env.NATAL_THUMB_MAX, 10) || 360);
+const THUMB_QUALITY = Math.min(90, Math.max(40, parseInt(process.env.NATAL_THUMB_QUALITY, 10) || 70));
+
+// Fotos grandes (26 MP ~ 7 MB) decodificadas por 3 PowerShell ao mesmo tempo
+// estouravam a memória e caíam no fallback (preview = cópia do original). Aqui
+// limitamos os processos simultâneos e damos vaga exclusiva para as grandes;
+// o import e a migração compartilham o mesmo semáforo.
+let previewAtivos = 0;
+const previewFila = [];
+function previewAdquirir(peso) {
+  return new Promise((resolve) => {
+    const tentar = () => {
+      if (peso >= PREVIEW_CONCURRENCY) {
+        if (previewAtivos !== 0) return false;
+        previewAtivos = PREVIEW_CONCURRENCY;
+      } else {
+        if (previewAtivos + peso > PREVIEW_CONCURRENCY) return false;
+        previewAtivos += peso;
+      }
+      resolve();
+      return true;
+    };
+    if (!tentar()) previewFila.push({ peso, tentar });
+  });
+}
+function previewLiberar(peso) {
+  previewAtivos = Math.max(0, previewAtivos - peso);
+  while (previewFila.length) {
+    const proximo = previewFila[0];
+    if (!proximo.tentar()) break;
+    previewFila.shift();
+  }
+}
+async function comPreviewSlot(srcSize, fn) {
+  const peso = srcSize >= PREVIEW_BIG_BYTES ? PREVIEW_CONCURRENCY : 1;
+  await previewAdquirir(peso);
+  try {
+    return await fn();
+  } finally {
+    previewLiberar(peso);
+  }
+}
+
+function gerarDerivado(src, dst, ext, maxDim, quality) {
+  const png = String(ext).toLowerCase() === '.png';
+  // Aspas simples do PowerShell = literal (não interpola $ nem trata \ como
+  // escape); aspas simples internas são duplicadas.
+  const psStr = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+  const linhas = [
+    'Add-Type -AssemblyName System.Drawing',
+    '$ErrorActionPreference = "Stop"',
+    `$src = ${psStr(src)}`,
+    `$dst = ${psStr(dst)}`,
+    `$max = ${maxDim}`,
+    '$img = $null; $bmp = $null; $g = $null',
+    'try {',
+    '  $img = [System.Drawing.Image]::FromFile($src)',
+    '  $scale = [Math]::Min(1.0, $max / [Math]::Max($img.Width, $img.Height))',
+    '  $w = [int][Math]::Max(1, [Math]::Round($img.Width * $scale))',
+    '  $h = [int][Math]::Max(1, [Math]::Round($img.Height * $scale))',
+    '  $bmp = New-Object System.Drawing.Bitmap($w, $h)',
+    '  $g = [System.Drawing.Graphics]::FromImage($bmp)',
+    '  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic',
+    '  $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality',
+    '  $g.DrawImage($img, 0, 0, $w, $h)',
+    // Mantém o tag EXIF de orientação: o preview fica com os mesmos pixels do
+    // original (só reduzidos) e o navegador continua girando como antes. Sem
+    // isso, foto de retrato apareceria deitada na tela do iPad.
+    '  try { $op = $img.GetPropertyItem(0x0112); $bmp.SetPropertyItem($op) } catch {}',
+  ];
+  if (png) {
+    linhas.push('  $bmp.Save($dst, [System.Drawing.Imaging.ImageFormat]::Png)');
+  } else {
+    linhas.push(
+      "  $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }",
+      '  $ep = New-Object System.Drawing.Imaging.EncoderParameters(1)',
+      `  $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, [long]${quality})`,
+      '  $bmp.Save($dst, $codec, $ep)',
+    );
+  }
+  linhas.push(
+    '} finally {',
+    '  if ($g) { $g.Dispose() }',
+    '  if ($bmp) { $bmp.Dispose() }',
+    '  if ($img) { $img.Dispose() }',
+    '}',
+  );
+  const script = linhas.join('\r\n');
+  return new Promise((resolve, reject) => {
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+      { windowsHide: true, timeout: 120000 },
+      (err, stdout, stderr) => {
+        if (err) reject(new Error(String(stderr || err.message).trim()));
+        else resolve();
+      },
+    );
+  });
+}
+
+function gerarPreviewLeve(src, dst, ext) {
+  return gerarDerivado(src, dst, ext, PREVIEW_MAX_DIM, PREVIEW_QUALITY);
+}
+
+// Gera o preview leve a partir do original; em caso de falha, copia o original
+// (comportamento antigo) para a sessão não ficar sem preview.
+async function criarPreviewLeve(srcPath, prevPath, ext) {
+  const tmp = path.join(path.dirname(prevPath), `.tmp-${process.pid}-${Date.now()}-${path.basename(prevPath)}`);
+  let srcSize = 0;
+  try { srcSize = fs.statSync(srcPath).size; } catch {}
+  let ultimoErro = null;
+  for (let tentativa = 1; tentativa <= 2; tentativa++) {
+    try {
+      await comPreviewSlot(srcSize, () => gerarPreviewLeve(srcPath, tmp, ext));
+      for (let i = 0; ; i++) {
+        try { fs.renameSync(tmp, prevPath); return; } catch (e) {
+          if (i >= 3) throw e;
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      }
+    } catch (e) {
+      ultimoErro = e;
+      try { fs.rmSync(tmp, { force: true }); } catch {}
+      if (tentativa < 2) await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  const mesmo = path.resolve(srcPath) === path.resolve(prevPath);
+  console.error(`[natal-core] Preview leve falhou (${path.basename(prevPath)})${mesmo ? '' : ', usando copia'}: ${ultimoErro ? ultimoErro.message : 'erro desconhecido'}`);
+  if (!mesmo) fs.copyFileSync(srcPath, prevPath);
+}
+
+// Miniatura leve (grade/vitrine). Diferente do preview, não tem fallback de
+// cópia: se falhar, a rota serve o preview e a próxima migração retenta.
+async function criarThumbLeve(srcPath, thumbPath, ext) {
+  try {
+    const srcStat = fs.statSync(srcPath);
+    try {
+      const stThumb = fs.statSync(thumbPath);
+      if (stThumb.isFile() && stThumb.size > 0 && stThumb.mtimeMs >= srcStat.mtimeMs) return;
+    } catch {}
+    fs.mkdirSync(path.dirname(thumbPath), { recursive: true });
+    const tmp = path.join(path.dirname(thumbPath), `.tmp-${process.pid}-${Date.now()}-${path.basename(thumbPath)}`);
+    let ultimoErro = null;
+    for (let tentativa = 1; tentativa <= 2; tentativa++) {
+      try {
+        await comPreviewSlot(1, () => gerarDerivado(srcPath, tmp, ext, THUMB_MAX_DIM, THUMB_QUALITY));
+        fs.renameSync(tmp, thumbPath);
+        return;
+      } catch (e) {
+        ultimoErro = e;
+        try { fs.rmSync(tmp, { force: true }); } catch {}
+        if (tentativa < 2) await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    console.error(`[natal-core] Miniatura falhou (${path.basename(thumbPath)}): ${ultimoErro ? ultimoErro.message : 'erro desconhecido'}`);
+  } catch (e) {
+    console.error(`[natal-core] Miniatura falhou (${path.basename(thumbPath)}): ${e.message}`);
   }
 }
 
@@ -627,6 +1185,7 @@ async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
   const id = nextSessionId();
   const dir = sessaoDir(id);
   fs.mkdirSync(path.join(dir, 'previews'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'thumbs'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'originais'), { recursive: true });
 
   const imported = [];
@@ -634,9 +1193,13 @@ async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
     const ext = path.extname(file).toLowerCase() === '.png' ? '.png' : '.jpg';
     const base = sanitizeSegment(path.basename(file, path.extname(file))) || 'foto';
     const name = base + ext;
+    const srcPath = path.join(subPath, file);
     try {
-      fs.copyFileSync(path.join(subPath, file), path.join(dir, 'originais', name));
-      fs.copyFileSync(path.join(subPath, file), path.join(dir, 'previews', name)); // preview = cópia p/ servir rápido
+      const origPath = path.join(dir, 'originais', name);
+      const prevPath = path.join(dir, 'previews', name);
+      fs.copyFileSync(srcPath, origPath);
+      await criarPreviewLeve(origPath, prevPath, ext);
+      await criarThumbLeve(prevPath, path.join(dir, 'thumbs', name), ext);
       imported.push(name);
     } catch (e) {
       console.error(`[natal-core] Falha ao importar ${file}: ${e.message}`);
@@ -665,6 +1228,159 @@ async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
   pastaImportadas[path.resolve(subPath)] = { id, snap: snapshotOf(subPath), importadaEm: Date.now() };
   savePastaImportadas();
   dropState.delete(sub);
+}
+
+// Migração idempotente dos previews antigos (que eram cópia do original).
+// Reduz só os arquivos ainda pesados, usando o ORIGINAL como fonte (melhor
+// qualidade) e preservando `originais/` intactos. Roda em background após o
+// boot para não atrasar o servidor; se algo falhar, a próxima abertura retenta.
+let migracaoPreviewsIniciada = false;
+async function migrarPreviewsPesados() {
+  if (migracaoPreviewsIniciada) return;
+  migracaoPreviewsIniciada = true;
+  let reduzidos = 0;
+  let falhas = 0;
+  const pendentes = [];
+  try {
+    // 1) Coleta só o que está pesado (stat é barato) e 2) reduz com um pool
+    // pequeno; o semáforo de previews limita os PowerShell simultâneos (fotos
+    // grandes rodam sozinhas) para não estourar a memória do PC da loja.
+    const tarefas = [];
+    for (const sid of safeReadDir(SESSOES_DIR)) {
+      const pdir = path.join(SESSOES_DIR, sid, 'previews');
+      let arquivos = [];
+      try { arquivos = fs.readdirSync(pdir); } catch { continue; }
+      for (const f of arquivos) {
+        if (!IMAGE_EXTS.has(path.extname(f).toLowerCase()) || f.startsWith('.tmp-')) continue;
+        const prevPath = path.join(pdir, f);
+        let st;
+        try { st = fs.statSync(prevPath); } catch { continue; }
+        if (!st.isFile() || st.size <= PREVIEW_SKIP_BYTES) continue;
+        const origPath = path.join(SESSOES_DIR, sid, 'originais', f);
+        tarefas.push({
+          sid,
+          f,
+          prevPath,
+          antes: st.size,
+          srcPath: fs.existsSync(origPath) ? origPath : prevPath,
+          ext: path.extname(f).toLowerCase() === '.png' ? '.png' : '.jpg',
+        });
+      }
+    }
+    if (!tarefas.length) return;
+    console.log(`[natal-core] previews leves: ${tarefas.length} arquivo(s) a reduzir`);
+    let idx = 0;
+    const limite = Math.max(1, Math.min(3, os.cpus().length || 1));
+    const trabalhar = async () => {
+      while (idx < tarefas.length) {
+        const t = tarefas[idx++];
+        try {
+          await criarPreviewLeve(t.srcPath, t.prevPath, t.ext);
+          let depois = t.antes;
+          try { depois = fs.statSync(t.prevPath).size; } catch {}
+          if (depois < t.antes) {
+            reduzidos += 1;
+            if (reduzidos % 20 === 0) {
+              console.log(`[natal-core] previews leves: ${reduzidos}/${tarefas.length}...`);
+            }
+          } else {
+            pendentes.push(t);
+          }
+        } catch (e) {
+          falhas += 1;
+          console.error(`[natal-core] migrar preview ${t.sid}/${t.f}: ${e.message}`);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(limite, tarefas.length) }, trabalhar));
+    // Segunda passada em série: se alguma foto grande caiu no fallback (cópia),
+    // tenta de novo sozinha — sem disputar memória com as outras.
+    if (pendentes.length) {
+      console.log(`[natal-core] previews leves: ${pendentes.length} pendente(s), retentando em serie`);
+      for (const t of pendentes) {
+        try {
+          await criarPreviewLeve(t.srcPath, t.prevPath, t.ext);
+          let depois = t.antes;
+          try { depois = fs.statSync(t.prevPath).size; } catch {}
+          if (depois < t.antes) {
+            reduzidos += 1;
+            console.log(`[natal-core] previews leves: recuperado ${t.sid}/${t.f} (${t.antes} -> ${depois})`);
+          } else {
+            falhas += 1;
+            console.error(`[natal-core] previews leves: ${t.sid}/${t.f} continua pesado (${depois} bytes)`);
+          }
+        } catch (e) {
+          falhas += 1;
+          console.error(`[natal-core] retry preview ${t.sid}/${t.f}: ${e.message}`);
+        }
+      }
+    }
+    console.log(`[natal-core] previews leves: ${reduzidos} reduzido(s), ${falhas} falha(s)`);
+  } catch (e) {
+    console.error(`[natal-core] migrar previews: ${e.message}`);
+  }
+}
+
+// Migração idempotente das miniaturas: para cada preview sem thumb (ou com
+// thumb mais antigo que o preview), gera a versão de 360 px a partir do
+// próprio preview. Roda em background; a rota cai no preview enquanto isso.
+let migracaoThumbsIniciada = false;
+async function migrarThumbs() {
+  if (migracaoThumbsIniciada) return;
+  migracaoThumbsIniciada = true;
+  let criados = 0;
+  let falhas = 0;
+  try {
+    const tarefas = [];
+    for (const sid of safeReadDir(SESSOES_DIR)) {
+      const pdir = path.join(SESSOES_DIR, sid, 'previews');
+      let arquivos = [];
+      try { arquivos = fs.readdirSync(pdir); } catch { continue; }
+      const tdir = path.join(SESSOES_DIR, sid, 'thumbs');
+      for (const f of arquivos) {
+        if (!IMAGE_EXTS.has(path.extname(f).toLowerCase()) || f.startsWith('.tmp-')) continue;
+        const prevPath = path.join(pdir, f);
+        const thumbPath = path.join(tdir, f);
+        let stPrev;
+        try { stPrev = fs.statSync(prevPath); } catch { continue; }
+        if (!stPrev.isFile()) continue;
+        try {
+          const stThumb = fs.statSync(thumbPath);
+          if (stThumb.isFile() && stThumb.size > 0 && stThumb.mtimeMs >= stPrev.mtimeMs) continue;
+        } catch {}
+        tarefas.push({
+          sid,
+          f,
+          prevPath,
+          thumbPath,
+          ext: path.extname(f).toLowerCase() === '.png' ? '.png' : '.jpg',
+        });
+      }
+    }
+    if (!tarefas.length) return;
+    console.log(`[natal-core] miniaturas: ${tarefas.length} arquivo(s) a gerar`);
+    let idx = 0;
+    const trabalhar = async () => {
+      while (idx < tarefas.length) {
+        const t = tarefas[idx++];
+        await criarThumbLeve(t.prevPath, t.thumbPath, t.ext);
+        let ok = false;
+        try { ok = fs.statSync(t.thumbPath).size > 0; } catch {}
+        if (ok) {
+          criados += 1;
+          if (criados % 50 === 0) console.log(`[natal-core] miniaturas: ${criados}/${tarefas.length}...`);
+        } else {
+          falhas += 1;
+          console.error(`[natal-core] miniaturas: ${t.sid}/${t.f} nao gerou`);
+        }
+      }
+    };
+    const limite = Math.max(1, Math.min(2, os.cpus().length || 1));
+    await Promise.all(Array.from({ length: Math.min(limite, tarefas.length) }, trabalhar));
+    console.log(`[natal-core] miniaturas: ${criados} criada(s), ${falhas} falha(s)`);
+  } catch (e) {
+    console.error(`[natal-core] migrar miniaturas: ${e.message}`);
+  }
 }
 
 // ─── Contador de sessões (NATAL-XXXXX) ───────────────────────
@@ -732,6 +1448,70 @@ function arquivarCaixa(fechada) {
   caixas.push({ ...fechada, numero: fechada.numero || caixas.length + 1 });
   writeJson(CAIXAS_FILE, caixas);
 }
+function statusPedidoVenda(x) {
+  return ['PAGO', 'IMPRESSO'].includes(String((x && x.status) || '').toUpperCase());
+}
+function totaisPedidosCaixa(caixaId) {
+  let total = 0;
+  const porMeio = {};
+  for (const p of pedidos) {
+    if (!p || String(p.caixaId || '') !== String(caixaId || '')) continue;
+    if (!statusPedidoVenda(p)) continue;
+    const valorPedido = Number(p.total) || 0;
+    total += valorPedido;
+    if (Array.isArray(p.pagamentos) && p.pagamentos.length) {
+      for (const pg of p.pagamentos) {
+        if (pg && pg.meio && Number(pg.valor) > 0) {
+          porMeio[pg.meio] = (porMeio[pg.meio] || 0) + Number(pg.valor);
+        }
+      }
+    } else if (p.meio) {
+      porMeio[p.meio] = (porMeio[p.meio] || 0) + valorPedido;
+    }
+  }
+  for (const k of Object.keys(porMeio)) {
+    porMeio[k] = Number(porMeio[k].toFixed(2));
+    if (Math.abs(porMeio[k]) <= 0.004) delete porMeio[k];
+  }
+  return { total: Number(total.toFixed(2)), porMeio };
+}
+function reconciliarCaixasHistorico() {
+  let mudou = false;
+  caixas = caixas.map((c) => {
+    if (!c || !c.id || !c.fechadoEm) return c;
+    if (!c.meiosDeclarados || !Object.keys(c.meiosDeclarados).length) return c;
+    const calc = totaisPedidosCaixa(c.id);
+    if (calc.total <= 0.004) return c;
+    const atual = Number(c.totalVendido) || 0;
+    if (atual > calc.total + 0.004) return c;
+    const sistema = { ...calc.porMeio };
+    sistema.dinheiro = Number(sistema.dinheiro || 0) + (Number(c.valorInicial) || 0);
+    const formas = new Set([...Object.keys(c.meiosDeclarados), ...Object.keys(sistema)]);
+    let diferenca = 0;
+    for (const forma of formas) {
+      diferenca += (Number(c.meiosDeclarados[forma]) || 0) - (Number(sistema[forma]) || 0);
+    }
+    const totalRecebido = Object.values(c.meiosDeclarados)
+      .reduce((acc, v) => acc + Math.max(0, Number(v) || 0), 0);
+    const novo = {
+      ...c,
+      totalVendido: calc.total,
+      totalPorMeio: calc.porMeio,
+      totalRecebido: Number(totalRecebido.toFixed(2)),
+      diferenca: Number(diferenca.toFixed(2)),
+    };
+    const mudouValores = Number(c.totalVendido || 0) !== novo.totalVendido
+      || JSON.stringify(c.totalPorMeio || {}) !== JSON.stringify(novo.totalPorMeio)
+      || Number(c.totalRecebido || 0) !== novo.totalRecebido
+      || Number(c.diferenca || 0) !== novo.diferenca;
+    if (!mudouValores && c.reconciliadoEm) return c;
+    novo.reconciliadoEm = new Date().toISOString();
+    mudou = true;
+    return novo;
+  });
+  if (mudou) writeJson(CAIXAS_FILE, caixas);
+}
+reconciliarCaixasHistorico();
 
 // ─── Outbox para o portal (fila durável de envio) ─────────────
 // O PDV funciona OFFLINE: nada é enviado direto do balcão. Tudo que o
@@ -903,6 +1683,7 @@ function recarregarEstadoLocal() {
   testes = readJson(TESTES_FILE, []);
   caixa = readJson(CAIXA_FILE, null);
   caixas = readJson(CAIXAS_FILE, []);
+  reconciliarCaixasHistorico();
   pastaImportadas = readJson(PASTA_IMPORTADAS_FILE, {});
   filaImpressao = (() => {
     const arr = readJson(FILA_IMPRESSAO_FILE, []);
@@ -935,12 +1716,26 @@ function consumeRibbon(units) {
 
 // ─── SSE ─────────────────────────────────────────────────────
 const sseClients = new Set();
+const ssePdvDispositivos = new Map();
+function ipDoCliente(req) {
+  return String((req && req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '');
+}
+function contarDispositivosPdv() {
+  const ips = new Set();
+  for (const ip of ssePdvDispositivos.values()) {
+    if (ip) ips.add(ip);
+  }
+  return ips.size;
+}
 function emit(event, data) {
   const payload = typeof data === 'string'
     ? `event: ${event}\ndata: ${data}\n\n`
     : `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of sseClients) {
-    try { client.write(payload); } catch { sseClients.delete(client); }
+    try { client.write(payload); } catch {
+      sseClients.delete(client);
+      ssePdvDispositivos.delete(client);
+    }
   }
 }
 
@@ -984,9 +1779,11 @@ function sendJson(res, code, data) {
   const body = JSON.stringify(data);
   res.writeHead(code, {
     'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   });
   res.end(body);
 }
@@ -1008,6 +1805,190 @@ function readBody(req, maxBytes = 200 * 1024 * 1024) {
   });
 }
 
+const WEB_DIR = (() => {
+  const env = String(process.env.NATAL_WEB_DIR || '').trim();
+  if (env) return path.resolve(env);
+  const aoLado = path.join(__dirname, 'web');
+  if (fs.existsSync(path.join(aoLado, 'vendas.html'))) return aoLado;
+  return path.resolve(__dirname, '..', 'dist');
+})();
+
+const WEB_MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+};
+
+// ─── Compressão do PDV web (iPad carrega JS/CSS/HTML a cada abertura) ──────
+// Sem compressão o shell do PDV passa de 400 KB; com brotli/gzip cai para
+// ~110 KB. O cache abaixo evita recomprimir o mesmo arquivo a cada request;
+// a chave inclui mtime/tamanho para invalidar sozinha depois de um build.
+const COMPRESSIBLE_WEB_EXTS = new Set(['.html', '.js', '.css', '.json', '.svg', '.webmanifest', '.txt', '.map']);
+const COMPRESS_CACHE_MAX = 48;
+const _compressCache = new Map();
+
+function encodingAceita(req) {
+  const a = String(req.headers['accept-encoding'] || '').toLowerCase();
+  if (/\bbr\b/.test(a)) return 'br';
+  if (/\bgzip\b/.test(a)) return 'gzip';
+  return '';
+}
+
+function etagArquivo(st, enc) {
+  const base = `${st.size.toString(16)}-${Math.floor(st.mtimeMs || st.mtime.getTime()).toString(16)}`;
+  return `"${base}${enc ? '-' + enc : ''}"`;
+}
+
+function comprimidoPara(full, st, enc) {
+  const key = `${full}|${st.size}|${Math.floor(st.mtimeMs || st.mtime.getTime())}|${enc}`;
+  const hit = _compressCache.get(key);
+  if (hit) return hit;
+  const raw = fs.readFileSync(full);
+  const out = enc === 'br'
+    ? zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } })
+    : zlib.gzipSync(raw, { level: 9 });
+  _compressCache.set(key, out);
+  if (_compressCache.size > COMPRESS_CACHE_MAX) {
+    const primeira = _compressCache.keys().next().value;
+    _compressCache.delete(primeira);
+  }
+  return out;
+}
+
+function sendPdvPairingPage(res, code, titulo, mensagem) {
+  const body = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${titulo} - Maxx Foto</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#0a1626;color:#f5efe3;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  main{width:100%;max-width:480px;background:#0f2039;border:1px solid #24466f;border-radius:16px;padding:28px;text-align:center}
+  h1{margin:0 0 12px;font-size:24px;color:#e8c787}
+  p{margin:0 0 18px;line-height:1.55;color:#a9b8cc}
+  a{display:inline-block;padding:12px 20px;border-radius:10px;background:#d4a24c;color:#0a1626;font-weight:700;text-decoration:none}
+</style>
+</head>
+<body>
+<main>
+  <h1>${titulo}</h1>
+  <p>${mensagem}</p>
+  <a href="/pdv/">Atualizar</a>
+</main>
+</body>
+</html>`;
+  res.writeHead(code, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.end(body);
+}
+
+function servirPdv(req, res, relativo) {
+  let alvo;
+  try {
+    alvo = decodeURIComponent(String(relativo || '')).replace(/^\/+/, '');
+  } catch {
+    return sendJson(res, 400, { success: false, error: 'Caminho inválido' });
+  }
+  const partes = alvo.split(/[\\/]+/);
+  if (!alvo || partes.some((seg) => seg === '..' || seg.startsWith('.'))) {
+    return sendJson(res, 404, { success: false, error: 'Rota nao encontrada' });
+  }
+  const full = path.resolve(WEB_DIR, alvo);
+  if (full !== WEB_DIR && !full.startsWith(WEB_DIR + path.sep)) {
+    return sendJson(res, 403, { success: false, error: 'Acesso negado' });
+  }
+  let st;
+  try {
+    st = fs.statSync(full);
+  } catch {
+    return sendJson(res, 404, { success: false, error: 'Rota nao encontrada' });
+  }
+  if (!st.isFile()) {
+    return sendJson(res, 404, { success: false, error: 'Rota nao encontrada' });
+  }
+  const ext = path.extname(full).toLowerCase();
+  const html = ext === '.html';
+  const assetLongo = /^assets[\\/]/.test(alvo);
+  const comprimivel = COMPRESSIBLE_WEB_EXTS.has(ext) && st.size >= 1024 && st.size <= 8 * 1024 * 1024;
+  const enc = comprimivel ? encodingAceita(req) : '';
+  const etag = etagArquivo(st, enc);
+  const cacheControl = html ? 'no-cache' : (assetLongo ? 'public, max-age=31536000, immutable' : 'public, max-age=3600');
+  const headers = {
+    'Content-Type': WEB_MIME[ext] || 'application/octet-stream',
+    'Cache-Control': cacheControl,
+    'X-Content-Type-Options': 'nosniff',
+    'ETag': etag,
+    'Last-Modified': st.mtime.toUTCString(),
+  };
+  if (comprimivel) headers['Vary'] = 'Accept-Encoding';
+
+  const inm = String(req.headers['if-none-match'] || '');
+  const ims = req.headers['if-modified-since'];
+  const etagSemAspas = etag.replace(/^"|"$/g, '');
+  const bateEtag = inm ? inm.split(',').some((s) => {
+    const v = s.trim().replace(/^W\//, '').replace(/^"|"$/g, '');
+    return v === etagSemAspas;
+  }) : false;
+  const bateData = !inm && ims && Date.parse(ims) >= Math.floor(st.mtimeMs / 1000) * 1000;
+  if (bateEtag || bateData) {
+    res.writeHead(304, headers);
+    res.end();
+    return;
+  }
+
+  if (enc) {
+    let body = null;
+    try {
+      body = comprimidoPara(full, st, enc);
+    } catch (e) {
+      console.error(`[natal-core] compressao PDV falhou (${path.basename(full)}): ${e.message}`);
+    }
+    if (body) {
+      headers['Content-Encoding'] = enc;
+      headers['Content-Length'] = body.length;
+      res.writeHead(200, headers);
+      if (req.method === 'HEAD') {
+        res.end();
+        return;
+      }
+      res.end(body);
+      return;
+    }
+    // Compressão falhou: responde sem compressão e com ETag sem o sufixo.
+    delete headers['Vary'];
+    headers['ETag'] = etagArquivo(st, '');
+  }
+
+  headers['Content-Length'] = st.size;
+  res.writeHead(200, headers);
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
+  const stream = fs.createReadStream(full);
+  stream.on('error', () => { try { res.destroy(); } catch {} });
+  stream.pipe(res);
+}
+
 // ─── Envio digital — galeria pública /natal (FTP, fila durável) ────────────
 // O PDV compõe o JPEG da foto digital (pose única) e manda com o CÓDIGO da
 // venda + sequência. O sidecar grava em disco (galeria/<CODIGO>/<seq>.jpg),
@@ -1018,6 +1999,7 @@ function readBody(req, maxBytes = 200 * 1024 * 1024) {
 // nunca depende do envio ter dado certo.
 const GALERIA_SYNC_MS = 60000;
 const GALERIA_FTP_TIMEOUT_MS = 60000;
+const GALERIA_FTP_TENTATIVAS = 3; // o host FTP do portal conecta lento/intermitente
 const GALERIA_LOCK_MS = 5 * 60000;
 const GALERIA_RECUPERACAO_MS = 90000;
 const galeriaLocks = new Map();
@@ -1082,6 +2064,10 @@ function galeriaStatusUI(meta) {
     tentativas: meta.tentativas || 0,
     ultimoErro: meta.ultimoErro || '',
     ultimoEnvioEm: meta.ultimoEnvioEm || null,
+    // Referências das fotos (sessão/arquivo + ajustes) enviadas pelo PDV no
+    // /finalizar. Permite ao PDV REGERAR a foto se ela não chegou ao disco
+    // (app fechou no meio do compose) sem precisar refazer a venda.
+    refs: Array.isArray(meta.refs) ? meta.refs : [],
   };
 }
 
@@ -1091,7 +2077,7 @@ function galeriaStatusUI(meta) {
 // interno em servidores com NAT.
 function ftpUpload({ host, port = 21, user, pass, folder = '', filename, buffer, timeout = 45000 }) {
   return new Promise((resolve, reject) => {
-    const sock = net.connect({ host, port });
+    const sock = net.connect({ host, port, timeout });
     sock.setTimeout(timeout);
     let buf = '';
     let cur = [];
@@ -1182,6 +2168,28 @@ function ftpUpload({ host, port = 21, user, pass, folder = '', filename, buffer,
   });
 }
 
+// O servidor FTP do portal (maxxfoto.com.br) às vezes demora ~30s para aceitar
+// o TCP e às vezes nem responde (o SO devolve ETIMEDOUT). Como é intermitente,
+// vale reabrir a conexão: uma nova tentativa costuma passar. Tenta algumas
+// vezes antes de desistir — sem isso a UI acusava "sem internet" à toa.
+async function ftpUploadComRetry(opts, rotulo) {
+  let ultimoErro;
+  for (let tentativa = 1; tentativa <= GALERIA_FTP_TENTATIVAS; tentativa++) {
+    try {
+      await comTimeout(
+        ftpUpload({ ...opts, timeout: GALERIA_FTP_TIMEOUT_MS }),
+        GALERIA_FTP_TIMEOUT_MS + 10000,
+        `Timeout no envio ${rotulo} (FTP)`
+      );
+      return;
+    } catch (e) {
+      ultimoErro = e;
+      if (tentativa < GALERIA_FTP_TENTATIVAS) await new Promise((r) => setTimeout(r, 3000 * tentativa));
+    }
+  }
+  throw ultimoErro;
+}
+
 // Sobe um código inteiro: fotos que faltam + manifesto por último.
 async function sincronizarGaleria(codigo, { forcar = false } = {}) {
   const c = String(codigo || '').toUpperCase();
@@ -1210,10 +2218,9 @@ async function sincronizarGaleria(codigo, { forcar = false } = {}) {
         const file = path.join(galeriaCodigoDir(c), `${foto.seq}.jpg`);
         const buffer = fs.readFileSync(file);
         lockToken.at = Date.now();
-        await comTimeout(
-          ftpUpload({ host: ftp.host, port: ftp.port, user: ftp.user, pass: ftp.pass, folder: ftp.folder, filename: galeriaArquivoRemoto(c, foto.seq), buffer }),
-          GALERIA_FTP_TIMEOUT_MS,
-          'Timeout no envio da foto (FTP)'
+        await ftpUploadComRetry(
+          { host: ftp.host, port: ftp.port, user: ftp.user, pass: ftp.pass, folder: ftp.folder, filename: galeriaArquivoRemoto(c, foto.seq), buffer },
+          `da foto ${c}/${foto.seq}`
         );
         foto.enviadoEm = Date.now();
         foto.erro = '';
@@ -1239,10 +2246,9 @@ async function sincronizarGaleria(codigo, { forcar = false } = {}) {
       };
       try {
         lockToken.at = Date.now();
-        await comTimeout(
-          ftpUpload({ host: ftp.host, port: ftp.port, user: ftp.user, pass: ftp.pass, folder: ftp.folder, filename: `${c}.json`, buffer: Buffer.from(JSON.stringify(manifesto), 'utf-8') }),
-          GALERIA_FTP_TIMEOUT_MS,
-          'Timeout no envio do manifesto (FTP)'
+        await ftpUploadComRetry(
+          { host: ftp.host, port: ftp.port, user: ftp.user, pass: ftp.pass, folder: ftp.folder, filename: `${c}.json`, buffer: Buffer.from(JSON.stringify(manifesto), 'utf-8') },
+          `do manifesto ${c}`
         );
         meta.manifestoEnviadoEm = Date.now();
         meta.ultimoErro = '';
@@ -1739,7 +2745,89 @@ const server = http.createServer(async (req, res) => {
   if (method === 'OPTIONS') return sendJson(res, 200, { success: true });
 
   try {
-    // ── SSE ──
+    if (method === 'GET' && (p === '/pdv' || p === '/pdv/')) {
+      const pair = url.searchParams.get('pair');
+      if (pair) {
+        const alvo = String(machineConfig.tabletToken || '').trim();
+        if (alvo.length >= PDV_TOKEN_MIN_LEN && tokenIgual(pair, alvo)) {
+          res.writeHead(302, {
+            Location: '/pdv/',
+            'Set-Cookie': `${PDV_COOKIE}=${alvo}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${PDV_COOKIE_MAX_AGE}`,
+            'Cache-Control': 'no-store',
+          });
+          res.end();
+          return;
+        }
+        if (isAutenticado(req)) {
+          res.writeHead(302, { Location: '/pdv/', 'Cache-Control': 'no-store' });
+          res.end();
+          return;
+        }
+        return sendPdvPairingPage(res, 401, 'QR expirado', 'Este QR não é mais válido. Gere um novo QR no PDV do PC.');
+      }
+      if (!isAutenticado(req)) {
+        return sendPdvPairingPage(res, 200, 'Pareamento necessário', 'Abra o PDV no PC e clique em "PDV Tablet" no topo para exibir o QR.');
+      }
+      return servirPdv(req, res, 'vendas.html');
+    }
+    if (method === 'HEAD' && (p === '/pdv' || p === '/pdv/')) {
+      if (!isAutenticado(req)) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
+      return servirPdv(req, res, 'vendas.html');
+    }
+    if ((method === 'GET' || method === 'HEAD') && p.startsWith('/pdv/')) {
+      if (p.endsWith('.html') && !isAutenticado(req)) {
+        return sendPdvPairingPage(res, 200, 'Pareamento necessário', 'Abra o PDV no PC e clique em "PDV Tablet" no topo para exibir o QR.');
+      }
+      return servirPdv(req, res, p.slice('/pdv/'.length));
+    }
+    if (method === 'GET' && p === '/api/pdv/status') {
+      return sendJson(res, 200, {
+        success: true,
+        authorized: isAutenticado(req),
+        loopback: isLoopbackReq(req),
+        paired: !!String(machineConfig.tabletToken || '').trim(),
+        dispositivosConectados: contarDispositivosPdv(),
+        serverTime: Date.now(),
+      });
+    }
+    if (method === 'GET' && p === '/api/pdv/link') {
+      if (!isLoopbackReq(req)) {
+        return sendJson(res, 403, { success: false, error: 'LOOPBACK_ONLY', message: 'Este link só pode ser gerado no PC do PDV.' });
+      }
+      const token = garantirTabletToken(false);
+      const urlPdv = tabletLinkUrl(token);
+      if (!urlPdv) {
+        return sendJson(res, 503, { success: false, error: 'SEM_REDE', message: 'Nenhum IP de rede local encontrado.' });
+      }
+      return sendJson(res, 200, { success: true, url: urlPdv, ip: ipLocal(), ips: ipsLocais(), urls: tabletLinkUrls(token), port: PORT });
+    }
+    if (method === 'POST' && p === '/api/pdv/link/rotate') {
+      if (!isLoopbackReq(req)) {
+        return sendJson(res, 403, { success: false, error: 'LOOPBACK_ONLY', message: 'Este link só pode ser gerado no PC do PDV.' });
+      }
+      const token = garantirTabletToken(true);
+      const urlPdv = tabletLinkUrl(token);
+      if (!urlPdv) {
+        return sendJson(res, 503, { success: false, error: 'SEM_REDE', message: 'Nenhum IP de rede local encontrado.' });
+      }
+      return sendJson(res, 200, { success: true, url: urlPdv, ip: ipLocal(), ips: ipsLocais(), urls: tabletLinkUrls(token), port: PORT });
+    }
+
+    const loopback = isLoopbackReq(req);
+    if (!loopback && p.startsWith('/api/') && p !== '/api/health') {
+      if (!isAutenticado(req)) {
+        return sendJson(res, 401, { success: false, error: 'PAIRING_REQUIRED', message: 'Pareie este dispositivo escaneando o QR do PDV.' });
+      }
+      if (!isTabletAllowed(method, p)) {
+        return sendJson(res, 403, { success: false, error: 'TABLET_FORBIDDEN', message: 'Esta ação só pode ser feita no PC do PDV.' });
+      }
+    }
+
+    // �"?�"? SSE �"?�"?
     if (method === 'GET' && p === '/api/events') {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -1749,7 +2837,16 @@ const server = http.createServer(async (req, res) => {
       });
       res.write(': connected\n\n');
       sseClients.add(res);
-      req.on('close', () => sseClients.delete(res));
+      if (!isLoopbackReq(req)) {
+        const ipCliente = ipDoCliente(req);
+        if (ipCliente) ssePdvDispositivos.set(res, ipCliente);
+      }
+      const limparSse = () => {
+        sseClients.delete(res);
+        ssePdvDispositivos.delete(res);
+      };
+      req.on('close', limparSse);
+      res.on('close', limparSse);
       return;
     }
 
@@ -1801,6 +2898,29 @@ const server = http.createServer(async (req, res) => {
       }
       return sendJson(res, 200, limparFila(body));
     }
+    // Cupom texto na impressora termica (Bematech/driver do Windows). No tablet
+    // o renderer nao tem Electron; esta rota faz a impressao pelo PC da venda.
+    if (method === 'POST' && p === '/api/printer/thermal') {
+      let body;
+      try {
+        body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      } catch {
+        return sendJson(res, 400, { success: false, error: 'JSON invalido' });
+      }
+      const texto = typeof body.texto === 'string' ? body.texto : '';
+      if (!texto.trim()) return sendJson(res, 400, { success: false, error: 'texto vazio' });
+      const printerName = String(body.printerName || machineConfig.thermalPrinterName || '').trim();
+      const resultado = await printBematech({
+        texto,
+        qr: body.qr,
+        titulo: body.titulo,
+        subtitulo: body.subtitulo,
+        telefone: body.telefone,
+        qrLabel: body.qrLabel,
+        printerName,
+      });
+      return sendJson(res, resultado && resultado.success ? 200 : 500, resultado);
+    }
     if (method === 'POST' && p === '/api/config') {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
       setMachineConfig(body);
@@ -1811,14 +2931,7 @@ const server = http.createServer(async (req, res) => {
     // lote. O PDV usa isso na aba "Cartao" e no chip da topbar.
     if (method === 'GET' && p === '/api/import/status') {
       const importFolder = getImportFolder();
-      let importer = null;
-      try {
-        const resp = await fetch('http://127.0.0.1:8099/api/status', {
-          headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(3000),
-        });
-        if (resp.ok) importer = await resp.json();
-      } catch {}
+      const importer = await getImporterStatus();
       const sessoes = {};
       for (const [abs, reg] of Object.entries(pastaImportadas)) {
         if (reg && typeof reg === 'object' && reg.id) sessoes[path.basename(abs)] = reg.id;
@@ -2032,6 +3145,7 @@ const server = http.createServer(async (req, res) => {
       meta.total = Math.max(Number(body.total || 0) || 0, (meta.fotos || []).length);
       meta.finalizadoEm = meta.finalizadoEm || Date.now();
       if (body.pedidoId) meta.pedidoId = String(body.pedidoId);
+      if (Array.isArray(body.refs) && body.refs.length) meta.refs = body.refs;
       meta.atualizadoEm = Date.now();
       salvarGaleriaMeta(meta);
       setImmediate(() => { sincronizarGaleria(codigo).catch(() => {}); });
@@ -2076,6 +3190,7 @@ const server = http.createServer(async (req, res) => {
         operadorFotografo: '',
       };
       fs.mkdirSync(path.join(sessaoDir(id), 'previews'), { recursive: true });
+      fs.mkdirSync(path.join(sessaoDir(id), 'thumbs'), { recursive: true });
       fs.mkdirSync(path.join(sessaoDir(id), 'originais'), { recursive: true });
       writeJson(sessaoMetaPath(id), meta);
       emit('sessao:criada', { id });
@@ -2104,7 +3219,16 @@ const server = http.createServer(async (req, res) => {
       if (!sessao) return sendJson(res, 404, { success: false, error: 'Sessao nao encontrada' });
       const buf = await readBody(req);
       const dir = path.join(sessaoDir(id), type);
+      fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, filename), buf);
+      if (type === 'previews') {
+        // Não bloqueia o upload: a miniatura é gerada em segundo plano e a
+        // rota /api/fotos/thumbs usa o preview até ela existir.
+        const thumbDir = path.join(sessaoDir(id), 'thumbs');
+        fs.mkdirSync(thumbDir, { recursive: true });
+        const extThumb = path.extname(filename).toLowerCase() === '.png' ? '.png' : '.jpg';
+        criarThumbLeve(path.join(dir, filename), path.join(thumbDir, filename), extThumb);
+      }
 
       if (sessao.estado === ESTADOS.CRIADA || sessao.estado === ESTADOS.FOTOGRAFANDO) {
         atualizarSessao(id, { estado: ESTADOS.RECEBENDO });
@@ -2118,6 +3242,9 @@ const server = http.createServer(async (req, res) => {
       const sessao = getSessao(finalizarMatch[1]);
       if (!sessao) return sendJson(res, 404, { success: false, error: 'Sessao nao encontrada' });
       if (sessao.fotosQtd === 0) return sendJson(res, 400, { success: false, error: 'Sessao sem fotos' });
+      if (sessao.importacaoParcial) {
+        return sendJson(res, 409, { success: false, error: 'Sessao ainda recebendo fotos do outro PC. Aguarde o download terminar.' });
+      }
       if (![ESTADOS.RECEBENDO, ESTADOS.FOTOGRAFANDO].includes(sessao.estado)) {
         return sendJson(res, 400, { success: false, error: `Sessao em estado invalido: ${sessao.estado}` });
       }
@@ -2135,25 +3262,73 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { success: false, error: 'Sessao ja finalizada' });
       }
       atualizarSessao(sessao.id, { estado: ESTADOS.CANCELADA, canceladaEm: Date.now() });
+      if (sessao.importacaoParcial) {
+        for (const reg of Object.values(pastaImportadas)) {
+          if (reg && typeof reg === 'object' && reg.id === sessao.id) {
+            reg.cancelada = true;
+            savePastaImportadas();
+            break;
+          }
+        }
+      }
       emit('sessao:status', { id: sessao.id, estado: ESTADOS.CANCELADA });
       return sendJson(res, 200, { success: true, sessao: getSessao(sessao.id) });
     }
 
-    // ── Fotos (servir previews/originais) ──
-    const fotoMatch = p.match(/^\/api\/fotos\/(originais|previews)\/([^/]+)\/([^/]+)$/);
+    // ── Fotos (servir previews/thumbs/originais) ──
+    const fotoMatch = p.match(/^\/api\/fotos\/(originais|previews|thumbs)\/([^/]+)\/([^/]+)$/);
     if (method === 'GET' && fotoMatch) {
       const [, type, id, filenameRaw] = fotoMatch;
       const filename = sanitizeSegment(filenameRaw);
-      const file = path.join(sessaoDir(id), type, filename);
-      if (!fs.existsSync(file)) return sendJson(res, 404, { success: false, error: 'Foto nao encontrada' });
-      res.writeHead(200, {
-        'Content-Type': 'image/jpeg',
-        'Content-Length': fs.statSync(file).size,
+      const baseDir = sessaoDir(id);
+      let file = path.join(baseDir, type, filename);
+      let fallbackPreview = false;
+      let st = null;
+      try {
+        st = fs.statSync(file);
+        if (!st.isFile()) st = null;
+      } catch {}
+      if (!st && type === 'thumbs') {
+        // Miniatura ainda não gerada (migração em background): usa o preview.
+        file = path.join(baseDir, 'previews', filename);
+        fallbackPreview = true;
+        try {
+          st = fs.statSync(file);
+          if (!st.isFile()) st = null;
+        } catch { st = null; }
+      }
+      if (!st) return sendJson(res, 404, { success: false, error: 'Foto nao encontrada' });
+      const extLower = path.extname(filename).toLowerCase();
+      const headers = {
+        'Content-Type': extLower === '.png' ? 'image/png' : 'image/jpeg',
         'Access-Control-Allow-Origin': '*',
-        // nomes de arquivo são únicos por sessão e nunca mudam: cache longo evita
-        // revalidar/re-baixar o mesmo JPEG a cada render (perf com 1000+ fotos/dia)
-        'Cache-Control': 'public, max-age=604800, immutable',
-      });
+        'ETag': `"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"`,
+        'Last-Modified': st.mtime.toUTCString(),
+      };
+      if (type === 'previews') {
+        // O preview pode ser regravado pela migração (leve) sem mudar o nome.
+        // Nada de `immutable`: o iPad revalida por ETag e pega a versão nova
+        // sozinho, sem precisar limpar o cache do Safari.
+        headers['Cache-Control'] = 'public, max-age=0, must-revalidate';
+        const ims = req.headers['if-modified-since'];
+        const inm = req.headers['if-none-match'];
+        const naoMudou = (inm && inm === headers['ETag']) ||
+          (!inm && ims && Date.parse(ims) >= Math.floor(st.mtimeMs / 1000) * 1000);
+        if (naoMudou) {
+          res.writeHead(304, headers);
+          res.end();
+          return;
+        }
+      } else if (type === 'thumbs') {
+        // Miniaturas não mudam depois de geradas; o fallback para o preview
+        // fica com cache curto para pegar a miniatura assim que ela existir.
+        headers['Cache-Control'] = fallbackPreview ? 'public, max-age=60' : 'public, max-age=604800, immutable';
+      } else {
+        // originais nunca mudam (sessão nova = ID novo): cache longo
+        headers['Cache-Control'] = 'public, max-age=604800, immutable';
+      }
+      headers['Content-Length'] = st.size;
+      res.writeHead(200, headers);
       fs.createReadStream(file).pipe(res);
       return;
     }
@@ -2166,8 +3341,18 @@ const server = http.createServer(async (req, res) => {
       const sessao = getSessao(body.sessaoId);
       if (!sessao) return sendJson(res, 404, { success: false, error: 'Sessao nao encontrada' });
 
+      const sessoesPedido = Array.isArray(body.sessoes) && body.sessoes.length
+        ? body.sessoes.map((s) => String((s && s.id) || s))
+        : [sessao.id];
+      const emRecebimento = [sessao.id, ...sessoesPedido]
+        .map((id) => getSessao(id))
+        .find((s) => s && s.estado === ESTADOS.RECEBENDO);
+      if (emRecebimento) {
+        return sendJson(res, 409, { success: false, error: `Sessao ${emRecebimento.id} ainda recebendo fotos do outro PC. Aguarde o download terminar.` });
+      }
+
       const totalPedido = Number(body.total || 0);
-      if (!Number.isFinite(totalPedido) || totalPedido <= 0) {
+      if (!Number.isFinite(totalPedido) || totalPedido < 0) {
         return sendJson(res, 400, { success: false, error: 'Total do pedido invalido' });
       }
       const numero = nextPedidoNumero();
@@ -2197,6 +3382,7 @@ const server = http.createServer(async (req, res) => {
         produtos: body.produtos || [], // produtos físicos
         total: totalPedido,
         caixaId: caixaAtual.id,
+        origemTerminal: isLoopbackReq(req) ? 'caixa' : 'tablet',
         status: 'AGUARDANDO',
         criadoEm: Date.now(),
         meio,
@@ -2233,8 +3419,12 @@ const server = http.createServer(async (req, res) => {
       if (pedido.status !== 'AGUARDANDO') {
         return sendJson(res, 409, { success: false, error: 'Pedido ja foi pago/cancelado' });
       }
+      const totalPedido = Number(pedido.total);
+      if (!Number.isFinite(totalPedido) || totalPedido < 0) {
+        return sendJson(res, 400, { success: false, error: 'Total do pedido invalido' });
+      }
       const pgsIn = Array.isArray(body.pagamentos) ? body.pagamentos : [];
-      if (!pgsIn.length) {
+      if (!pgsIn.length && totalPedido > 0) {
         return sendJson(res, 400, { success: false, error: 'Informe ao menos uma forma de pagamento' });
       }
       const pgs = [];
@@ -2250,19 +3440,15 @@ const server = http.createServer(async (req, res) => {
           parcelas: pg && pg.parcelas ? Number(pg.parcelas) : undefined,
         });
       }
-      if (!pgs.length) {
+      if (!pgs.length && totalPedido > 0) {
         return sendJson(res, 400, { success: false, error: 'Informe ao menos uma forma de pagamento com valor positivo' });
-      }
-      const totalPedido = Number(pedido.total);
-      if (!Number.isFinite(totalPedido) || totalPedido <= 0) {
-        return sendJson(res, 400, { success: false, error: 'Total do pedido invalido' });
       }
       const somaPaga = +pgs.reduce((s, pg) => s + pg.valor, 0).toFixed(2);
       if (Math.abs(somaPaga - totalPedido) > 0.005) {
         return sendJson(res, 400, { success: false, error: `Soma dos pagamentos (${somaPaga.toFixed(2)}) diferente do total (${totalPedido.toFixed(2)})` });
       }
       pedido.pagamentos = pgs;
-      pedido.meio = pgs.length === 1 ? pgs[0].meio : 'MULTI';
+      pedido.meio = pgs.length === 0 ? 'CORTESIA' : (pgs.length === 1 ? pgs[0].meio : 'MULTI');
       pedido.status = 'PAGO';
       pedido.pagoEm = Date.now();
       savePedidos();
@@ -2469,6 +3655,95 @@ const server = http.createServer(async (req, res) => {
       const historico = [...caixas].sort((a, b) => (b.fechadoEm || 0) - (a.fechadoEm || 0));
       return sendJson(res, 200, { success: true, caixas: historico });
     }
+    const caixaCorrigirGet = p.match(/^\/api\/pdv\/caixas\/([^/]+)$/);
+    if (method === 'PUT' && caixaCorrigirGet) {
+      const id = decodeURIComponent(caixaCorrigirGet[1]);
+      const idx = caixas.findIndex((c) => c && String(c.id) === id);
+      if (idx < 0) return sendJson(res, 404, { success: false, error: 'Caixa nao encontrado' });
+      const atual = caixas[idx];
+      if (!atual.fechadoEm) return sendJson(res, 400, { success: false, error: 'Feche o caixa antes de corrigir' });
+      let body;
+      try {
+        body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      } catch {
+        return sendJson(res, 400, { success: false, error: 'JSON invalido' });
+      }
+      const motivo = String(body.motivo || '').trim();
+      if (!motivo) return sendJson(res, 400, { success: false, error: 'Informe o motivo da correcao' });
+      if (!body.meios || typeof body.meios !== 'object' || Array.isArray(body.meios)) {
+        return sendJson(res, 400, { success: false, error: 'Informe os valores declarados' });
+      }
+      const meios = {};
+      for (const [forma, valor] of Object.entries(body.meios)) {
+        const chave = String(forma || '').trim();
+        if (!chave) continue;
+        const numero = Number(valor);
+        if (!Number.isFinite(numero) || numero < 0) {
+          return sendJson(res, 400, { success: false, error: `Valor invalido para ${chave}` });
+        }
+        meios[chave] = Number(numero.toFixed(2));
+      }
+      const valorEnvelope = Number(body.valorEnvelope !== undefined ? body.valorEnvelope : (atual.valorEnvelope || 0));
+      if (!Number.isFinite(valorEnvelope) || valorEnvelope < 0 || Math.abs(valorEnvelope % 50) > 0.004) {
+        return sendJson(res, 400, { success: false, error: 'O valor do malote deve ser multiplo de 50' });
+      }
+      let saldoRestante;
+      const saldoInformado = body.saldoRestante;
+      if (saldoInformado !== undefined && saldoInformado !== null && saldoInformado !== '') {
+        saldoRestante = Number(saldoInformado);
+        if (!Number.isFinite(saldoRestante)) {
+          return sendJson(res, 400, { success: false, error: 'Saldo restante invalido' });
+        }
+        saldoRestante = Number(saldoRestante.toFixed(2));
+      } else {
+        saldoRestante = Number(((Number(meios.dinheiro) || 0) - valorEnvelope).toFixed(2));
+      }
+      const calc = totaisPedidosCaixa(atual.id);
+      const sistema = { ...calc.porMeio };
+      sistema.dinheiro = Number(sistema.dinheiro || 0) + Number(atual.valorInicial || 0);
+      const formas = new Set([...Object.keys(meios), ...Object.keys(sistema)]);
+      let diferenca = 0;
+      for (const forma of formas) {
+        diferenca += (Number(meios[forma]) || 0) - (Number(sistema[forma]) || 0);
+      }
+      const totalRecebido = Object.values(meios)
+        .reduce((acc, v) => acc + Math.max(0, Number(v) || 0), 0);
+      const corrigidoPor = String(body.corrigidoPor || 'Operador');
+      const agora = Date.now();
+      const antes = {
+        totalVendido: atual.totalVendido,
+        totalPorMeio: atual.totalPorMeio,
+        meiosDeclarados: atual.meiosDeclarados,
+        totalRecebido: atual.totalRecebido,
+        diferenca: atual.diferenca,
+        valorEnvelope: atual.valorEnvelope,
+        saldoRestante: atual.saldoRestante,
+      };
+      const depois = {
+        totalVendido: calc.total,
+        totalPorMeio: calc.porMeio,
+        meiosDeclarados: meios,
+        totalRecebido: Number(totalRecebido.toFixed(2)),
+        diferenca: Number(diferenca.toFixed(2)),
+        valorEnvelope: Number(valorEnvelope.toFixed(2)),
+        saldoRestante,
+      };
+      const corrigido = {
+        ...atual,
+        ...depois,
+        corrigidoEm: agora,
+        corrigidoPor,
+        motivoCorrecao: motivo,
+        correcoes: [
+          ...(Array.isArray(atual.correcoes) ? atual.correcoes : []),
+          { em: agora, por: corrigidoPor, motivo, antes, depois },
+        ],
+      };
+      caixas[idx] = corrigido;
+      writeJson(CAIXAS_FILE, caixas);
+      emit('caixa:corrigido', { id: corrigido.id, numero: corrigido.numero, diferenca: corrigido.diferenca });
+      return sendJson(res, 200, { success: true, caixa: corrigido });
+    }
     if (method === 'POST' && p === '/api/pdv/caixa/abrir') {
       if (requireCaixaAberto()) return sendJson(res, 400, { success: false, error: 'Caixa ja esta aberto' });
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
@@ -2491,11 +3766,11 @@ const server = http.createServer(async (req, res) => {
       const meios = body.meios || {};
       const pedidosDoCaixa = pedidos.filter((x) => x.caixaId === caixa.id);
       const totalVendido = pedidosDoCaixa
-        .filter((x) => x.status === 'PAGO')
+        .filter(statusPedidoVenda)
         .reduce((acc, x) => acc + x.total, 0);
       const totalPorMeio = {};
       for (const p of pedidosDoCaixa) {
-        if (p.status !== 'PAGO') continue;
+        if (!statusPedidoVenda(p)) continue;
         if (Array.isArray(p.pagamentos) && p.pagamentos.length) {
           for (const pg of p.pagamentos) {
             if (pg && pg.meio && Number(pg.valor) > 0) {
@@ -2518,6 +3793,13 @@ const server = http.createServer(async (req, res) => {
         diferencaCaixa += Number(meios[forma] || 0) - Number(sistemaPorMeio[forma] || 0);
       }
       const valorEnvelope = Number(body.valorEnvelope || 0);
+      if (!Number.isFinite(valorEnvelope) || valorEnvelope < 0 || Math.abs(valorEnvelope % 50) > 0.004) {
+        return sendJson(res, 400, { success: false, error: 'O valor do malote deve ser multiplo de 50' });
+      }
+      const saldoInformado = body.saldoRestante;
+      const saldoRestante = (saldoInformado !== undefined && saldoInformado !== null && saldoInformado !== '' && Number.isFinite(Number(saldoInformado)))
+        ? Number(Number(saldoInformado).toFixed(2))
+        : Number(((meios['dinheiro'] || 0) - valorEnvelope).toFixed(2));
       const fechadoPor = String(body.fechadoPor || caixa.operador || '');
       caixa = {
         ...caixa,
@@ -2529,7 +3811,7 @@ const server = http.createServer(async (req, res) => {
         totalRecebido,
         diferenca: Number(diferencaCaixa.toFixed(2)),
         valorEnvelope,
-        saldoRestante: Number(((meios['dinheiro'] || 0) - valorEnvelope).toFixed(2)),
+        saldoRestante,
         fechadoPor,
         observacoes: body.observacoes || '',
       };
@@ -2549,12 +3831,20 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`[natal-core] Sidecar Natal rodando em http://${HOST}:${PORT}`);
   console.log(`[natal-core] Dados em: ${DATA_DIR}`);
+  console.log(`[natal-core] PDV web em: ${WEB_DIR}${fs.existsSync(path.join(WEB_DIR, 'vendas.html')) ? '' : ' (vendas.html nao encontrado)'}`);
   if (machineConfig.photosFolder) {
     console.log(`[natal-core] Importador de pasta ativo: ${machineConfig.photosFolder}`);
   }
   ensurePhotosWatcher();
   kickFila(); // fila persistente do disco → retoma impressões que ficaram pra trás
   sincronizarGaleriasPendentes().catch(() => {}); // envio digital que ficou na fila offline
+  // Previews antigos (cópia do original) → leves e miniaturas, em background.
+  // Não bloqueia o boot; a rota de thumbs usa o preview até a miniatura existir.
+  setTimeout(() => {
+    migrarPreviewsPesados()
+      .catch(() => {})
+      .finally(() => { migrarThumbs().catch(() => {}); });
+  }, 5000);
 });
 
 server.on('error', (e) => {

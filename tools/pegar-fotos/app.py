@@ -434,9 +434,11 @@ class PhotoImportApp:
         self.log_file = getattr(self.args, "log", None) or ""
         self._started_at = time.time()
         # Retrato do estado para GET /api/status (lido por outra thread, sem Tk).
+        last_import = self.config.get("last_import")
         self._status = {
             "card": {"state": "waiting", "badge": "AGUARDANDO CARTAO...", "message": "", "drive": "", "batch": ""},
             "progress": {"count": 0, "total": 0, "speed": 0, "file": ""},
+            "lastImport": last_import if isinstance(last_import, dict) else None,
             "download": None,
             "peer": {"found": False, "name": "", "ip": "", "port": 0, "status": "", "error": "", "batches": []},
             "server": {"active": False, "ips": [], "url": "", "port": 0},
@@ -572,11 +574,13 @@ class PhotoImportApp:
         except Exception:
             pass
 
-    def _set_card(self, state, badge, message="", drive="", batch=""):
-        self._status["card"] = {
+    def _set_card(self, state, badge, message="", drive="", batch="", **extra):
+        card = {
             "state": state, "badge": badge, "message": message,
-            "drive": drive, "batch": batch,
+            "drive": drive, "batch": batch, "at": time.time(),
         }
+        card.update({k: v for k, v in extra.items() if v is not None})
+        self._status["card"] = card
 
     # --------------------------------------------------------------- camera
     def _set_camera(self, **values):
@@ -742,13 +746,22 @@ class PhotoImportApp:
                     lastAt=time.time(), lastError="",
                 )
             else:
+                if reason == "copy_error":
+                    detalhe = "Falha ao copiar as fotos. Nada foi publicado; tente de novo."
+                elif reason == "publish_error":
+                    detalhe = "Falha ao publicar a sessao. Nada foi publicado; tente de novo."
+                else:
+                    detalhe = "Falha ao importar as fotos da camera."
                 self._set_camera(
                     capturing=False, message="Falha ao importar as fotos da camera.",
                     lastBatch="", lastCount=len(paths), lastAt=time.time(),
-                    lastError="Nao foi possivel publicar a sessao.",
+                    lastError=detalhe,
                 )
-                self._set_card("camera_error", "ERRO NA CAMERA",
-                               "Nao foi possivel publicar a sessao.")
+                # copy_error/publish_error ja foram detalhados no card pelo
+                # process_import; nao sobrescreve com um erro generico.
+                if reason not in ("copy_error", "publish_error"):
+                    self._set_card("camera_error", "ERRO NA CAMERA", detalhe,
+                                   found=len(paths), newCount=len(paths))
         except Exception as e:
             self.log("camera: erro: %s" % e)
             self._set_camera(
@@ -793,6 +806,7 @@ class PhotoImportApp:
             "nextBatch": next_batch,
             "copying": bool(self.is_copying),
             "card": self._status["card"],
+            "lastImport": self._status.get("lastImport"),
             "progress": self._status["progress"] if self.is_copying else None,
             "download": self._status["download"],
             "server": {
@@ -1598,37 +1612,54 @@ class PhotoImportApp:
         self.status_badge.config(text=f"CARTAO DETECTADO ({drive})", bg="#3b82f6", fg="#ffffff")
         self.drive_info_lbl.config(text=f"Drive {drive} detectado com {count} fotos/videos. Iniciando copia...")
         self._set_card("detected", f"CARTAO DETECTADO ({drive})",
-                       f"Drive {drive} detectado com {count} fotos/videos. Iniciando copia...", drive=drive)
+                       f"Drive {drive} detectado com {count} fotos/videos. Iniciando copia...",
+                       drive=drive, found=count)
 
     def set_status_ready_existing(self, drive, count):
         self.status_badge.config(text=f"CARTAO JA PROCESSADO ({drive})", bg="#45475a", fg="#ffffff")
         self.drive_info_lbl.config(text=f"Drive {drive} ja foi descarregado ({count} fotos). Remova o cartao.")
         self._set_card("ready_existing", f"CARTAO JA PROCESSADO ({drive})",
-                       f"Drive {drive} ja foi descarregado ({count} fotos). Remova o cartao.", drive=drive)
+                       f"Drive {drive} ja foi descarregado ({count} fotos). Remova o cartao.",
+                       drive=drive, found=count, newCount=0)
 
     def set_status_empty(self, drive):
         self.status_badge.config(text=f"CARTAO VAZIO ({drive})", bg="#6c7086", fg="#ffffff")
         self.drive_info_lbl.config(text=f"Drive {drive} conectado, mas nenhuma foto suportada encontrada.")
         self._set_card("empty", f"CARTAO VAZIO ({drive})",
-                       f"Drive {drive} conectado, mas nenhuma foto suportada encontrada.", drive=drive)
+                       f"Drive {drive} conectado, mas nenhuma foto suportada encontrada.",
+                       drive=drive, found=0, newCount=0)
 
-    def set_status_copying(self, batch_name, count):
+    def set_status_copying(self, batch_name, count, found=None):
         self.status_badge.config(text=f"COPIANDO PARA {batch_name}...", bg="#22c55e", fg="#11111b")
         self.drive_info_lbl.config(text=f"Descarregando {count} fotos para {batch_name}...")
         self._set_card("copying", f"COPIANDO PARA {batch_name}...",
-                       f"Descarregando {count} fotos para {batch_name}...", batch=batch_name)
+                       f"Descarregando {count} fotos para {batch_name}...",
+                       batch=batch_name, found=found if found is not None else count, newCount=count)
 
-    def set_status_finished(self, batch_name, count):
+    def set_status_finished(self, batch_name, count, found=None):
         self.status_badge.config(text=f"CONCLUIDO ({batch_name})", bg="#a6e3a1", fg="#11111b")
         self.drive_info_lbl.config(text=f"Sucesso! {count} fotos salvas em {batch_name}. Pode remover o cartao!")
         self._set_card("finished", f"CONCLUIDO ({batch_name})",
-                       f"Sucesso! {count} fotos salvas em {batch_name}. Pode remover o cartao!", batch=batch_name)
+                       f"Sucesso! {count} fotos salvas em {batch_name}. Pode remover o cartao!",
+                       batch=batch_name, count=count, found=found, newCount=count)
 
-    def set_status_all_imported(self):
+    def set_status_all_imported(self, found=0, same_batch=""):
+        if same_batch:
+            msg = f"Essas fotos ja estao no lote {same_batch}. Pode remover o cartao."
+        else:
+            total = f"{found} foto(s) " if found else "Todas as fotos "
+            msg = f"{total}deste cartao ja foram importadas antes. Pode remover."
         self.status_badge.config(text="CARTAO SEM NOVIDADES", bg="#f59e0b", fg="#11111b")
-        self.drive_info_lbl.config(text="Todas as fotos deste cartao ja foram importadas antes. Pode remover.")
-        self._set_card("all_imported", "CARTAO SEM NOVIDADES",
-                       "Todas as fotos deste cartao ja foram importadas antes. Pode remover.")
+        self.drive_info_lbl.config(text=msg)
+        self._set_card("all_imported", "CARTAO SEM NOVIDADES", msg,
+                       batch=same_batch, found=found, newCount=0)
+
+    def set_status_error(self, drive, state, message, found=0, new_count=0, batch="", error=""):
+        badge = "ERRO AO PUBLICAR" if state == "publish_error" else "ERRO AO COPIAR"
+        self.status_badge.config(text=badge, bg="#ef4444", fg="#ffffff")
+        self.drive_info_lbl.config(text=message)
+        self._set_card(state, badge, message, drive=drive, batch=batch,
+                       found=found, newCount=new_count, error=error or message)
 
     def manual_import(self):
         if self.is_copying:
@@ -1683,6 +1714,7 @@ class PhotoImportApp:
 
     def process_import(self, source_path, photo_files, source_label=None):
         source = source_label or source_path
+        found_count = len(photo_files)
         self._last_process_reason = ""
         self.is_copying = True
         self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.DISABLED))
@@ -1733,7 +1765,7 @@ class PhotoImportApp:
                 winsound.MessageBeep(winsound.MB_ICONASTERISK)
             except Exception:
                 pass
-            self.root.after(0, self.set_status_all_imported)
+            self.root.after(0, self.set_status_all_imported, found_count)
             return None
 
         # se o MESMO conteudo ja existe em outro lote (ex: baixado do outro PC
@@ -1744,9 +1776,7 @@ class PhotoImportApp:
             self._last_process_reason = "duplicate"
             self.is_copying = False
             self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.NORMAL))
-            self.root.after(0, self.set_status_all_imported)
-            self.root.after(0, lambda: self.drive_info_lbl.config(
-                text=f"Essas fotos ja estao no lote {same_lot}. Pode remover o cartao."))
+            self.root.after(0, self.set_status_all_imported, found_count, same_lot)
             return None
 
         prefix = self.config.get("prefix", "NATAL")
@@ -1764,7 +1794,7 @@ class PhotoImportApp:
         os.makedirs(tmp_dir, exist_ok=True)
 
         total_files = len(new_files)
-        self.root.after(0, self.set_status_copying, batch_name, total_files)
+        self.root.after(0, self.set_status_copying, batch_name, total_files, found_count)
         self.root.after(0, lambda: self.progress_bar.config(maximum=total_files, value=0))
 
         copied_bytes = 0
@@ -1773,6 +1803,7 @@ class PhotoImportApp:
         start_time = time.time()
 
         lot_entries = []
+        registry_updates = []
         for idx, (src_file, fhash, file_size, qhash) in enumerate(new_files, 1):
             if not self.monitor_running:
                 break
@@ -1786,10 +1817,7 @@ class PhotoImportApp:
             try:
                 shutil.copy2(src_file, dest_file)
                 lot_entries.append((os.path.basename(dest_file), fhash))
-                self._registry_names.setdefault(os.path.basename(dest_file), {})[file_size] = {
-                    "h": fhash, "q": qhash
-                }
-                self._registry_hashes.add(fhash)
+                registry_updates.append((os.path.basename(dest_file), file_size, fhash, qhash))
                 copied_bytes += file_size
                 copied_count += 1
                 elapsed = time.time() - start_time
@@ -1805,11 +1833,11 @@ class PhotoImportApp:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             self.is_copying = False
             self._status["progress"] = None
-            faltaram = total_files - copied_count
+            faltaram = max(0, total_files - copied_count)
+            msg = f"Falha ao copiar {faltaram} foto(s). Nada foi publicado; tente de novo."
             self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.NORMAL))
-            self.root.after(0, self.set_status_empty, source)
-            self.root.after(0, lambda: self.drive_info_lbl.config(
-                text=f"Falha ao copiar {faltaram} foto(s). Nada foi publicado; tente de novo."))
+            self.root.after(0, self.set_status_error, source, "copy_error", msg,
+                            found_count, total_files, batch_name, msg)
             self.log("lote %s NAO publicado: %s de %s copiados" % (
                 batch_name, copied_count, total_files))
             return None
@@ -1820,13 +1848,30 @@ class PhotoImportApp:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             self.is_copying = False
             self._status["progress"] = None
+            msg = "Nao foi possivel publicar a sessao. Nada foi publicado; tente de novo."
             self.root.after(0, lambda: self.btn_manual_copy.config(state=tk.NORMAL))
-            self.root.after(0, self.set_status_empty, source)
+            self.root.after(0, self.set_status_error, source, "publish_error", msg,
+                            found_count, total_files, batch_name, msg)
             return None
 
-        self._save_import_registry()
         self._write_marker(final_dir, copied_count, copied_bytes, source,
                            make_lot_hash(lot_entries), dict(lot_entries))
+        # O registro so e confirmado depois que o lote foi publicado. Se a
+        # copia falhar, as fotos continuam "desconhecidas" e a proxima
+        # tentativa no mesmo cartao nao pula arquivos para sempre.
+        for dest_name, file_size, fhash, qhash in registry_updates:
+            self._registry_names.setdefault(dest_name, {})[file_size] = {
+                "h": fhash, "q": qhash
+            }
+            self._registry_hashes.add(fhash)
+        self._save_import_registry()
+
+        last_import = {
+            "batch": batch_name, "count": copied_count, "found": found_count,
+            "newCount": copied_count, "source": source, "at": time.time(),
+        }
+        self._status["lastImport"] = last_import
+        self.config["last_import"] = last_import
 
         formatted_size = self.format_size(copied_bytes)
         date_str = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -1841,7 +1886,7 @@ class PhotoImportApp:
         except Exception:
             pass
 
-        self.root.after(0, self.finish_import, batch_name, copied_count)
+        self.root.after(0, self.finish_import, batch_name, copied_count, found_count)
         self._last_process_reason = "ok"
         return batch_name
 
@@ -1955,11 +2000,11 @@ class PhotoImportApp:
         self.current_file_lbl.config(text=f"Copiando: {filename}")
         self._status["progress"] = {"count": count, "total": total, "speed": round(speed, 2), "file": filename}
 
-    def finish_import(self, batch_name, count):
+    def finish_import(self, batch_name, count, found=None):
         self.is_copying = False
         self.btn_manual_copy.config(state=tk.NORMAL)
         self.current_file_lbl.config(text="")
-        self.set_status_finished(batch_name, count)
+        self.set_status_finished(batch_name, count, found)
         # Copia concluida: limpa o progresso para o chip do PDV nao ficar
         # eternamente em "Copiando 6/6".
         self._status["progress"] = None

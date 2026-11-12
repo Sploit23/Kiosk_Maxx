@@ -1,6 +1,7 @@
 node_modules/
 dist/
 release/
+release-minimo/
 electron-config.json
 *.log
 jre8/
