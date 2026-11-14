@@ -1451,6 +1451,77 @@ function arquivarCaixa(fechada) {
 function statusPedidoVenda(x) {
   return ['PAGO', 'IMPRESSO'].includes(String((x && x.status) || '').toUpperCase());
 }
+// Formas canônicas do caixa. O PDV e o portal sempre falam estas 4 chaves;
+// qualquer rótulo legado ("Dinheiro", "Crédito 3x", "Cartão") é normalizado
+// aqui para não criar uma "forma fantasma" no fechamento.
+const MEIOS_CAIXA = ['dinheiro', 'debito', 'credito', 'pix'];
+const TOLERANCIA_CAIXA = 0.05;
+function normalizarMeioCaixa(valor) {
+  const s = String(valor || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (s.startsWith('dinheiro')) return 'dinheiro';
+  if (s.startsWith('debito')) return 'debito';
+  if (s.startsWith('pix')) return 'pix';
+  if (s.startsWith('credito') || s.startsWith('cartao')) return 'credito';
+  return '';
+}
+function meioDoPagamento(pg) {
+  if (!pg) return '';
+  return normalizarMeioCaixa(pg.meio) || normalizarMeioCaixa(pg.forma);
+}
+function lerMeiosDeclarados(raw, { exigirTodos = true } = {}) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { error: 'Informe os valores declarados das 4 formas' };
+  }
+  const meios = {};
+  for (const [forma, valor] of Object.entries(raw)) {
+    const chave = normalizarMeioCaixa(forma);
+    if (!chave) return { error: `Forma de pagamento desconhecida: ${forma}` };
+    const numero = Number(valor);
+    if (!Number.isFinite(numero) || numero < 0) {
+      return { error: `Valor invalido para ${chave}` };
+    }
+    meios[chave] = Number(((meios[chave] || 0) + numero).toFixed(2));
+  }
+  for (const meio of MEIOS_CAIXA) {
+    if (!(meio in meios)) {
+      if (exigirTodos) return { error: `Informe o valor de ${meio}` };
+      meios[meio] = 0;
+    }
+  }
+  return { meios };
+}
+// Devolução de uma venda do próprio caixa já sai das vendas no fechamento.
+// Ela fica registrada em sangrias para auditoria, mas só abate do dinheiro
+// esperado a parte que não entrou em dinheiro na venda original (ex.: venda
+// mista de R$ 100 com R$ 60 em dinheiro e devolução de R$ 100 em dinheiro
+// abate R$ 40). Sem isso o caixa fecharia com falta em dobro.
+function dinheiroDoPedido(pedido) {
+  if (!pedido) return 0;
+  if (Array.isArray(pedido.pagamentos) && pedido.pagamentos.length) {
+    return pedido.pagamentos.reduce((s, pg) => (
+      meioDoPagamento(pg) === 'dinheiro' ? s + (Number(pg.valor) || 0) : s
+    ), 0);
+  }
+  if (normalizarMeioCaixa(pedido.meio) === 'dinheiro') return Number(pedido.total) || 0;
+  return 0;
+}
+function abatimentoDaSangria(c, sangria) {
+  const valor = Number(sangria && sangria.valor) || 0;
+  if (sangria && sangria.abatimento !== undefined && sangria.abatimento !== null) {
+    return Number(sangria.abatimento) || 0;
+  }
+  const pedidoId = String((sangria && sangria.pedidoId) || '');
+  if (!pedidoId || !c || !c.id) return valor;
+  const pedido = pedidos.find((p) => String(p && p.id) === pedidoId
+    && String(p && p.caixaId) === String(c.id));
+  if (!pedido) return valor;
+  return Number(Math.max(0, valor - dinheiroDoPedido(pedido)).toFixed(2));
+}
+function totalSangriasAbatidas(c) {
+  if (!c || !Array.isArray(c.sangrias)) return 0;
+  const total = c.sangrias.reduce((s, x) => s + (x ? abatimentoDaSangria(c, x) : 0), 0);
+  return Number(total.toFixed(2));
+}
 function totaisPedidosCaixa(caixaId) {
   let total = 0;
   const porMeio = {};
@@ -1461,12 +1532,14 @@ function totaisPedidosCaixa(caixaId) {
     total += valorPedido;
     if (Array.isArray(p.pagamentos) && p.pagamentos.length) {
       for (const pg of p.pagamentos) {
-        if (pg && pg.meio && Number(pg.valor) > 0) {
-          porMeio[pg.meio] = (porMeio[pg.meio] || 0) + Number(pg.valor);
+        const chave = meioDoPagamento(pg);
+        if (chave && Number(pg.valor) > 0) {
+          porMeio[chave] = (porMeio[chave] || 0) + Number(pg.valor);
         }
       }
-    } else if (p.meio) {
-      porMeio[p.meio] = (porMeio[p.meio] || 0) + valorPedido;
+    } else {
+      const chave = normalizarMeioCaixa(p.meio);
+      if (chave) porMeio[chave] = (porMeio[chave] || 0) + valorPedido;
     }
   }
   for (const k of Object.keys(porMeio)) {
@@ -1484,17 +1557,24 @@ function reconciliarCaixasHistorico() {
     if (calc.total <= 0.004) return c;
     const atual = Number(c.totalVendido) || 0;
     if (atual > calc.total + 0.004) return c;
+    const declarados = {};
+    for (const [forma, valor] of Object.entries(c.meiosDeclarados)) {
+      const chave = normalizarMeioCaixa(forma);
+      if (!chave) continue;
+      declarados[chave] = Number(((declarados[chave] || 0) + (Number(valor) || 0)).toFixed(2));
+    }
     const sistema = { ...calc.porMeio };
-    sistema.dinheiro = Number(sistema.dinheiro || 0) + (Number(c.valorInicial) || 0);
-    const formas = new Set([...Object.keys(c.meiosDeclarados), ...Object.keys(sistema)]);
+    sistema.dinheiro = Number(sistema.dinheiro || 0) + (Number(c.valorInicial) || 0) - totalSangriasAbatidas(c);
+    const formas = new Set([...Object.keys(declarados), ...Object.keys(sistema)]);
     let diferenca = 0;
     for (const forma of formas) {
-      diferenca += (Number(c.meiosDeclarados[forma]) || 0) - (Number(sistema[forma]) || 0);
+      diferenca += (Number(declarados[forma]) || 0) - (Number(sistema[forma]) || 0);
     }
-    const totalRecebido = Object.values(c.meiosDeclarados)
+    const totalRecebido = Object.values(declarados)
       .reduce((acc, v) => acc + Math.max(0, Number(v) || 0), 0);
     const novo = {
       ...c,
+      meiosDeclarados: declarados,
       totalVendido: calc.total,
       totalPorMeio: calc.porMeio,
       totalRecebido: Number(totalRecebido.toFixed(2)),
@@ -1505,6 +1585,21 @@ function reconciliarCaixasHistorico() {
       || Number(c.totalRecebido || 0) !== novo.totalRecebido
       || Number(c.diferenca || 0) !== novo.diferenca;
     if (!mudouValores && c.reconciliadoEm) return c;
+    const antes = {
+      totalVendido: c.totalVendido,
+      totalPorMeio: c.totalPorMeio,
+      totalRecebido: c.totalRecebido,
+      diferenca: c.diferenca,
+    };
+    novo.reconciliacoes = [
+      ...(Array.isArray(c.reconciliacoes) ? c.reconciliacoes : []),
+      { em: new Date().toISOString(), antes, depois: {
+        totalVendido: novo.totalVendido,
+        totalPorMeio: novo.totalPorMeio,
+        totalRecebido: novo.totalRecebido,
+        diferenca: novo.diferenca,
+      } },
+    ].slice(-50);
     novo.reconciliadoEm = new Date().toISOString();
     mudou = true;
     return novo;
@@ -3355,17 +3450,30 @@ const server = http.createServer(async (req, res) => {
       if (!Number.isFinite(totalPedido) || totalPedido < 0) {
         return sendJson(res, 400, { success: false, error: 'Total do pedido invalido' });
       }
-      const numero = nextPedidoNumero();
       let pagamentos = null;
       if (Array.isArray(body.pagamentos) && body.pagamentos.length) {
-        pagamentos = body.pagamentos
-          .filter((pg) => pg && Number(pg.valor) > 0)
-          .map((pg) => ({
-            meio: String(pg.meio || ''),
-            valor: Number(pg.valor),
+        pagamentos = [];
+        for (const pg of body.pagamentos) {
+          const valor = Number(pg && pg.valor);
+          if (!Number.isFinite(valor) || valor < 0) {
+            return sendJson(res, 400, { success: false, error: 'Pagamento com valor invalido' });
+          }
+          if (valor === 0) continue;
+          const forma = normalizarMeioCaixa(pg && (pg.meio || pg.forma));
+          if (!forma) return sendJson(res, 400, { success: false, error: 'Forma de pagamento invalida' });
+          pagamentos.push({
+            meio: forma,
+            valor: Number(valor.toFixed(2)),
             parcelas: pg.parcelas ? Number(pg.parcelas) : undefined,
-          }));
+          });
+        }
+        const soma = +pagamentos.reduce((s, pg) => s + pg.valor, 0).toFixed(2);
+        if (Math.abs(soma - totalPedido) > 0.005) {
+          return sendJson(res, 400, { success: false, error: `Soma dos pagamentos (${soma.toFixed(2)}) diferente do total (${totalPedido.toFixed(2)})` });
+        }
+        if (!pagamentos.length) pagamentos = null;
       }
+      const numero = nextPedidoNumero();
       const meio = pagamentos && pagamentos.length
         ? (pagamentos.length === 1 ? pagamentos[0].meio : 'MULTI')
         : (body.meio || null);
@@ -3434,9 +3542,11 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 400, { success: false, error: 'Pagamento com valor invalido' });
         }
         if (valor === 0) continue;
+        const forma = normalizarMeioCaixa(pg && (pg.meio || pg.forma));
+        if (!forma) return sendJson(res, 400, { success: false, error: 'Forma de pagamento invalida' });
         pgs.push({
-          meio: String((pg && pg.meio) || ''),
-          valor,
+          meio: forma,
+          valor: Number(valor.toFixed(2)),
           parcelas: pg && pg.parcelas ? Number(pg.parcelas) : undefined,
         });
       }
@@ -3471,20 +3581,46 @@ const server = http.createServer(async (req, res) => {
       const idx = pedidos.findIndex((x) => x.id === pedidoPut[1] || String(x.numero) === pedidoPut[1]);
       if (idx < 0) return sendJson(res, 404, { success: false, error: 'Pedido nao encontrado' });
       const pedido = pedidos[idx];
-      if (typeof body.total === 'number' && Number.isFinite(body.total)) {
-        pedido.total = Number(+body.total.toFixed(2));
+      const original = { ...pedido };
+      const falhar = (status, error) => {
+        Object.assign(pedido, original);
+        return sendJson(res, status, { success: false, error });
+      };
+      let totalFinal = Number(pedido.total) || 0;
+      if (body.total !== undefined) {
+        const total = Number(body.total);
+        if (!Number.isFinite(total) || total < 0) {
+          return falhar(400, 'Total do pedido invalido');
+        }
+        totalFinal = Number(total.toFixed(2));
       }
       if (Array.isArray(body.pagamentos)) {
-        const pgs = body.pagamentos
-          .filter((pg) => pg && Number(pg.valor) > 0)
-          .map((pg) => ({
-            meio: String(pg.meio || ''),
-            valor: Number(pg.valor),
+        const pgs = [];
+        for (const pg of body.pagamentos) {
+          const valor = Number(pg && pg.valor);
+          if (!Number.isFinite(valor) || valor < 0) {
+            return falhar(400, 'Pagamento com valor invalido');
+          }
+          if (valor === 0) continue;
+          const forma = normalizarMeioCaixa(pg && (pg.meio || pg.forma));
+          if (!forma) return falhar(400, 'Forma de pagamento invalida');
+          pgs.push({
+            meio: forma,
+            valor: Number(valor.toFixed(2)),
             parcelas: pg.parcelas ? Number(pg.parcelas) : undefined,
-          }));
+          });
+        }
+        if (!pgs.length && totalFinal > 0.005) {
+          return falhar(400, 'Informe ao menos uma forma de pagamento com valor positivo');
+        }
+        const soma = +pgs.reduce((s, pg) => s + pg.valor, 0).toFixed(2);
+        if (Math.abs(soma - totalFinal) > 0.005) {
+          return falhar(400, `Soma dos pagamentos (${soma.toFixed(2)}) diferente do total (${totalFinal.toFixed(2)})`);
+        }
         pedido.pagamentos = pgs;
-        pedido.meio = pgs.length === 1 ? pgs[0].meio : 'MULTI';
+        pedido.meio = pgs.length === 0 ? 'CORTESIA' : (pgs.length === 1 ? pgs[0].meio : 'MULTI');
       }
+      pedido.total = totalFinal;
       if (Array.isArray(body.itens)) pedido.itens = body.itens;
       if (Array.isArray(body.produtos)) pedido.produtos = body.produtos;
       if (body.desconto !== undefined) pedido.desconto = body.desconto || null;
@@ -3493,11 +3629,37 @@ const server = http.createServer(async (req, res) => {
       if (Array.isArray(body.sessoes) && body.sessoes.length) {
         pedido.sessoes = body.sessoes.map((s) => ({ id: String((s && s.id) || s) }));
       }
+      if (body.devolucao !== undefined) {
+        const d = body.devolucao || {};
+        const forma = String(d.forma || '').trim().toLowerCase();
+        if (!['dinheiro', 'cartao', 'nao'].includes(forma)) {
+          return falhar(400, 'Forma de devolucao invalida');
+        }
+        const valor = Number(d.valor || 0);
+        if (!Number.isFinite(valor) || valor < 0) {
+          return falhar(400, 'Valor de devolucao invalido');
+        }
+        pedido.devolucao = {
+          forma,
+          valor: Number(valor.toFixed(2)),
+          registradoEm: Date.now(),
+        };
+      }
       if (typeof body.status === 'string') {
         const st = body.status.toUpperCase();
         if (['AGUARDANDO', 'PAGO', 'IMPRESSO', 'CANCELADO'].includes(st)) {
+          const statusAnterior = pedido.status;
+          if (['PAGO', 'IMPRESSO'].includes(st) && statusAnterior === 'CANCELADO') {
+            const motivo = String(body.motivo || '').trim();
+            if (!motivo) {
+              return falhar(400, 'Informe o motivo para reabrir um pedido cancelado');
+            }
+            pedido.reabertoMotivo = motivo;
+            pedido.reabertoEm = Date.now();
+            pedido.canceladoEm = null;
+          }
           pedido.status = st;
-          if (st === 'CANCELADO') pedido.canceladoEm = Date.now();
+          if (st === 'CANCELADO') pedido.canceladoEm = pedido.canceladoEm || Date.now();
         }
       }
       pedidos[idx] = pedido;
@@ -3670,19 +3832,9 @@ const server = http.createServer(async (req, res) => {
       }
       const motivo = String(body.motivo || '').trim();
       if (!motivo) return sendJson(res, 400, { success: false, error: 'Informe o motivo da correcao' });
-      if (!body.meios || typeof body.meios !== 'object' || Array.isArray(body.meios)) {
-        return sendJson(res, 400, { success: false, error: 'Informe os valores declarados' });
-      }
-      const meios = {};
-      for (const [forma, valor] of Object.entries(body.meios)) {
-        const chave = String(forma || '').trim();
-        if (!chave) continue;
-        const numero = Number(valor);
-        if (!Number.isFinite(numero) || numero < 0) {
-          return sendJson(res, 400, { success: false, error: `Valor invalido para ${chave}` });
-        }
-        meios[chave] = Number(numero.toFixed(2));
-      }
+      const lido = lerMeiosDeclarados(body.meios, { exigirTodos: false });
+      if (lido.error) return sendJson(res, 400, { success: false, error: lido.error });
+      const meios = lido.meios;
       const valorEnvelope = Number(body.valorEnvelope !== undefined ? body.valorEnvelope : (atual.valorEnvelope || 0));
       if (!Number.isFinite(valorEnvelope) || valorEnvelope < 0 || Math.abs(valorEnvelope % 50) > 0.004) {
         return sendJson(res, 400, { success: false, error: 'O valor do malote deve ser multiplo de 50' });
@@ -3700,7 +3852,7 @@ const server = http.createServer(async (req, res) => {
       }
       const calc = totaisPedidosCaixa(atual.id);
       const sistema = { ...calc.porMeio };
-      sistema.dinheiro = Number(sistema.dinheiro || 0) + Number(atual.valorInicial || 0);
+      sistema.dinheiro = Number(sistema.dinheiro || 0) + Number(atual.valorInicial || 0) - totalSangriasAbatidas(atual);
       const formas = new Set([...Object.keys(meios), ...Object.keys(sistema)]);
       let diferenca = 0;
       for (const forma of formas) {
@@ -3755,42 +3907,91 @@ const server = http.createServer(async (req, res) => {
         fechadoEm: null,
         pedidos: [],
         meios: {},
+        sangrias: [],
       };
       saveCaixa();
       emit('caixa:aberto', { id: caixa.id, operador: caixa.operador });
       return sendJson(res, 200, { success: true, caixa });
     }
+    if (method === 'POST' && p === '/api/pdv/caixa/sangria') {
+      if (!requireCaixaAberto()) return sendJson(res, 400, { success: false, error: 'Caixa nao esta aberto' });
+      let body;
+      try {
+        body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      } catch {
+        return sendJson(res, 400, { success: false, error: 'JSON invalido' });
+      }
+      const valor = Number(body.valor);
+      if (!Number.isFinite(valor) || valor <= 0) {
+        return sendJson(res, 400, { success: false, error: 'Informe um valor de sangria maior que zero' });
+      }
+      const motivo = String(body.motivo || '').trim();
+      if (!motivo) return sendJson(res, 400, { success: false, error: 'Informe o motivo da sangria' });
+      const sangria = {
+        id: `SG-${Date.now().toString(36).toUpperCase()}`,
+        em: Date.now(),
+        valor: Number(valor.toFixed(2)),
+        motivo,
+        pedidoId: body.pedidoId ? String(body.pedidoId) : '',
+        por: String(body.por || caixa.operador || ''),
+      };
+      sangria.abatimento = abatimentoDaSangria(caixa, sangria);
+      caixa = {
+        ...caixa,
+        sangrias: [...(Array.isArray(caixa.sangrias) ? caixa.sangrias : []), sangria],
+      };
+      saveCaixa();
+      emit('caixa:sangria', { id: caixa.id, valor: sangria.valor, pedidoId: sangria.pedidoId });
+      return sendJson(res, 200, { success: true, caixa, sangria });
+    }
     if (method === 'POST' && p === '/api/pdv/caixa/fechar') {
       if (!requireCaixaAberto()) return sendJson(res, 400, { success: false, error: 'Caixa nao esta aberto' });
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
-      const meios = body.meios || {};
+      const lido = lerMeiosDeclarados(body.meios);
+      if (lido.error) return sendJson(res, 400, { success: false, error: lido.error });
+      const meios = lido.meios;
       const pedidosDoCaixa = pedidos.filter((x) => x.caixaId === caixa.id);
       const totalVendido = pedidosDoCaixa
         .filter(statusPedidoVenda)
-        .reduce((acc, x) => acc + x.total, 0);
+        .reduce((acc, x) => acc + (Number(x.total) || 0), 0);
       const totalPorMeio = {};
-      for (const p of pedidosDoCaixa) {
-        if (!statusPedidoVenda(p)) continue;
-        if (Array.isArray(p.pagamentos) && p.pagamentos.length) {
-          for (const pg of p.pagamentos) {
-            if (pg && pg.meio && Number(pg.valor) > 0) {
-              totalPorMeio[pg.meio] = (totalPorMeio[pg.meio] || 0) + Number(pg.valor);
+      for (const pedido of pedidosDoCaixa) {
+        if (!statusPedidoVenda(pedido)) continue;
+        if (Array.isArray(pedido.pagamentos) && pedido.pagamentos.length) {
+          for (const pg of pedido.pagamentos) {
+            const chave = meioDoPagamento(pg);
+            if (chave && Number(pg.valor) > 0) {
+              totalPorMeio[chave] = (totalPorMeio[chave] || 0) + Number(pg.valor);
             }
           }
-        } else if (p.meio) {
-          totalPorMeio[p.meio] = (totalPorMeio[p.meio] || 0) + p.total;
+        } else {
+          const chave = normalizarMeioCaixa(pedido.meio);
+          if (chave) totalPorMeio[chave] = (totalPorMeio[chave] || 0) + (Number(pedido.total) || 0);
         }
+      }
+      for (const chave of Object.keys(totalPorMeio)) {
+        totalPorMeio[chave] = Number(totalPorMeio[chave].toFixed(2));
       }
       const totalRecebido = Object.values(meios).reduce((a, b) => a + Number(b || 0), 0);
       // O dinheiro declarado inclui o fundo de troco; o totalPorMeio só tem
-      // vendas. Soma o fundo no lado do sistema para a diferença não acusar
-      // o fundo inteiro como sobra.
+      // vendas. Soma o fundo e desconta as sangrias já retiradas da gaveta.
       const sistemaPorMeio = { ...totalPorMeio };
-      sistemaPorMeio.dinheiro = Number(sistemaPorMeio.dinheiro || 0) + Number(caixa.valorInicial || 0);
+      sistemaPorMeio.dinheiro = Number(sistemaPorMeio.dinheiro || 0)
+        + Number(caixa.valorInicial || 0)
+        - totalSangriasAbatidas(caixa);
       const formasConferidas = new Set([...Object.keys(meios), ...Object.keys(sistemaPorMeio)]);
       let diferencaCaixa = 0;
       for (const forma of formasConferidas) {
         diferencaCaixa += Number(meios[forma] || 0) - Number(sistemaPorMeio[forma] || 0);
+      }
+      diferencaCaixa = Number(diferencaCaixa.toFixed(2));
+      const justificativa = String(body.justificativa || '').trim();
+      const diferencaAceita = Math.abs(diferencaCaixa) > TOLERANCIA_CAIXA + 0.0001;
+      if (diferencaAceita && justificativa.length < 5) {
+        return sendJson(res, 400, {
+          success: false,
+          error: 'Informe a justificativa da diferenca de caixa (minimo 5 caracteres)',
+        });
       }
       const valorEnvelope = Number(body.valorEnvelope || 0);
       if (!Number.isFinite(valorEnvelope) || valorEnvelope < 0 || Math.abs(valorEnvelope % 50) > 0.004) {
@@ -3805,15 +4006,20 @@ const server = http.createServer(async (req, res) => {
         ...caixa,
         numero: caixas.length + 1,
         fechadoEm: Date.now(),
-        totalVendido,
+        totalVendido: Number(totalVendido.toFixed(2)),
         totalPorMeio,
         meiosDeclarados: meios,
-        totalRecebido,
-        diferenca: Number(diferencaCaixa.toFixed(2)),
+        totalRecebido: Number(totalRecebido.toFixed(2)),
+        diferenca: diferencaCaixa,
+        diferencaAceita,
+        tolerancia: TOLERANCIA_CAIXA,
+        justificativa,
+        autorizadoPor: String(body.autorizadoPor || (justificativa ? fechadoPor : '')),
         valorEnvelope,
         saldoRestante,
         fechadoPor,
         observacoes: body.observacoes || '',
+        sangrias: Array.isArray(caixa.sangrias) ? caixa.sangrias : [],
       };
       arquivarCaixa(caixa);
       saveCaixa();

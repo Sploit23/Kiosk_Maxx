@@ -1229,10 +1229,22 @@ function totaisPedidosDoCaixaPortal(array $pedidos, string $caixaId): array
 function reconciliarCaixaComPedidos(array $caixa, array $pedidos): array
 {
     $fechadoEm = trim((string) ($caixa['fechadoEm'] ?? ''));
-    $declarados = is_array($caixa['meiosDeclarados'] ?? null) ? $caixa['meiosDeclarados'] : [];
-    if ($fechadoEm === '' || !$declarados) return $caixa;
+    $declaradosBrutos = is_array($caixa['meiosDeclarados'] ?? null) ? $caixa['meiosDeclarados'] : [];
+    if ($fechadoEm === '' || !$declaradosBrutos) return $caixa;
     $caixaId = trim((string) ($caixa['id'] ?? ''));
     if ($caixaId === '') return $caixa;
+
+    // Normaliza rótulos antigos ("Dinheiro", "Crédito 3x") para as 4 chaves
+    // canônicas antes de comparar — sem isso a reconciliação criava uma forma
+    // fantasma e podia "corrigir" o caixa para um valor errado.
+    $declarados = [];
+    foreach ($declaradosBrutos as $forma => $valor) {
+        if (!is_scalar($valor)) continue;
+        $meio = normalizarMeioPagamento($forma, $forma);
+        if (!in_array($meio, MEIOS_CONHECIDOS, true)) continue;
+        $declarados[$meio] = round((float) ($declarados[$meio] ?? 0) + (float) $valor, 2);
+    }
+    if (!$declarados) return $caixa;
 
     $calculado = totaisPedidosDoCaixaPortal($pedidos, $caixaId);
     $totalPedidos = (float) $calculado['total'];
@@ -1243,11 +1255,36 @@ function reconciliarCaixaComPedidos(array $caixa, array $pedidos): array
 
     $porMeio = $calculado['porMeio'];
 
+    $totalSangrias = 0.0;
+    foreach ((is_array($caixa['sangrias'] ?? null) ? $caixa['sangrias'] : []) as $sg) {
+        if (!is_array($sg) || !is_numeric($sg['valor'] ?? null)) continue;
+        if (is_numeric($sg['abatimento'] ?? null)) {
+            $totalSangrias += (float) $sg['abatimento'];
+            continue;
+        }
+        // Registros antigos sem abatimento: devolução de venda do próprio
+        // caixa já saiu das vendas e não pode ser descontada de novo.
+        $pedidoId = trim((string) ($sg['pedidoId'] ?? ''));
+        $devolucaoDoCaixa = false;
+        if ($pedidoId !== '') {
+            foreach ($pedidos as $pedido) {
+                if (!is_array($pedido)) continue;
+                if ((string) ($pedido['id'] ?? '') === $pedidoId
+                    && (string) ($pedido['caixaId'] ?? '') === $caixaId) {
+                    $devolucaoDoCaixa = true;
+                    break;
+                }
+            }
+        }
+        if (!$devolucaoDoCaixa) $totalSangrias += (float) $sg['valor'];
+    }
+    $totalSangrias = round($totalSangrias, 2);
+
     $sistema = array_fill_keys(MEIOS_CONHECIDOS, 0.0);
     foreach (MEIOS_CONHECIDOS as $meio) {
         $sistema[$meio] = round((float) ($porMeio[$meio] ?? 0), 2);
     }
-    $sistema['dinheiro'] = round($sistema['dinheiro'] + (float) ($caixa['valorInicial'] ?? 0), 2);
+    $sistema['dinheiro'] = round($sistema['dinheiro'] + (float) ($caixa['valorInicial'] ?? 0) - $totalSangrias, 2);
 
     $formas = array_unique(array_merge(array_keys($declarados), array_keys($sistema)));
     $diferenca = 0.0;
@@ -1263,14 +1300,35 @@ function reconciliarCaixaComPedidos(array $caixa, array $pedidos): array
     $mudou = abs($totalAtual - $totalPedidos) > 0.004
         || ($caixa['totalPorMeio'] ?? []) != $porMeio
         || abs((float) ($caixa['totalRecebido'] ?? 0) - $novoTotalRecebido) > 0.004
-        || abs((float) ($caixa['diferenca'] ?? 0) - $novaDiferenca) > 0.004;
+        || abs((float) ($caixa['diferenca'] ?? 0) - $novaDiferenca) > 0.004
+        || ($caixa['meiosDeclarados'] ?? []) != $declarados;
     if (!$mudou && trim((string) ($caixa['reconciliadoEm'] ?? '')) !== '') return $caixa;
 
+    $antes = [
+        'totalVendido' => $caixa['totalVendido'] ?? null,
+        'totalPorMeio' => $caixa['totalPorMeio'] ?? [],
+        'totalRecebido' => $caixa['totalRecebido'] ?? null,
+        'diferenca' => $caixa['diferenca'] ?? null,
+    ];
+    $caixa['meiosDeclarados'] = $declarados;
     $caixa['totalVendido'] = $totalPedidos;
     $caixa['totalPorMeio'] = $porMeio;
     $caixa['totalRecebido'] = $novoTotalRecebido;
     $caixa['diferenca'] = $novaDiferenca;
     $caixa['reconciliadoEm'] = gmdate('c');
+    $trilha = is_array($caixa['reconciliacoes'] ?? null) ? $caixa['reconciliacoes'] : [];
+    $trilha[] = [
+        'em' => $caixa['reconciliadoEm'],
+        'antes' => $antes,
+        'depois' => [
+            'totalVendido' => $totalPedidos,
+            'totalPorMeio' => $porMeio,
+            'totalRecebido' => $novoTotalRecebido,
+            'diferenca' => $novaDiferenca,
+        ],
+        'por' => 'portal',
+    ];
+    $caixa['reconciliacoes'] = array_slice($trilha, -50);
     return $caixa;
 }
 
@@ -1766,6 +1824,16 @@ try {
                     'parcelas' => max(0, $parcelas),
                 ];
             }
+            $devolucao = null;
+            if (is_array($pd['devolucao'] ?? null)) {
+                $formaDev = strtolower(trim((string) ($pd['devolucao']['forma'] ?? '')));
+                if (in_array($formaDev, ['dinheiro', 'cartao', 'nao'], true)) {
+                    $devolucao = [
+                        'forma' => $formaDev,
+                        'valor' => round(max(0, (float) ($pd['devolucao']['valor'] ?? 0)), 2),
+                    ];
+                }
+            }
             $registro = [
                 'id' => $id,
                 'numero' => (string) ($pd['numero'] ?? $id),
@@ -1791,6 +1859,7 @@ try {
                 'caixaId' => (string) ($pd['caixaId'] ?? ''),
                 'origemTerminal' => (string) ($pd['origemTerminal'] ?? ''),
                 'origemPedidoId' => (string) ($pd['origemPedidoId'] ?? ''),
+                'devolucao' => $devolucao,
                 'guiaImpressa' => !empty($pd['guiaImpressa']),
                 'enviadoEm' => gmdate('c'),
             ];
@@ -1826,6 +1895,26 @@ try {
                 return $out;
             };
             $fechadoEm = trim((string) ($c['fechadoEm'] ?? ''));
+            $sangrias = [];
+            foreach ((is_array($c['sangrias'] ?? null) ? $c['sangrias'] : []) as $sg) {
+                if (!is_array($sg)) continue;
+                $sangrias[] = [
+                    'id' => trim((string) ($sg['id'] ?? '')),
+                    'em' => $sg['em'] ?? null,
+                    'valor' => round((float) ($sg['valor'] ?? 0), 2),
+                    'abatimento' => (isset($sg['abatimento']) && is_numeric($sg['abatimento']))
+                        ? round((float) $sg['abatimento'], 2)
+                        : null,
+                    'motivo' => trim((string) ($sg['motivo'] ?? '')),
+                    'pedidoId' => trim((string) ($sg['pedidoId'] ?? '')),
+                    'por' => trim((string) ($sg['por'] ?? '')),
+                ];
+            }
+            $pedidosDoCaixa = [];
+            foreach ((is_array($c['pedidos'] ?? null) ? $c['pedidos'] : []) as $pedidoId) {
+                $pedidoId = trim((string) $pedidoId);
+                if ($pedidoId !== '') $pedidosDoCaixa[] = $pedidoId;
+            }
             $registro = [
                 'id' => $id,
                 'numero' => (string) ($c['numero'] ?? ''),
@@ -1842,9 +1931,16 @@ try {
                 'fechadoPor' => trim((string) ($c['fechadoPor'] ?? '')),
                 'totalVendido' => round((float) ($c['totalVendido'] ?? 0), 2),
                 'totalPorMeio' => $numMap($c['totalPorMeio'] ?? []),
+                'pedidos' => $pedidosDoCaixa,
                 'meiosDeclarados' => $numMap($c['meiosDeclarados'] ?? []),
                 'totalRecebido' => round((float) ($c['totalRecebido'] ?? 0), 2),
                 'diferenca' => round((float) ($c['diferenca'] ?? 0), 2),
+                'diferencaAceita' => !empty($c['diferencaAceita']),
+                'tolerancia' => isset($c['tolerancia']) ? round((float) $c['tolerancia'], 2) : null,
+                'justificativa' => trim((string) ($c['justificativa'] ?? '')),
+                'autorizadoPor' => trim((string) ($c['autorizadoPor'] ?? '')),
+                'sangrias' => $sangrias,
+                'reconciliacoes' => is_array($c['reconciliacoes'] ?? null) ? array_slice($c['reconciliacoes'], -50) : [],
                 'valorEnvelope' => round((float) ($c['valorEnvelope'] ?? 0), 2),
                 'saldoRestante' => round((float) ($c['saldoRestante'] ?? 0), 2),
                 'observacoes' => trim((string) ($c['observacoes'] ?? '')),
@@ -2617,8 +2713,7 @@ try {
             $testIds = lojaIdsTeste($db);
             $incluirTeste = incluirTeste($p);
             $out = [];
-            $mudou = false;
-            foreach ($todos as $i => $r) {
+            foreach ($todos as $r) {
                 if (!registroDeLojaExistente($ids, $r)) continue;
                 if (!$incluirTeste && registroDeLojaDeTeste($testIds, $r)) continue;
                 if ($lojaId !== '' && ($r['lojaId'] ?? '') !== $lojaId) continue;
@@ -2626,14 +2721,11 @@ try {
                 if ($data === '') $data = substr((string) ($r['abertoEm'] ?? ''), 0, 10);
                 if ($dataIni !== '' && $data < $dataIni) continue;
                 if ($dataFim !== '' && $data > $dataFim) continue;
-                $ajustado = reconciliarCaixaComPedidos($r, $pedidosPortal);
-                if ($ajustado !== $r) {
-                    $todos[$i] = $ajustado;
-                    $mudou = true;
-                }
-                $out[] = $ajustado;
+                // Recalcula só para exibição; NÃO grava durante um GET (evita
+                // reescrever histórico a cada consulta). A gravação acontece
+                // no caixa.push seguinte, com trilha de reconciliação.
+                $out[] = reconciliarCaixaComPedidos($r, $pedidosPortal);
             }
-            if ($mudou) saveJson('caixas.json', $todos);
             usort($out, function ($a, $b) {
                 return strcmp((string) ($b['abertoEm'] ?? ''), (string) ($a['abertoEm'] ?? '')) ?: 0;
             });

@@ -71,6 +71,7 @@ const natalApi = {
   caixasHistorico: () => api('GET', '/api/pdv/caixas'),
   caixaAbrir: (data) => api('POST', '/api/pdv/caixa/abrir', data),
   caixaFechar: (data) => api('POST', '/api/pdv/caixa/fechar', data),
+  caixaSangria: (data) => api('POST', '/api/pdv/caixa/sangria', data),
   caixaCorrigir: (id, data) => api('PUT', `/api/pdv/caixas/${encodeURIComponent(id)}`, data),
 
   // ─── Auditoria (uso de senha master) ─────────────────────

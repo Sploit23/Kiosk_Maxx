@@ -667,6 +667,7 @@ select.form-input{appearance:none;}
     <div class="sb-item active" data-screen="dashboard"><span class="ico">🏠</span> Dashboard</div>
     <div class="sb-item" data-screen="lojas"><span class="ico">🏪</span> Lojas <span class="badge" id="lojas-badge">0</span></div>
     <div class="sb-item" data-screen="financeiro"><span class="ico">💰</span> Financeiro</div>
+    <div class="sb-item" data-screen="auditoria"><span class="ico">🧾</span> Auditoria</div>
     <div class="sb-item" data-screen="fluxo"><span class="ico">💧</span> Fluxo de Caixa</div>
     <div class="sb-item" data-screen="estoque"><span class="ico">📦</span> Estoque</div>
     <div class="sb-item" data-screen="precos"><span class="ico">🛍</span> Catálogo de produtos</div>
@@ -919,6 +920,37 @@ select.form-input{appearance:none;}
       <div class="fin2-tip" id="fin2-tip"></div>
     </div>
 
+    <!-- ====== AUDITORIA ====== -->
+    <div class="screen" id="screen-auditoria">
+      <div class="section-head">
+        <div>
+          <h2>Auditoria</h2>
+          <p>Confira os pedidos de uma loja em um dia e exporte para Excel (.xlsx)</p>
+        </div>
+        <div class="fin2-head-actions"><div class="fin2-period" id="aud-header-label">—</div></div>
+      </div>
+      <div class="card" style="padding:16px 18px;">
+        <div class="fin2-filters">
+          <div class="fin2-field"><label>Loja</label><select class="fin2-select" id="aud-loja"></select></div>
+          <div class="fin2-field"><label>De</label><input class="fin2-input" type="date" id="aud-de"></div>
+          <div class="fin2-field"><label>Até</label><input class="fin2-input" type="date" id="aud-ate"></div>
+          <button class="fin2-btn" id="aud-hoje">Hoje</button>
+          <button class="fin2-btn" id="aud-ontem">Ontem</button>
+          <button class="fin2-btn" id="aud-7d">7 dias</button>
+          <button class="fin2-btn" id="aud-mes">Este mês</button>
+          <button class="fin2-btn" id="aud-tudo">Tudo</button>
+          <button class="fin2-btn primary" id="aud-aplicar">Aplicar</button>
+          <button class="fin2-btn" id="aud-exportar" title="Baixa um arquivo Excel (.xlsx) com os pedidos do período">Exportar Excel</button>
+        </div>
+        <div class="fin2-range" id="aud-range"></div>
+      </div>
+      <div class="fin2-stats" id="aud-stats"></div>
+      <div class="card">
+        <h3>Pedidos do período <span class="h3-count" id="aud-count"></span></h3>
+        <div style="overflow-x:auto;"><table id="aud-pedidos"></table></div>
+      </div>
+    </div>
+
     <!-- ====== FLUXO DE CAIXA ====== -->
     <div class="screen" id="screen-fluxo">
       <div class="section-head">
@@ -945,7 +977,7 @@ select.form-input{appearance:none;}
       </div>
       <div class="card">
         <h3>Abertura e fechamento de caixa <em style="color:var(--slate-400);font-size:11px;font-weight:400;">(fundo, vendas do sistema, valores declarados e diferença)</em></h3>
-        <p class="screen-note" id="fluxo-caixas-nota">Vendido, Dinheiro, Débito, Crédito e PIX são calculados pelo sistema. <b>Recebido</b> é a soma declarada pelo operador; <b>Esperado</b> = vendas + fundo; <b>Diferença</b> = recebido − esperado. Dinheiro esperado inclui o fundo; cartões/PIX não. <b>Envelope</b> é a sangria e <b>Saldo</b> é o dinheiro declarado menos o envelope. No celular, arraste a tabela para o lado para ver todas as colunas.</p>
+        <p class="screen-note" id="fluxo-caixas-nota">Vendido, Dinheiro, Débito, Crédito e PIX são calculados pelo sistema. <b>Recebido</b> é a soma declarada pelo operador; <b>Esperado</b> = vendas + fundo − sangrias; <b>Diferença</b> = recebido − esperado. Dinheiro esperado inclui o fundo e desconta as sangrias; devoluções de vendas do próprio caixa aparecem à parte e não são descontadas duas vezes. Cartões/PIX não incluem fundo. <b>Envelope</b> é a sangria e <b>Saldo</b> é o dinheiro declarado menos o envelope. Diferenças acima de R$ 0,05 aparecem com a justificativa autorizada. No celular, arraste a tabela para o lado para ver todas as colunas.</p>
         <table id="fluxo-caixas"></table>
       </div>
     </div>
@@ -1146,7 +1178,7 @@ var FN_LABEL = { vendedor:'Vendedora', fotografo:'Fotógrafo', admin:'Administra
 var FN_ACESSO = { vendedor:'Kiosk', fotografo:'Kiosk', admin:'Total', gerente:'Regional' };
 
 var token = sessionStorage.getItem('nac_token') || '';
-var state = { currentUser:null, lojas:[], usuarios:[], pendentes:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', vendasDate:'', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje', estoqueLoja:'', estoqueItens:[], estoqueConfig:null, _estoqueAt:0, incluirTeste:false };
+var state = { currentUser:null, lojas:[], usuarios:[], pendentes:[], filtroLoja:'', screen:'dashboard', vendasPeriod:'hoje', vendasDate:'', fin2De:null, fin2Ate:null, fin2Mes:null, fluxoPeriodo:'hoje', despesas:[], _despDirty:false, vendasRaw:[], pedidos:[], _pedProm:null, _pedDirty:false, parametros:null, _paramProm:null, rankPeriodo:'hoje', estoqueLoja:'', estoqueItens:[], estoqueConfig:null, _estoqueAt:0, incluirTeste:false, audLoja:'', audDe:'', audAte:'', audPedidos:[] };
 var notificacoes = [];
 var currentScreen = 'dashboard';
 
@@ -1257,7 +1289,7 @@ var titles = {
   dashboard:'Dashboard', lojas:'Lojas', equipe:'Colaboradores', ranking:'Ranking',
   precos:'Catálogo de produtos', overlays:'Overlay das fotos',
   financeiro:'Financeiro', fluxo:'Fluxo de Caixa',
-  estoque:'Estoque'
+  estoque:'Estoque', auditoria:'Auditoria'
 };
 $$('.sb-item[data-screen]').forEach(function(item){
   item.addEventListener('click', function(){
@@ -1296,6 +1328,7 @@ function goScreen(name){
   if(name==='precos') renderPrecos();
   if(name==='overlays') ovCarregar();
   if(name==='financeiro') renderFinanc();
+  if(name==='auditoria') renderAuditoria();
   if(name==='fluxo') renderFluxo();
   if(name==='estoque') renderEstoque();
   if(name==='ranking') renderRanking();
@@ -2393,6 +2426,309 @@ function fin2RenderPedidos(agg){
     : 'nenhum pedido no período');
 }
 
+// ——— AUDITORIA ———
+// Relatório por loja/dia + exportação em Excel (.xlsx), sem bibliotecas externas.
+function audOntem(){
+  var d = new Date();
+  d.setDate(d.getDate() - 1);
+  return dayStr(d);
+}
+function audRangeLabel(){
+  var de = state.audDe, ate = state.audAte;
+  if(!de && !ate) return 'Todo o período';
+  if(de && ate && de === ate) return dayLabel(de);
+  return dayLabel(de || '…') + ' a ' + dayLabel(ate || 'hoje');
+}
+function audInitFiltros(){
+  var sel = $('#aud-loja');
+  if(sel){
+    var opts = '<option value="">Todas as lojas</option>';
+    lojasVisiveis().forEach(function(l){ opts += '<option value="'+escAttr(l.id)+'">'+esc(l.nome)+'</option>'; });
+    sel.innerHTML = opts;
+    sel.value = state.audLoja || '';
+  }
+  var de = $('#aud-de'), ate = $('#aud-ate');
+  if(de && ate && !de.value && !ate.value && !state.audDe && !state.audAte){
+    var ontem = audOntem();
+    de.value = ontem; ate.value = ontem;
+  }
+}
+function audSetRange(de, ate){
+  var dEl = $('#aud-de'), aEl = $('#aud-ate');
+  if(dEl) dEl.value = de || '';
+  if(aEl) aEl.value = ate || '';
+  renderAuditoria();
+}
+function renderAuditoria(){
+  audInitFiltros();
+  var deEl = $('#aud-de'), ateEl = $('#aud-ate'), sEl = $('#aud-loja');
+  var de = deEl ? deEl.value : '';
+  var ate = ateEl ? ateEl.value : '';
+  if(de && ate && de > ate){ var t = de; de = ate; ate = t; if(deEl) deEl.value = de; if(ateEl) ateEl.value = ate; }
+  state.audDe = de; state.audAte = ate;
+  state.audLoja = sEl ? sEl.value : '';
+  var lojaTxt = state.audLoja || 'Todas as lojas';
+  $('#aud-header-label').textContent = lojaTxt + ' · ' + audRangeLabel();
+  $('#aud-range').innerHTML = 'Carregando…';
+  call('pedido.list', { lojaId: state.audLoja, dataIni: state.audDe, dataFim: state.audAte }).then(function(res){
+    state.audPedidos = (res && res.ok && Array.isArray(res.pedidos)) ? res.pedidos : [];
+    state.audPedidos.forEach(function(p){ p.status = String(p.status||'').toLowerCase(); });
+    audRender();
+  }).catch(function(){ state.audPedidos = []; audRender(); });
+}
+function audRender(){
+  var peds = state.audPedidos.slice().sort(function(a,b){ return (a.numero||0)-(b.numero||0); });
+  var liquidos = peds.filter(function(p){ return p.status !== 'cancelado'; });
+  var tot = liquidos.reduce(function(s,p){ return s + toNum(p.total); }, 0);
+  var ticket = liquidos.length ? tot/liquidos.length : 0;
+  var meios = { dinheiro:0, debito:0, credito:0, pix:0 };
+  liquidos.forEach(function(p){
+    (p.pagamentos||[]).forEach(function(pg){ var k = pg.meio || pg.forma; if(meios[k] != null) meios[k] += toNum(pg.valor); });
+  });
+  $('#aud-stats').innerHTML =
+    '<div class="fin2-stat blue"><div class="l">Pedidos</div><div class="v">'+fmtInt(peds.length)+'</div>'+
+      '<div class="s">'+fmtInt(liquidos.length)+' válido(s) · '+fmtInt(peds.length-liquidos.length)+' cancelado(s)</div></div>'+
+    '<div class="fin2-stat green"><div class="l">Total líquido</div><div class="v">'+fmtBRL(tot)+'</div>'+
+      '<div class="s">ticket médio '+fmtBRL(ticket)+'</div></div>'+
+    '<div class="fin2-stat amber"><div class="l">Dinheiro</div><div class="v">'+fmtBRL(meios.dinheiro)+'</div>'+
+      '<div class="s">PIX '+fmtBRL(meios.pix)+'</div></div>'+
+    '<div class="fin2-stat purple"><div class="l">Cartões</div><div class="v">'+fmtBRL(meios.debito+meios.credito)+'</div>'+
+      '<div class="s">débito '+fmtBRL(meios.debito)+' · crédito '+fmtBRL(meios.credito)+'</div></div>';
+  var ptb = $('#aud-pedidos');
+  ptb.innerHTML = pedidosTabelaHTML(peds, 1000);
+  bindAudVer(ptb);
+  setCardCount('#aud-count', peds.length ? (fmtInt(liquidos.length)+' pedido(s) · '+fmtBRL(tot)) : 'nenhum pedido no período');
+  $('#aud-range').innerHTML = 'Pedidos de <b>'+esc(state.audLoja || 'todas as lojas')+'</b> · <b>'+audRangeLabel()+'</b> · '+fmtInt(peds.length)+' pedido(s)';
+}
+function bindAudVer(container){
+  container.querySelectorAll('[data-ver-pedido]').forEach(function(b){
+    b.addEventListener('click', function(){
+      var p = state.audPedidos.find(function(x){ return pedId(x) === b.dataset.verPedido; });
+      if(p) modalPedido(p);
+    });
+  });
+}
+function audExportar(){
+  var peds = state.audPedidos.slice().sort(function(a,b){ return (a.numero||0)-(b.numero||0); });
+  if(!peds.length){ toast('Nada para exportar', true); return; }
+  var liquidos = peds.filter(function(p){ return p.status !== 'cancelado'; });
+  var tot = liquidos.reduce(function(s,p){ return s + toNum(p.total); }, 0);
+  var lojaTxt = state.audLoja || 'Todas as lojas';
+  var rows = [];
+  rows.push([{v:'Vendas - '+lojaTxt+' - '+audRangeLabel(), s:1}]);
+  rows.push([{v:peds.length+' pedidos  |  Total líquido: '+fmtBRL(tot)}]);
+  rows.push([]);
+  rows.push([{v:'Nº',s:1},{v:'Hora',s:1},{v:'Operador',s:1},{v:'Sessão',s:1},{v:'Itens',s:1},{v:'Fotos 10x15',s:1},{v:'Fotos 15x20',s:1},{v:'Unidades',s:1},{v:'Desconto (R$)',s:1},{v:'Total (R$)',s:1},{v:'Pagamento',s:1},{v:'Status',s:1},{v:'Pedido',s:1}]);
+  peds.forEach(function(p){
+    var itens = (p.itens||[]).map(function(it){ return (it.qtd>1?it.qtd+'x ':'')+(it.label||it.produtoId||''); }).join('; ');
+    var pags = (p.pagamentos||[]).map(function(pg){ return (MEIO_LABEL[pg.meio]||pg.forma||pg.meio||'')+' '+fmtBRL(toNum(pg.valor)); }).join('; ');
+    var sess = (p.sessoes||[]).map(function(s){ return s.senha||''; }).join(', ');
+    var hr = p.pagoEm || p.criadoEm;
+    var hm = hr ? new Date(hr) : null;
+    rows.push([
+      p.numero, (hm && !isNaN(hm)) ? hm.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '',
+      p.operador||'', sess, itens,
+      toNum(p.fotos10x15), toNum(p.fotos15x20), toNum(p.unidadesTotal),
+      {v:toNum(p.desconto),t:'n',s:2}, {v:toNum(p.total),t:'n',s:2}, pags, p.status||'', pedId(p)
+    ]);
+  });
+  rows.push([{v:'TOTAL',s:1},null,null,null,null,null,null,null,null,{v:tot,t:'n',s:3}]);
+  var sheets = [{ name:'Vendas', cols:[6,7,20,9,46,12,12,10,13,12,30,10,22], rows:rows }];
+  var meios = {};
+  liquidos.forEach(function(p){
+    (p.pagamentos||[]).forEach(function(pg){
+      var k = pg.meio || pg.forma || 'outro';
+      if(!meios[k]) meios[k] = { valor:0, n:0 };
+      meios[k].valor += toNum(pg.valor); meios[k].n += 1;
+    });
+  });
+  var ordem = ['dinheiro','debito','credito','pix'];
+  var keys = Object.keys(meios).sort(function(a,b){ var ia=ordem.indexOf(a), ib=ordem.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib); });
+  var srows = [[{v:'Resumo por forma de pagamento',s:1}],[],[{v:'Forma',s:1},{v:'Nº de pagamentos',s:1},{v:'Valor (R$)',s:1}]];
+  keys.forEach(function(k){ srows.push([MEIO_LABEL[k]||k, meios[k].n, {v:meios[k].valor,t:'n',s:2}]); });
+  srows.push([{v:'TOTAL',s:1},null,{v:tot,t:'n',s:3}]);
+  sheets.push({ name:'Resumo', cols:[20,16,14], rows:srows });
+  try {
+    var bytes = xlsxBuild(sheets);
+    var per = (state.audDe || state.audAte) ? ((state.audDe||'inicio')+'_a_'+(state.audAte||'hoje')) : 'todo_periodo';
+    var fname = 'auditoria_'+String(lojaTxt).replace(/[^A-Za-z0-9]+/g,'_')+'_'+per+'.xlsx';
+    var blob = new Blob([bytes], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fname;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+    toast('Excel gerado: '+fname);
+  } catch(e){ toast('Erro ao gerar Excel', true); }
+}
+$('#aud-aplicar').addEventListener('click', renderAuditoria);
+$('#aud-hoje').addEventListener('click', function(){ var h = dayStr(new Date()); audSetRange(h, h); });
+$('#aud-ontem').addEventListener('click', function(){ var o = audOntem(); audSetRange(o, o); });
+$('#aud-7d').addEventListener('click', function(){ var d = new Date(); d.setDate(d.getDate()-6); audSetRange(dayStr(d), dayStr(new Date())); });
+$('#aud-mes').addEventListener('click', function(){ var n = new Date(); audSetRange(dayStr(new Date(n.getFullYear(), n.getMonth(), 1)), dayStr(n)); });
+$('#aud-tudo').addEventListener('click', function(){ audSetRange('', ''); });
+$('#aud-exportar').addEventListener('click', audExportar);
+// ——— XLSX (ZIP store + CRC32, sem dependências) ———
+var XLSX_CRC = (function(){
+  var t = [];
+  for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++){ c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); } t[n]=c>>>0; }
+  return t;
+})();
+function xlsxCrc32(bytes){
+  var c = 0xFFFFFFFF;
+  for(var i=0;i<bytes.length;i++){ c = XLSX_CRC[(c ^ bytes[i]) & 0xff] ^ (c>>>8); }
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function xlsxUtf8(str){
+  if(typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str);
+  var b = [];
+  for(var i=0;i<str.length;i++){
+    var code = str.charCodeAt(i);
+    if(code < 0x80) b.push(code);
+    else if(code < 0x800){ b.push(0xC0 | (code>>6), 0x80 | (code & 0x3F)); }
+    else { b.push(0xE0 | (code>>12), 0x80 | ((code>>6)&0x3F), 0x80 | (code & 0x3F)); }
+  }
+  return new Uint8Array(b);
+}
+function xlsxZipStore(files){
+  var out = [];
+  function u16(v){ out.push(v & 0xff, (v>>8)&0xff); }
+  function u32(v){ out.push(v & 0xff, (v>>8)&0xff, (v>>16)&0xff, (v>>>24)&0xff); }
+  function push(arr){ for(var i=0;i<arr.length;i++) out.push(arr[i]); }
+  var dosTime = 0, dosDate = ((2026-1980)<<9) | (1<<5) | 1;
+  var central = [];
+  files.forEach(function(f){
+    var name = xlsxUtf8(f.name);
+    var data = f.data;
+    var crc = xlsxCrc32(data);
+    var offset = out.length;
+    u32(0x04034b50); u16(20); u16(0x0800); u16(0); u16(dosTime); u16(dosDate);
+    u32(crc); u32(data.length); u32(data.length); u16(name.length); u16(0);
+    push(name); push(data);
+    central.push({ name:name, crc:crc, size:data.length, offset:offset });
+  });
+  var cdStart = out.length;
+  central.forEach(function(c){
+    u32(0x02014b50); u16(20); u16(20); u16(0x0800); u16(0); u16(dosTime); u16(dosDate);
+    u32(c.crc); u32(c.size); u32(c.size); u16(c.name.length); u16(0); u16(0); u16(0); u16(0); u32(0); u32(c.offset);
+    push(c.name);
+  });
+  var cdSize = out.length - cdStart;
+  u32(0x06054b50); u16(0); u16(0); u16(central.length); u16(central.length); u32(cdSize); u32(cdStart); u16(0);
+  return new Uint8Array(out);
+}
+function xlsxEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function xlsxColLetter(n){
+  var s = '';
+  while(n > 0){ var m = (n-1) % 26; s = String.fromCharCode(65+m) + s; n = Math.floor((n-1)/26); }
+  return s;
+}
+function xlsxSheetName(name){
+  return String(name||'Planilha').replace(/[\[\]\*\?\/\\:]/g,' ').slice(0,31) || 'Planilha';
+}
+function xlsxCellXml(ref, cell, defStyle){
+  var v, t, s;
+  if(cell && typeof cell === 'object'){
+    v = cell.v; t = cell.t; s = (cell.s != null) ? cell.s : defStyle;
+  } else { v = cell; s = defStyle; }
+  if(v === null || v === undefined || v === '') return '';
+  if(!t) t = (typeof v === 'number') ? 'n' : 's';
+  var styleAttr = (s != null && s !== 0) ? ' s="'+s+'"' : '';
+  if(t === 'n'){
+    var num = (typeof v === 'number') ? v : parseFloat(v);
+    if(isNaN(num)) return '';
+    return '<c r="'+ref+'"'+styleAttr+'><v>'+num+'</v></c>';
+  }
+  return '<c r="'+ref+'"'+styleAttr+' t="inlineStr"><is><t xml:space="preserve">'+xlsxEsc(v)+'</t></is></c>';
+}
+function xlsxSheetXml(sheet){
+  var cols = sheet.cols || [];
+  var colsXml = '';
+  if(cols.length){
+    colsXml = '<cols>';
+    cols.forEach(function(w, i){
+      colsXml += '<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>';
+    });
+    colsXml += '</cols>';
+  }
+  var rowsXml = '';
+  (sheet.rows || []).forEach(function(row, r){
+    var cells = '';
+    (row||[]).forEach(function(cell, c){
+      cells += xlsxCellXml(xlsxColLetter(c+1)+(r+1), cell, 0);
+    });
+    rowsXml += '<row r="'+(r+1)+'">'+cells+'</row>';
+  });
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+    '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'+
+    colsXml+'<sheetData>'+rowsXml+'</sheetData></worksheet>';
+}
+function xlsxStylesXml(){
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+    '<numFmts count="1"><numFmt numFmtId="164" formatCode="&quot;R$&quot; #,##0.00"/></numFmts>'+
+    '<fonts count="2">'+
+      '<font><sz val="11"/><color theme="1"/><name val="Calibri"/></font>'+
+      '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>'+
+    '</fonts>'+
+    '<fills count="3">'+
+      '<fill><patternFill patternType="none"/></fill>'+
+      '<fill><patternFill patternType="gray125"/></fill>'+
+      '<fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill>'+
+    '</fills>'+
+    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'+
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+    '<cellXfs count="4">'+
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+
+      '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'+
+      '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'+
+      '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>'+
+    '</cellXfs>'+
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'+
+    '</styleSheet>';
+}
+function xlsxBuild(sheets){
+  sheets = (sheets && sheets.length) ? sheets : [{ name:'Planilha', rows:[[]] }];
+  var files = [];
+  var ctOverrides = '';
+  var wbSheets = '';
+  var wbRels = '';
+  sheets.forEach(function(sh, i){
+    var idx = i+1;
+    var fname = 'sheet'+idx+'.xml';
+    ctOverrides += '<Override PartName="/xl/worksheets/'+fname+'" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+    wbSheets += '<sheet name="'+xlsxEsc(xlsxSheetName(sh.name))+'" sheetId="'+idx+'" r:id="rId'+idx+'"/>';
+    wbRels += '<Relationship Id="rId'+idx+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/'+fname+'"/>';
+    files.push({ name:'xl/worksheets/'+fname, data:xlsxUtf8(xlsxSheetXml(sh)) });
+  });
+  var stylesRid = 'rId'+(sheets.length+1);
+  wbRels += '<Relationship Id="'+stylesRid+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>';
+  files.push({ name:'xl/styles.xml', data:xlsxUtf8(xlsxStylesXml()) });
+  files.push({ name:'[Content_Types].xml', data:xlsxUtf8(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+    '<Default Extension="xml" ContentType="application/xml"/>'+
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+
+    ctOverrides+'</Types>') });
+  files.push({ name:'_rels/.rels', data:xlsxUtf8(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'+
+    '</Relationships>') });
+  files.push({ name:'xl/workbook.xml', data:xlsxUtf8(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+    '<sheets>'+wbSheets+'</sheets></workbook>') });
+  files.push({ name:'xl/_rels/workbook.xml.rels', data:xlsxUtf8(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    wbRels+'</Relationships>') });
+  return xlsxZipStore(files);
+}
+
 // ——— FLUXO DE CAIXA ———
 async function renderFluxo(){
   await getVendas();
@@ -2439,22 +2775,38 @@ async function renderFluxo(){
   if(nota){
     var abertos = caixas.filter(function(c){ return c.status==='aberto'; });
     var antigos = abertos.filter(function(c){ return horasDesde(c.abertoEm) >= 12; });
-    nota.innerHTML = 'Vendido, Dinheiro, Débito, Crédito e PIX são calculados pelo sistema. <b>Recebido</b> é a soma declarada pelo operador; <b>Esperado</b> = vendas + fundo; <b>Diferença</b> = recebido − esperado. Dinheiro esperado inclui o fundo; cartões/PIX não. <b>Envelope</b> é a sangria e <b>Saldo</b> é o valor informado para ficar no caixa (ou o dinheiro declarado menos o envelope).' +
+    nota.innerHTML = 'Vendido, Dinheiro, Débito, Crédito e PIX são calculados pelo sistema. <b>Recebido</b> é a soma declarada pelo operador; <b>Esperado</b> = vendas + fundo − sangrias; <b>Diferença</b> = recebido − esperado. Dinheiro esperado inclui o fundo e desconta as sangrias; devoluções de vendas do próprio caixa aparecem à parte e não são descontadas duas vezes. Cartões/PIX não incluem fundo. <b>Envelope</b> é a sangria e <b>Saldo</b> é o valor informado para ficar no caixa (ou o dinheiro declarado menos o envelope). Diferenças acima de R$ 0,05 aparecem com a justificativa autorizada.' +
       (window.innerWidth <= 900 ? ' No celular, arraste a tabela para o lado.' : '') +
       (antigos.length ? ' <span class="warn">Há '+antigos.length+' caixa(s) aberto(s) há mais de 12h — provavelmente ficaram abertos após reinício do PDV.</span>' : '');
   }
 
   var tbc = $('#fluxo-caixas');
   if(caixas.length){
-    tbc.innerHTML = '<tr><th>Abertura</th><th>Loja</th><th>Operador</th><th>Fundo</th><th>Fechamento</th><th>Fechado por</th><th>Vendido</th><th>Dinheiro</th><th>Débito</th><th>Crédito</th><th>PIX</th><th>Recebido</th><th>Esperado</th><th>Diferença</th><th>Envelope</th><th>Saldo</th><th>Status</th></tr>' +
+    tbc.innerHTML = '<tr><th>Abertura</th><th>Loja</th><th>Operador</th><th>Fundo</th><th>Fechamento</th><th>Fechado por</th><th>Vendido</th><th>Dinheiro</th><th>Débito</th><th>Crédito</th><th>PIX</th><th>Recebido</th><th>Esperado</th><th>Sangrias</th><th>Diferença</th><th>Envelope</th><th>Saldo</th><th>Status</th></tr>' +
       caixas.map(function(c){
         var m = c.totalPorMeio || {};
         var dif = toNum(c.diferenca);
-        var esperado = toNum(c.totalVendido) + toNum(c.valorInicial);
+        var idsCaixa = {};
+        (Array.isArray(c.pedidos) ? c.pedidos : []).forEach(function(pid){ idsCaixa[String(pid)] = true; });
+        var sangrias = 0, devolucoes = 0;
+        (Array.isArray(c.sangrias) ? c.sangrias : []).forEach(function(sg){
+          var valor = toNum(sg && sg.valor);
+          var doCaixa = !!(sg && sg.pedidoId && idsCaixa[String(sg.pedidoId)]);
+          if(doCaixa) devolucoes += valor;
+          var abatimento = (sg && sg.abatimento !== undefined && sg.abatimento !== null)
+            ? toNum(sg.abatimento)
+            : (doCaixa ? 0 : valor);
+          sangrias += abatimento;
+        });
+        sangrias = +sangrias.toFixed(2);
+        devolucoes = +devolucoes.toFixed(2);
+        var esperado = toNum(c.totalVendido) + toNum(c.valorInicial) - sangrias;
         var horas = horasDesde(c.abertoEm);
         var status = c.status==='aberto'
           ? (horas >= 12 ? '<span class="pill pill-amber">aberto há '+idadeTxt(horas)+'</span>' : '<span class="pill pill-green">aberto</span>')
           : '<span class="pill">fechado</span>';
+        var difTxt = fmtBRL(dif);
+        if(c.diferencaAceita) difTxt += ' <span class="pill pill-amber" title="'+esc(c.justificativa||'Diferença autorizada')+'">autorizada</span>';
         return '<tr><td style="white-space:nowrap;">'+esc(fmtDt(c.abertoEm))+'</td>'+
           '<td><b>'+esc(c.lojaNome||c.lojaId)+'</b></td><td>'+esc(c.operador||'—')+'</td>'+
           '<td>'+fmtBRL(toNum(c.valorInicial))+'</td>'+
@@ -2463,13 +2815,14 @@ async function renderFluxo(){
           '<td>'+fmtBRL(toNum(m.dinheiro))+'</td><td>'+fmtBRL(toNum(m.debito))+'</td>'+
           '<td>'+fmtBRL(toNum(m.credito))+'</td><td>'+fmtBRL(toNum(m.pix))+'</td>'+
           '<td>'+fmtBRL(toNum(c.totalRecebido))+'</td><td>'+fmtBRL(esperado)+'</td>'+
-          '<td style="color:'+(Math.abs(dif)>0.009?'var(--red,#dc2626)':'inherit')+'">'+fmtBRL(dif)+'</td>'+
+          '<td style="color:'+(sangrias>0?'var(--red,#dc2626)':'inherit')+'" title="'+(devolucoes>0?('Devoluções de vendas deste caixa: '+fmtBRL(devolucoes)+' (já fora das vendas)'):'Sangrias que reduzem o dinheiro esperado')+'">'+(sangrias>0?'− ':'')+fmtBRL(sangrias)+(devolucoes>0?'<br><span style="font-size:10.5px;color:var(--slate-400);">'+fmtBRL(devolucoes)+' devol.</span>':'')+'</td>'+
+          '<td style="color:'+(Math.abs(dif)>0.009?'var(--red,#dc2626)':'inherit')+'">'+difTxt+'</td>'+
           '<td>'+fmtBRL(toNum(c.valorEnvelope))+'</td>'+
           '<td>'+fmtBRL(toNum(c.saldoRestante))+'</td>'+
           '<td>'+status+'</td></tr>';
       }).join('');
   } else {
-    tbc.innerHTML = '<tr><td class="empty" colspan="17">Nenhum caixa recebido no período.</td></tr>';
+    tbc.innerHTML = '<tr><td class="empty" colspan="18">Nenhum caixa recebido no período.</td></tr>';
   }
 }
 

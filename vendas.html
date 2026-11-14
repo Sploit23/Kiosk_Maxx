@@ -1212,6 +1212,14 @@
 
   .pay-rows{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;}
   .pay-row{display:flex;gap:8px;align-items:center;}
+  .pay-row-com{flex-direction:column;align-items:stretch;gap:10px;padding:10px;border:1px solid var(--navy-line);border-radius:10px;background:rgba(255,255,255,.015);}
+  .pay-method-btns{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .pay-btn{background:var(--navy-850);border:1px solid var(--navy-line);color:var(--slate-300);border-radius:8px;padding:13px 4px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;}
+  .pay-btn.active{background:rgba(212,162,76,.18);border-color:var(--gold-500);color:var(--gold-300);}
+  .pay-row-com .pr-forma{display:none;}
+  .pay-row-com .pr-parcelas{display:none;width:100%;margin-top:8px;}
+  .pay-row-com .pr-parcelas.show{display:block;}
+  .pay-row-com .pay-bottom{display:flex;gap:8px;align-items:center;}
   .pay-row select, .pay-row input{
     background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);
     border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;
@@ -1238,6 +1246,7 @@
   .restante-banner.ok{
     background:rgba(79,174,127,.12);color:var(--green-300);border-color:rgba(79,174,127,.3);
   }
+  .fc-real:placeholder-shown{border-color:rgba(193,102,107,.65) !important;}
 
   .btn-primary{
     width:100%;padding:13px;border:none;border-radius:10px;
@@ -2595,6 +2604,10 @@ function mapearPedido(p){
     guiaImpressa: !!p.guiaImpressa,
     codigoDigital: p.codigoDigital || null,
     canceladoEm: p.canceladoEm ? new Date(p.canceladoEm) : null,
+    devolucao: (p.devolucao && typeof p.devolucao === 'object') ? {
+      forma: String(p.devolucao.forma || ''),
+      valor: Number(p.devolucao.valor) || 0,
+    } : null,
   };
 }
 
@@ -2645,6 +2658,17 @@ async function carregarCaixa(){
 
 function fechamentoDeCaixaServidor(c){
   const fundo = Number(c.valorInicial || 0);
+  const idsDoCaixa = new Set((Array.isArray(c.pedidos) ? c.pedidos : []).map(String));
+  const sangriaDaVenda = (s)=> !!(s && s.pedidoId && idsDoCaixa.has(String(s.pedidoId)));
+  const todasSangrias = Array.isArray(c.sangrias) ? c.sangrias : [];
+  const valorAbatido = (s)=>{
+    if(s && s.abatimento !== undefined && s.abatimento !== null) return Number(s.abatimento)||0;
+    return sangriaDaVenda(s) ? 0 : (Number(s && s.valor)||0);
+  };
+  const sangrias = +todasSangrias.reduce((s,x)=>s+valorAbatido(x),0).toFixed(2);
+  const devolucoes = +todasSangrias
+    .filter(sangriaDaVenda)
+    .reduce((s,x)=>s+(Number(x && x.valor)||0),0).toFixed(2);
   return {
     id: c.id,
     numero: c.numero,
@@ -2656,13 +2680,19 @@ function fechamentoDeCaixaServidor(c){
     valorEnvelope: c.valorEnvelope !== undefined ? c.valorEnvelope : undefined,
     saldoRestante: c.saldoRestante !== undefined ? c.saldoRestante : undefined,
     diferencaTotal: c.diferenca ?? 0,
+    diferencaAceita: !!c.diferencaAceita,
+    tolerancia: c.tolerancia,
+    justificativa: c.justificativa || '',
+    autorizadoPor: c.autorizadoPor || '',
+    sangrias,
+    devolucoes,
     meiosDeclarados: c.meiosDeclarados || {},
     totalPorMeio: c.totalPorMeio || {},
     corrigidoEm: c.corrigidoEm || null,
     corrigidoPor: c.corrigidoPor || null,
     motivoCorrecao: c.motivoCorrecao || '',
     porForma: Object.keys({ ...(c.totalPorMeio||{}), ...(c.meiosDeclarados||{}) }).map(m => {
-      const sistema = +(c.totalPorMeio?.[m] || 0);
+      const sistema = +(Number(c.totalPorMeio?.[m] || 0) - (m === 'dinheiro' ? sangrias : 0)).toFixed(2);
       const declarado = c.meiosDeclarados?.[m];
       const real = declarado !== undefined
         ? +(Number(declarado) - (m === 'dinheiro' ? fundo : 0)).toFixed(2)
@@ -9041,29 +9071,101 @@ async function abrirConfirmacaoLimparDados(){
   };
 }
 
+function formaBasePagamento(forma){
+  const f = String(forma || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if(f.startsWith('dinheiro')) return 'Dinheiro';
+  if(f.startsWith('debito')) return 'Débito';
+  if(f.startsWith('pix')) return 'PIX';
+  if(f.startsWith('credito') || f.startsWith('cartao')) return 'Crédito';
+  return '';
+}
+function formaPagamentoPreenchida(forma){
+  const f = String(forma || '').trim();
+  return !!f && f !== '-' && f !== '—';
+}
+function pagamentosTemForma(rows, total){
+  const comValor = (Array.isArray(rows) ? rows : []).filter(r=>Number(r.valor)>0);
+  if(Number(total) === 0 && !comValor.length) return true;
+  if(!comValor.length) return false;
+  return comValor.every(r=>formaPagamentoPreenchida(r.forma));
+}
 function paymentRowsHTML(rows, editable, formasList){
-  return rows.map((r,i)=>`
-    <div class="pay-row" data-i="${i}">
-      <select ${editable?'':'disabled'} class="pr-forma">
-        ${formasList.map(f=>`<option ${f===r.forma?'selected':''}>${f}</option>`).join('')}
-      </select>
-      <div class="valor-wrap"><span>R$</span>
-        <input ${editable?'':'disabled'} type="number" class="pr-valor" step="0.01" value="${r.valor.toFixed(2)}">
+  return rows.map((r,i)=>{
+    const base = formaBasePagamento(r.forma);
+    const creditoOpcoes = formasList.filter(f=>formaBasePagamento(f)==='Crédito');
+    if(formaPagamentoPreenchida(r.forma) && base === 'Crédito' && !creditoOpcoes.includes(r.forma)) creditoOpcoes.unshift(r.forma);
+    const opcoes = ['', ...formasList];
+    if(formaPagamentoPreenchida(r.forma) && !opcoes.includes(r.forma)) opcoes.push(r.forma);
+    const botao = (rotulo)=>`<button type="button" class="pay-btn ${base===rotulo?'active':''}" data-forma-base="${rotulo}">${rotulo}</button>`;
+    return `
+    <div class="pay-row pay-row-com" data-i="${i}">
+      <div class="pay-method-btns">
+        ${botao('Dinheiro')}${botao('Débito')}${botao('Crédito')}${botao('PIX')}
       </div>
-      ${editable && rows.length>1 ? `<button class="remove-row" data-i="${i}">×</button>` : '<span style="width:22px"></span>'}
+      <select ${editable?'':'disabled'} class="pr-forma" tabindex="-1" aria-hidden="true">
+        ${opcoes.map(f=>`<option value="${f}" ${f===(r.forma||'')?'selected':''}>${f || 'Selecione…'}</option>`).join('')}
+      </select>
+      <select ${editable?'':'disabled'} class="pr-parcelas ${base==='Crédito'?'show':''}">
+        ${creditoOpcoes.map(f=>`<option value="${f}" ${f===r.forma?'selected':''}>${f}</option>`).join('')}
+      </select>
+      <div class="pay-bottom">
+        <div class="valor-wrap"><span>R$</span>
+          <input ${editable?'':'disabled'} type="number" class="pr-valor" step="0.01" value="${r.valor.toFixed(2)}">
+        </div>
+        ${editable && rows.length>1 ? `<button class="remove-row" data-i="${i}">×</button>` : '<span style="width:22px"></span>'}
+      </div>
     </div>
-  `).join('');
+  `;}).join('');
 }
 
 function wirePaymentRows(rows, containerId, total, onChange){
   const cont = document.getElementById(containerId);
-  // Sincroniza o objeto com o que o <select> está EXIBINDO: quando rows[i].forma
-  // não existe na lista (ex.: '-' de pedido legado), o navegador marca a 1ª
-  // opção mas o objeto continuava com a forma antiga — o pagamento era gravado
-  // sem forma e subia ao portal como não informado.
-  cont.querySelectorAll('.pr-forma').forEach((sel,i)=>{ rows[i].forma = sel.value; });
-  cont.querySelectorAll('.pr-forma').forEach((sel,i)=>{
-    sel.addEventListener('change', e=>{ rows[i].forma = e.target.value; onChange(); });
+  const aplicarForma = (i, forma)=>{
+    rows[i].forma = forma;
+    const rowEl = cont.querySelectorAll('.pay-row')[i];
+    if(!rowEl) return;
+    const sel = rowEl.querySelector('.pr-forma');
+    if(sel) sel.value = forma;
+    const base = formaBasePagamento(forma);
+    rowEl.querySelectorAll('.pay-btn').forEach(b=>{
+      b.classList.toggle('active', b.dataset.formaBase === base);
+    });
+    const parcelas = rowEl.querySelector('.pr-parcelas');
+    if(parcelas){
+      parcelas.classList.toggle('show', base === 'Crédito');
+      if(base === 'Crédito' && formaPagamentoPreenchida(forma)) parcelas.value = forma;
+    }
+    // Linha única ainda sem valor: escolher a forma já preenche o total.
+    if(rows.length === 1 && !(Number(rows[i].valor) > 0) && Number(total) > 0){
+      rows[i].valor = +Number(total).toFixed(2);
+      const inp = rowEl.querySelector('.pr-valor');
+      if(inp) inp.value = rows[i].valor.toFixed(2);
+    }
+    onChange();
+  };
+  cont.querySelectorAll('.pay-row').forEach((rowEl,i)=>{
+    const sel = rowEl.querySelector('.pr-forma');
+    if(sel){
+      sel.value = rows[i].forma || '';
+      sel.addEventListener('change', e=>aplicarForma(i, e.target.value));
+    }
+    const parcelas = rowEl.querySelector('.pr-parcelas');
+    if(parcelas){
+      parcelas.addEventListener('change', e=>aplicarForma(i, e.target.value));
+    }
+    rowEl.querySelectorAll('.pay-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const base = btn.dataset.formaBase;
+        if(base === 'Crédito'){
+          const atual = rows[i].forma;
+          const opcoes = Array.from(parcelas ? parcelas.options : []).map(o=>o.value);
+          const escolhida = opcoes.includes(atual) ? atual : (opcoes[0] || 'Crédito à vista');
+          aplicarForma(i, escolhida);
+        } else {
+          aplicarForma(i, base);
+        }
+      });
+    });
   });
   cont.querySelectorAll('.pr-valor').forEach((inp,i)=>{
     inp.addEventListener('input', e=>{
@@ -9087,6 +9189,9 @@ function wirePaymentRows(rows, containerId, total, onChange){
       onChange(true);
     });
   });
+  cont.querySelectorAll('.pay-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>btn.blur());
+  });
 }
 
 function openCheckoutPretendido(){
@@ -9095,12 +9200,12 @@ function openCheckoutPretendido(){
     toast('⚠ Total do pedido inválido — revise os descontos');
     return;
   }
-  pretendidoRows = [{forma:'Crédito à vista', valor: total}];
+  pretendidoRows = [{forma:'', valor: total}];
   renderCheckoutStep(total);
 }
 
 function ajustarPagamentosAoTotal(rows, total){
-  if(!rows.length){ rows.push({forma:'Crédito à vista', valor:total}); return; }
+  if(!rows.length){ rows.push({forma:'', valor:total}); return; }
   let diff = +(total - rows.reduce((s,r)=>s+(+r.valor||0),0)).toFixed(2);
   for(let i=rows.length-1; i>=0 && Math.abs(diff)>0.004; i--){
     const atual = +rows[i].valor || 0;
@@ -9114,12 +9219,32 @@ function ajustarPagamentosAoTotal(rows, total){
   }
 }
 
+function confirmarCobranca(total, rows, onConfirm){
+  if(!(Number(total) > 0)){ onConfirm(); return; }
+  const partes = (rows || [])
+    .filter(r=>Number(r.valor) > 0)
+    .map(r=>`<b>${fmt(r.valor)}</b> no <b>${escHtml(String(r.forma || '').toUpperCase())}</b>`);
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">Confirmar cobrança</div><h3>${fmt(total)}</h3></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <p class="modal-sub">Confira a forma de pagamento antes de finalizar a venda. O valor e a forma gravados no caixa serão exatamente estes.</p>
+    <div class="restante-banner ok" style="display:block;text-align:center;font-size:15px;">Cobrar ${partes.join(' + ') || fmt(total)}</div>
+    <button class="btn-primary" id="cc-confirmar">Confirmar cobrança</button>
+    <button class="fc-btn" id="cc-voltar" style="width:100%;margin-top:10px;">Voltar e corrigir</button>
+  `);
+  document.getElementById('cc-confirmar').addEventListener('click', ()=>{ closeModal(); onConfirm(); });
+  document.getElementById('cc-voltar').addEventListener('click', ()=>closeModal());
+}
+
 function renderCheckoutStep(total){
   const totalValido = Number.isFinite(total) && total >= 0;
   const rows = pretendidoRows;
   const alocado = rows.reduce((s,r)=>s+r.valor,0);
   const restante = +(total - alocado).toFixed(2);
   const semCobranca = totalValido && total === 0;
+  const formasOk = pagamentosTemForma(rows, total);
   const formasList = formasDisponiveis(total);
   const parcelamentoLiberado = total >= LOJA_PARCELAMENTO.valorMinimo;
   const descontoManual = cart.find(c=>TIPOS_DESCONTO_MANUAL.includes(c.tipo));
@@ -9148,11 +9273,11 @@ function renderCheckoutStep(total){
     </div>
     <div class="pay-rows" id="pay-rows">${paymentRowsHTML(rows, true, formasList)}</div>
     <button class="add-pay-row" id="add-row">+ Adicionar forma de pagamento (multipagamento)</button>
-    <div class="restante-banner ${totalValido && restante===0?'ok':''}" id="restante-banner">
-      <span>${!totalValido ? 'Total inválido' : (semCobranca ? 'Pedido sem cobrança (desconto 100%)' : (restante===0?'Valor totalmente alocado':'Restante a alocar'))}</span>
+    <div class="restante-banner ${totalValido && restante===0 && formasOk?'ok':''}" id="restante-banner">
+      <span>${!totalValido ? 'Total inválido' : (semCobranca ? 'Pedido sem cobrança (desconto 100%)' : (restante!==0 ? 'Restante a alocar' : (formasOk ? 'Valor totalmente alocado' : 'Selecione a forma de pagamento')))}</span>
       <span>${fmt(Math.abs(restante))}</span>
     </div>
-    <button class="btn-primary" id="btn-confirm-step" ${(!totalValido || restante!==0)?'disabled':''}>Confirmar pedido</button>
+    <button class="btn-primary" id="btn-confirm-step" ${(!totalValido || restante!==0 || !formasOk)?'disabled':''}>Confirmar pedido</button>
   `);
 
   const btnAplicar = document.getElementById('btn-desconto-checkout');
@@ -9195,7 +9320,7 @@ function renderCheckoutStep(total){
   });
 
   document.getElementById('add-row').addEventListener('click', ()=>{
-    rows.push({forma:'Dinheiro', valor:0});
+    rows.push({forma:'', valor:0});
     renderCheckoutStep(total);
   });
 
@@ -9204,9 +9329,13 @@ function renderCheckoutStep(total){
       toast('⚠ Nenhum caixa aberto no momento — não é possível confirmar a venda');
       return;
     }
+    if(!pagamentosTemForma(rows, total)){
+      toast('⚠ Selecione a forma de pagamento de cada valor');
+      return;
+    }
     // Cupom da venda sai automático no resumo; fotos só na ASK-400 (botão manual).
     efetivoRows = pretendidoRows.map(r=>({...r}));
-    finalizarVenda();
+    confirmarCobranca(total, efetivoRows, ()=>finalizarVenda());
   });
 }
 
@@ -9215,22 +9344,24 @@ function updateRestante(rows, total){
   const alocado = rows.reduce((s,r)=>s+r.valor,0);
   const restante = +(total-alocado).toFixed(2);
   const semCobranca = totalValido && total === 0;
+  const formasOk = pagamentosTemForma(rows, total);
   const banner = document.getElementById('restante-banner');
-  banner.className = 'restante-banner'+(totalValido && restante===0?' ok':'');
-  banner.innerHTML = `<span>${!totalValido ? 'Total inválido' : (semCobranca ? 'Pedido sem cobrança (desconto 100%)' : (restante===0?'Valor totalmente alocado':'Restante a alocar'))}</span><span>${fmt(Math.abs(restante))}</span>`;
-  document.getElementById('btn-confirm-step').disabled = !totalValido || restante!==0;
+  banner.className = 'restante-banner'+(totalValido && restante===0 && formasOk?' ok':'');
+  banner.innerHTML = `<span>${!totalValido ? 'Total inválido' : (semCobranca ? 'Pedido sem cobrança (desconto 100%)' : (restante!==0 ? 'Restante a alocar' : (formasOk ? 'Valor totalmente alocado' : 'Selecione a forma de pagamento')))}</span><span>${fmt(Math.abs(restante))}</span>`;
+  document.getElementById('btn-confirm-step').disabled = !totalValido || restante!==0 || !formasOk;
 }
 
 /* ---------------- SELETOR DE PAGAMENTO GENÉRICO (multipagamento) ----------------
    Reaproveitado pela correção de forma de pagamento e cobrança de diferença
    na reabertura de pedido (regra 3.5 do documento). */
 function showPaymentPickerModal(total, rowsIniciais, titulo, subtitulo, onConfirm){
-  let rows = rowsIniciais && rowsIniciais.length ? rowsIniciais.map(r=>({...r})) : [{forma:'Dinheiro', valor: total}];
+  let rows = rowsIniciais && rowsIniciais.length ? rowsIniciais.map(r=>({...r})) : [{forma:'', valor: total}];
   const formasList = formasDisponiveis(total);
 
   function render(){
     const alocado = rows.reduce((s,r)=>s+r.valor,0);
     const restante = +(total-alocado).toFixed(2);
+    const formasOk = pagamentosTemForma(rows, total);
     openModal(`
       <div class="modal-head">
         <div><div class="modal-step-label">${titulo}</div><h3>${fmt(total)}</h3></div>
@@ -9239,28 +9370,30 @@ function showPaymentPickerModal(total, rowsIniciais, titulo, subtitulo, onConfir
       <p class="modal-sub">${subtitulo}</p>
       <div class="pay-rows" id="pp-rows">${paymentRowsHTML(rows, true, formasList)}</div>
       <button class="add-pay-row" id="pp-add-row">+ Adicionar forma de pagamento (multipagamento)</button>
-      <div class="restante-banner ${restante===0?'ok':''}" id="pp-restante">
-        <span>${restante===0?'Valor totalmente alocado':'Restante a alocar'}</span>
+      <div class="restante-banner ${(restante===0 && formasOk)?'ok':''}" id="pp-restante">
+        <span>${restante!==0 ? 'Restante a alocar' : (formasOk ? 'Valor totalmente alocado' : 'Selecione a forma de pagamento')}</span>
         <span>${fmt(Math.abs(restante))}</span>
       </div>
-      <button class="btn-primary" id="pp-confirmar" ${restante!==0?'disabled':''}>Confirmar</button>
+      <button class="btn-primary" id="pp-confirmar" ${(restante!==0 || !formasOk)?'disabled':''}>Confirmar</button>
     `);
     wirePaymentRows(rows, 'pp-rows', total, (removed)=>{
       if(removed) render();
       else {
         const aloc = rows.reduce((s,r)=>s+r.valor,0);
         const rest = +(total-aloc).toFixed(2);
+        const ok = pagamentosTemForma(rows, total);
         const banner = document.getElementById('pp-restante');
-        banner.className = 'restante-banner'+(rest===0?' ok':'');
-        banner.innerHTML = `<span>${rest===0?'Valor totalmente alocado':'Restante a alocar'}</span><span>${fmt(Math.abs(rest))}</span>`;
-        document.getElementById('pp-confirmar').disabled = rest!==0;
+        banner.className = 'restante-banner'+((rest===0 && ok)?' ok':'');
+        banner.innerHTML = `<span>${rest!==0 ? 'Restante a alocar' : (ok ? 'Valor totalmente alocado' : 'Selecione a forma de pagamento')}</span><span>${fmt(Math.abs(rest))}</span>`;
+        document.getElementById('pp-confirmar').disabled = rest!==0 || !ok;
       }
     });
     document.getElementById('pp-add-row').addEventListener('click', ()=>{
-      rows.push({forma:'Dinheiro', valor:0});
+      rows.push({forma:'', valor:0});
       render();
     });
     document.getElementById('pp-confirmar').addEventListener('click', ()=>{
+      if(!pagamentosTemForma(rows, total)){ toast('⚠ Selecione a forma de pagamento de cada valor'); return; }
       closeModal();
       onConfirm(rows);
     });
@@ -10204,12 +10337,35 @@ function showReprintModal(p){
 }
 
 /* ---------------- CANCELAMENTO COM SELEÇÃO DE ITENS QUE VOLTAM AO ESTOQUE ---------------- */
+function askFormaDevolucao(p, onConfirm){
+  const total = Number(p && p.total) || 0;
+  if(total <= 0){ onConfirm({forma:'nao', valor:0}); return; }
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">Cancelar pedido ${p.id}</div><h3>Como o cliente foi reembolsado?</h3></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <p class="modal-sub">Registre a devolução de <b>${fmt(total)}</b>. Se o dinheiro sair da gaveta, o sistema lança uma sangria vinculada a este pedido.</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+      <button class="btn-primary" id="dv-dinheiro" style="background:linear-gradient(135deg,var(--green-500),var(--green-700));">Devolvido em dinheiro — ${fmt(total)}</button>
+      <button class="btn-primary" id="dv-cartao" style="background:linear-gradient(135deg,#3b6ea5,#2c527c);">Estornado no cartão</button>
+      <button class="btn-secondary" id="dv-nao" style="width:100%;">Não devolvido ao cliente</button>
+    </div>
+    <p class="modal-sub" style="color:var(--slate-500);font-size:11px;">A devolução não altera o total vendido do pedido; ela fica registrada para auditoria e conciliação do caixa.</p>
+  `);
+  document.getElementById('dv-dinheiro').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'dinheiro', valor:Number(total.toFixed(2))}); });
+  document.getElementById('dv-cartao').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'cartao', valor:Number(total.toFixed(2))}); });
+  document.getElementById('dv-nao').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'nao', valor:0}); });
+}
+
 function askCancelarPedido(p){
   const itensReais = p.itens.filter(it=>!['combo-desconto','ajuste','desconto-catalogo','desconto-senha-master','desconto-falha-operacional','desconto-comercial'].includes(it.tipo) && it.preco>=0);
   if(itensReais.length===0){
     // pedido só com linhas de ajuste/desconto — cancela direto, sem nada pra devolver
     askSenhaMotivo('Cancelar pedido', `Isso vai cancelar o ${p.id} por completo (${fmt(p.total)}).`, (senha,motivo)=>{
-      efetivarCancelamento(p, [], [], senha, motivo, new Map());
+      askFormaDevolucao(p, (devolucao)=>{
+        efetivarCancelamento(p, [], [], senha, motivo, new Map(), devolucao);
+      });
     }, p.id);
     return;
   }
@@ -10316,13 +10472,15 @@ function askCancelarPedido(p){
         ? `${voltam.length} iten${voltam.length===1?'':'s'} volta${voltam.length===1?'':'m'} ao estoque e ${perdidos} ser${perdidos===1?'á':'ão'} registrado${perdidos===1?'':'s'} como perda (${fmt(valorPerda)}).`
         : 'Nenhum item será registrado como perda.');
     askSenhaMotivo('Cancelar pedido', subtitulo, (senha,motivo)=>{
-      efetivarCancelamento(p, itensReais, voltam, senha, motivo, perdaInfo);
+      askFormaDevolucao(p, (devolucao)=>{
+        efetivarCancelamento(p, itensReais, voltam, senha, motivo, perdaInfo, devolucao);
+      });
     }, p.id);
   });
   atualizarResumo();
 }
 
-function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perdaInfo){
+function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perdaInfo, devolucao){
   itensQueVoltam.forEach(it=>{
     if(it.tipo==='tamanho'){
       const t = TAMANHOS.find(x=>x.id===it.produtoId);
@@ -10338,14 +10496,25 @@ function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perd
   p.status = 'cancelado';
   p.itensDevolvidos = itensQueVoltam.map(it=>it.label);
   p.itensPerdidos = itensPerdidos.map(it=>it.label);
+  const dev = devolucao || { forma:'nao', valor:0 };
+  p.devolucao = dev;
   if(p.horario && p.horario.toDateString() === new Date().toDateString()) vendasHojeTotal -= p.total;
   try{
     // persiste o cancelamento no sidecar (sobrevive a restart — sem isso o pedido
     // volta a 'pago' no reboot e o portal "des-cancela" o registro)
-    natalApi.atualizarPedido(p._realId || p.id, { status: 'cancelado' })
+    natalApi.atualizarPedido(p._realId || p.id, { status: 'cancelado', devolucao: dev })
       .catch(e=> console.warn('[pdv] falha ao persistir cancelamento:', e))
       .then(()=> natalApi.limparFila({ pedidoId: p._realId || p.id }))
       .catch(()=>{});
+    if(dev.forma === 'dinheiro' && Number(dev.valor) > 0 && caixaAberto){
+      natalApi.caixaSangria({
+        valor: Number(dev.valor),
+        motivo: `Devolução do pedido ${p.id}` + (motivo ? ` — ${motivo}` : ''),
+        pedidoId: p._realId || p.id,
+        por: currentUser ? currentUser.nome : '',
+      }).then(r=>{ if(r && r.caixa) caixaReal = r.caixa; })
+        .catch(e=> console.warn('[pdv] falha ao registrar sangria da devolução:', e));
+    }
   }catch(e){ console.warn('[pdv] falha ao persistir cancelamento:', e); }
   agendarPedidosPortal(500);
   renderRibbonChip();
@@ -10377,6 +10546,7 @@ function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, motivo, perdaIn
       <div class="rc-sub">Cancelamento autorizado por senha, para auditoria</div>
       <div class="rc-line"><span>Autorização</span><span>senha master registrada na auditoria</span></div>
       <div class="rc-line"><span>Operador</span><span>${currentUser?currentUser.nome:'—'}</span></div>
+      <div class="rc-line"><span>Devolução</span><span>${p.devolucao ? (p.devolucao.forma==='dinheiro' ? `dinheiro — ${fmt(p.devolucao.valor)}` : (p.devolucao.forma==='cartao' ? `estorno no cartão — ${fmt(p.devolucao.valor)}` : 'não devolvido ao cliente')) : '—'}</span></div>
       <div class="rc-line"><span>Data/hora</span><span>${new Date().toLocaleString('pt-BR')}</span></div>
       <div class="rc-line"><span>Motivo</span><span style="text-align:right;max-width:200px;">${motivo}</span></div>
       <h4 style="margin-top:12px;">Itens perdidos (anexar a este relatório)</h4>
@@ -11173,6 +11343,13 @@ function conciliacaoReceiptTexto(f){
     out.push(linha('Envelope (sangria)', fmt(f.valorEnvelope)));
     out.push(linha('Ficou no caixa', fmt(f.saldoRestante)));
   }
+  if(f.sangrias > 0) out.push(linha('Sangrias retiradas', fmt(f.sangrias)));
+  if(f.devolucoes > 0) out.push(linha('Devolucoes do caixa', fmt(f.devolucoes)));
+  if(f.justificativa){
+    out.push(sep);
+    out.push('Justificativa: ' + f.justificativa);
+    if(f.autorizadoPor) out.push('Autorizado por: ' + f.autorizadoPor);
+  }
   if(f.corrigidoEm){
     out.push(sep);
     out.push(linha('Corrigido em', new Date(f.corrigidoEm).toLocaleString('pt-BR')));
@@ -11196,19 +11373,101 @@ function abrirTelaFechamento(){
   const porForma = {};
   formasComMovimento.forEach(f=>porForma[f]=0);
   pagos.forEach(p=>p.pagamentosEfetivos.forEach(r=>{
-    const chave = meioInfoDeForma(r.forma).meio === 'credito' ? 'Crédito' : r.forma;
+    const meio = meioInfoDeForma(r.forma).meio;
+    const chave = meio === 'credito' ? 'Crédito'
+      : meio === 'dinheiro' ? 'Dinheiro'
+      : meio === 'debito' ? 'Débito'
+      : meio === 'pix' ? 'PIX'
+      : r.forma;
     porForma[chave] = (porForma[chave]||0) + r.valor;
   }));
+  const sangriasTodas = Array.isArray(caixaReal && caixaReal.sangrias) ? caixaReal.sangrias : [];
+  const idsDoCaixa = new Set((Array.isArray(caixaReal && caixaReal.pedidos) ? caixaReal.pedidos : []).map(String));
+  const pedidosDoCaixa = new Map();
+  pedidosRealizados.forEach(p=>{
+    if(caixaReal && String(p.caixaId||'') === String(caixaReal.id||'')){
+      const pid = String(p._realId||p.id);
+      idsDoCaixa.add(pid);
+      pedidosDoCaixa.set(pid, p);
+    }
+  });
+  const sangriaDaVendaDoCaixa = (s)=> !!(s && s.pedidoId && idsDoCaixa.has(String(s.pedidoId)));
+  const dinheiroDoPedidoLocal = (p)=>{
+    if(!p) return 0;
+    const pgs = Array.isArray(p.pagamentosEfetivos) ? p.pagamentosEfetivos : [];
+    if(pgs.length) return pgs.reduce((s,r)=> meioInfoDeForma(r.forma).meio === 'dinheiro' ? s + (Number(r.valor)||0) : s, 0);
+    return meioInfoDeForma(p.forma || p.meio).meio === 'dinheiro' ? Number(p.total)||0 : 0;
+  };
+  const abatimentoDaSangriaLocal = (s)=>{
+    const valor = Number(s && s.valor) || 0;
+    if(s && s.abatimento !== undefined && s.abatimento !== null) return Number(s.abatimento)||0;
+    if(!sangriaDaVendaDoCaixa(s)) return valor;
+    return +Math.max(0, valor - dinheiroDoPedidoLocal(pedidosDoCaixa.get(String(s.pedidoId)))).toFixed(2);
+  };
+  const devolucoesCaixa = +sangriasTodas
+    .filter(sangriaDaVendaDoCaixa)
+    .reduce((s,x)=>s+(Number(x && x.valor)||0),0).toFixed(2);
+  const sangriasCaixa = +sangriasTodas
+    .reduce((s,x)=>s+abatimentoDaSangriaLocal(x),0).toFixed(2);
+  porForma['Dinheiro'] = +((porForma['Dinheiro']||0) - sangriasCaixa).toFixed(2);
+
+  const canceladosDoCaixa = pedidosRealizados.filter(p => {
+    if(!p || p.status !== 'cancelado') return false;
+    if(idsDoCaixa.has(String(p._realId||p.id))) return true;
+    return !p.caixaId && (!p.horario || +p.horario >= desde);
+  });
+  const itensCanceladoHtml = (p)=>{
+    const itens = (Array.isArray(p.itens) ? p.itens : []).filter(it=>it && (it.label || it.produtoId));
+    if(!itens.length) return '<span style="color:var(--slate-500);">Sem itens registrados</span>';
+    return itens.map(it=>{
+      const qtd = Number(it.qtd)>1 ? `${Number(it.qtd)}x ` : '';
+      const valor = Number(it.preco)<0 ? ` <span style="color:var(--red-400);">${fmt(it.preco)}</span>` : '';
+      return `<span style="display:inline-block;margin:0 10px 2px 0;">${qtd}${escHtml(String(it.label || it.produtoId))}${valor}</span>`;
+    }).join('');
+  };
+  const devolucaoCancelado = (p)=>{
+    const d = p.devolucao;
+    if(!d) return 'Sem devolução registrada';
+    if(d.forma === 'dinheiro') return `Devolvido em dinheiro — ${fmt(d.valor)} (sangria registrada)`;
+    if(d.forma === 'cartao') return `Estornado no cartão — ${fmt(d.valor)}`;
+    return 'Não devolvido ao cliente';
+  };
+  const canceladosHtml = canceladosDoCaixa.length ? `
+    <div style="border:1px solid rgba(193,102,107,.35);background:rgba(193,102,107,.07);border-radius:10px;padding:12px 14px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px;">
+        <b style="font-size:12px;color:var(--red-400);">Pedidos cancelados neste caixa</b>
+        <span style="font-size:10.5px;color:var(--slate-400);">não somam nas vendas do sistema</span>
+      </div>
+      <p style="font-size:11px;color:var(--slate-400);margin:0 0 10px;">Os valores e itens abaixo aparecem só para conferência: como a venda foi cancelada, não entram nas formas de pagamento nem no total vendido. Devoluções em dinheiro, quando houver, aparecem à parte em "Devoluções do caixa".</p>
+      ${canceladosDoCaixa.map(p=>`
+        <div style="border-top:1px solid rgba(193,102,107,.22);padding:8px 0 6px;">
+          <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;">
+            <b>${escHtml(String(p.numero ? '#'+p.numero : (p.id||'—')))}</b>
+            <span style="color:var(--red-400);font-weight:700;">${fmt(p.total)} <span style="font-weight:400;color:var(--slate-400);">cancelado</span></span>
+          </div>
+          <div style="font-size:11.5px;color:var(--slate-300);margin-top:4px;">${itensCanceladoHtml(p)}</div>
+          <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">${devolucaoCancelado(p)} · não impacta o total por forma de pagamento</div>
+        </div>
+      `).join('')}
+    </div>` : '';
 
   const linhasHtml = `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px 10px;">
       <span style="font-size:12px;color:var(--slate-400);">Dinheiro inicial (fundo de troco)</span>
       <span style="font-size:13px;font-weight:700;color:var(--cream-100);">${fmt(fundoTrocoCaixa)}</span>
     </div>
+    ${sangriasCaixa > 0 ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px 10px;">
+      <span style="font-size:12px;color:var(--red-400);">Sangrias já retiradas (reduzem o esperado)</span>
+      <span style="font-size:13px;font-weight:700;color:var(--red-400);">− ${fmt(sangriasCaixa)}</span>
+    </div>` : ''}
+    ${devolucoesCaixa > 0 ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:0 2px 10px;">
+      <span style="font-size:12px;color:var(--slate-400);">Devoluções em dinheiro de vendas deste caixa (já fora das vendas)</span>
+      <span style="font-size:13px;font-weight:700;color:var(--slate-400);">${fmt(devolucoesCaixa)}</span>
+    </div>` : ''}
   ` + formasComMovimento.map(f=>`
     <div class="pay-row" data-forma="${f}">
-      <div style="flex:1.3;font-size:13px;color:var(--cream-100);">${f}${f==='Dinheiro' ? ' <span style="font-size:10.5px;color:var(--slate-400);">(recebido hoje, sem o fundo)</span>' : ''}</div>
-      <div style="flex:1;font-size:12px;color:var(--slate-400);text-align:right;padding-right:8px;">${fmt(porForma[f]||0)}</div>
+      <div style="flex:1.3;font-size:13px;color:var(--cream-100);">${f}${f==='Dinheiro' ? ' <span style="font-size:10.5px;color:var(--slate-400);">(recebido hoje − sangrias, sem o fundo)</span>' : ''}</div>
+      <div class="fc-sist" style="flex:1;font-size:12px;color:var(--slate-400);text-align:right;padding-right:8px;">${fmt(porForma[f]||0)}</div>
       <div class="valor-wrap" style="flex:1;"><span>R$</span>
         <input type="number" class="fc-real" data-forma="${f}" step="0.01" value="" placeholder="0,00" autocomplete="off">
       </div>
@@ -11225,6 +11484,7 @@ function abrirTelaFechamento(){
       <div style="flex:0.9;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--slate-500);text-align:right;white-space:nowrap;">Diferença</div>
     </div>
     <div class="pay-rows" id="fc-linhas" style="margin-bottom:16px;">${linhasHtml}</div>
+    ${canceladosHtml}
 
     <div style="border-top:1px solid var(--navy-line);padding-top:14px;margin-bottom:16px;">
       <span style="font-size:11px;color:var(--slate-400);display:block;margin-bottom:4px;">Valor enviado no malote (múltiplos de 50 — apenas registro, não entra na diferença do caixa)</span>
@@ -11259,15 +11519,23 @@ function abrirTelaFechamento(){
   const atualizarBannerSaldo = (valor)=>{
     document.getElementById('fc-saldo-restante').className = 'restante-banner'+(Number(valor)<0?'':' ok');
   };
+  const fcLinhas = document.getElementById('fc-linhas');
+  const fcInputs = Array.from(document.querySelectorAll('#fc-linhas .fc-real'));
+  const fcConfirmar = document.getElementById('fc-confirmar');
+  const atualizarPreenchimento = ()=>{
+    const completo = fcInputs.every(inp=>String(inp.value).trim() !== '');
+    fcConfirmar.disabled = !completo;
+    return completo;
+  };
   const atualizarDiferencas = ()=>{
-    document.querySelectorAll('.pay-row[data-forma]').forEach(row=>{
+    fcLinhas.querySelectorAll('.pay-row[data-forma]').forEach(row=>{
       const forma = row.dataset.forma;
       const input = row.querySelector('.fc-real');
       const alvo = row.querySelector('.fc-dif');
       if(!input || !alvo) return;
       const sistema = Number(porForma[forma]||0);
-      if(input.value.trim()==='' && sistema === 0){
-        alvo.textContent = '—';
+      if(input.value.trim()===''){
+        alvo.textContent = '�?"';
         alvo.style.color = 'var(--slate-500)';
         return;
       }
@@ -11297,69 +11565,100 @@ function abrirTelaFechamento(){
   });
   envelopeInput.addEventListener('change', ()=>envelopeValido(true));
   document.querySelectorAll('.fc-real').forEach(inp=>inp.addEventListener('input', ()=>{
+    atualizarPreenchimento();
     atualizarDiferencas();
     recalcSaldoRestante();
   }));
+  atualizarPreenchimento();
   atualizarDiferencas();
 
-  document.getElementById('fc-confirmar').addEventListener('click', async ()=>{
-    const porFormaResultado = formasComMovimento.map(f=>{
-      const input = document.querySelector(`.fc-real[data-forma="${f}"]`);
-      const digitado = parseFloat(input.value)||0;
-      const sistema = porForma[f]||0;
-      return {forma:f, sistema, real: digitado, diferenca: +(digitado-sistema).toFixed(2)};
-    });
-    /* PRODUÇÃO: concilia o caixa no sidecar (meios declarados) antes de registrar na tela.
-       O sidecar compara o dinheiro TOTAL da gaveta (fundo + recebido), por isso
-       soma o fundo só na hora de enviar; a tela mostra apenas o que foi digitado. */
-    const meios = {};
-    porFormaResultado.forEach(r=>{
-      const chave = meioInfoDeForma(r.forma).meio || r.forma;
-      const valor = r.forma === 'Dinheiro' ? +(r.real + fundoTrocoCaixa).toFixed(2) : r.real;
-      meios[chave] = +((meios[chave]||0) + valor).toFixed(2);
-    });
-    if(!envelopeValido(true)) return;
-    const valorEnvelope = parseFloat(envelopeInput.value)||0;
-    const dinheiroRecebido = porFormaResultado.find(r=>r.forma==='Dinheiro')?.real || 0;
-    const saldoRestante = saldoInput.value.trim() === ''
-      ? +(fundoTrocoCaixa + dinheiroRecebido - valorEnvelope).toFixed(2)
-      : +(parseFloat(saldoInput.value)||0).toFixed(2);
-    const fechado = await natalApi.caixaFechar({
-      meios,
-      observacoes: 'Fechamento pelo PDV',
-      valorEnvelope,
-      saldoRestante,
-      fechadoPor: (currentUser && currentUser.nome) || '—',
-    });
-    if(!fechado || !fechado.success){
-      toast('⚠ ' + ((fechado && fechado.error) || 'Não foi possível fechar o caixa'));
+  document.getElementById('fc-confirmar').addEventListener('click', ()=>{
+    if(!atualizarPreenchimento()){
+      toast('⚠ Informe as 4 formas de pagamento — digite 0 quando não houve movimento');
       return;
     }
-    caixaReal = fechado.caixa || null;
-    enfileirarCaixaPortal(caixaReal);
+    const porFormaResultado = formasComMovimento.map(f=>{
+      const input = document.querySelector(`.fc-real[data-forma="${f}"]`);
+      const digitado = parseFloat(input.value);
+      const sistema = porForma[f]||0;
+      return {forma:f, sistema, real: Number.isFinite(digitado) ? digitado : NaN, diferenca: +(digitado-sistema).toFixed(2)};
+    });
+    if(porFormaResultado.some(r=>!Number.isFinite(r.real) || r.real < 0)){
+      toast('⚠ Valor inválido em uma das formas de pagamento');
+      return;
+    }
+    if(!envelopeValido(true)) return;
     const diferencaTotal = +porFormaResultado.reduce((s,r)=>s+r.diferenca,0).toFixed(2);
 
-    const caixaEntry = caixasHoje.find(c=>c.aberto);
-    const numeroFechado = caixaEntry ? caixaEntry.numero : caixasHoje.length;
-    if(caixaEntry){ caixaEntry.aberto=false; caixaEntry.fechadoEm=new Date(); }
+    const executarFechamento = async (justificativa, autorizadoPor)=>{
+      /* PRODUÇÃO: concilia o caixa no sidecar (meios declarados) antes de registrar na tela.
+         O sidecar compara o dinheiro TOTAL da gaveta (fundo + recebido − sangrias); por isso
+         soma o fundo só na hora de enviar; a tela mostra apenas o que foi digitado. */
+      const meios = {};
+      porFormaResultado.forEach(r=>{
+        const chave = meioInfoDeForma(r.forma).meio || r.forma;
+        const valor = r.forma === 'Dinheiro' ? +(r.real + fundoTrocoCaixa).toFixed(2) : r.real;
+        meios[chave] = +((meios[chave]||0) + valor).toFixed(2);
+      });
+      const valorEnvelope = parseFloat(envelopeInput.value)||0;
+      const dinheiroRecebido = porFormaResultado.find(r=>r.forma==='Dinheiro')?.real || 0;
+      const saldoRestante = saldoInput.value.trim() === ''
+        ? +(fundoTrocoCaixa + dinheiroRecebido - valorEnvelope).toFixed(2)
+        : +(parseFloat(saldoInput.value)||0).toFixed(2);
+      const fechado = await natalApi.caixaFechar({
+        meios,
+        observacoes: 'Fechamento pelo PDV',
+        valorEnvelope,
+        saldoRestante,
+        fechadoPor: (currentUser && currentUser.nome) || '—',
+        justificativa,
+        autorizadoPor,
+      });
+      if(!fechado || !fechado.success){
+        toast('⚠ ' + ((fechado && fechado.error) || 'Não foi possível fechar o caixa'));
+        abrirTelaFechamento();
+        return;
+      }
+      caixaReal = fechado.caixa || null;
+      enfileirarCaixaPortal(caixaReal);
 
-    ultimoFechamentoCaixa = {
-      id: (fechado.caixa && fechado.caixa.id) || null,
-      numero: numeroFechado,
-      data: new Date(),
-      abertoEm: caixaAbertoEm,
-      fundoTroco: fundoTrocoCaixa,
-      porForma: porFormaResultado,
-      diferencaTotal,
-      fechadoPor: currentUser ? currentUser.nome : '—',
-      valorEnvelope,
-      saldoRestante
+      const caixaEntry = caixasHoje.find(c=>c.aberto);
+      const numeroFechado = caixaEntry ? caixaEntry.numero : caixasHoje.length;
+      if(caixaEntry){ caixaEntry.aberto=false; caixaEntry.fechadoEm=new Date(); }
+
+      ultimoFechamentoCaixa = {
+        id: (fechado.caixa && fechado.caixa.id) || null,
+        numero: numeroFechado,
+        data: new Date(),
+        abertoEm: caixaAbertoEm,
+        fundoTroco: fundoTrocoCaixa,
+        porForma: porFormaResultado,
+        diferencaTotal,
+        fechadoPor: currentUser ? currentUser.nome : '—',
+        valorEnvelope,
+        saldoRestante,
+        sangrias: sangriasCaixa,
+        devolucoes: devolucoesCaixa,
+        justificativa,
+        autorizadoPor,
+      };
+      conciliacoesCaixa.push(ultimoFechamentoCaixa);
+      saldoEsperadoProximoCaixa = saldoRestante; // trava o valor de abertura do próximo caixa
+      caixaAberto = false;
+      renderCaixaChip();
+      mostrarResultadoFechamento(ultimoFechamentoCaixa, !abrirNovoAposFechar);
     };
-    conciliacoesCaixa.push(ultimoFechamentoCaixa);
-    saldoEsperadoProximoCaixa = saldoRestante; // trava o valor de abertura do próximo caixa
-    caixaAberto = false;
-    renderCaixaChip();
-    mostrarResultadoFechamento(ultimoFechamentoCaixa, !abrirNovoAposFechar);
+
+    if(Math.abs(diferencaTotal) > 0.05){
+      askSenhaMotivo(
+        'Diferença de caixa',
+        `A diferença total é ${diferencaTotal>0?'+':''}${fmt(diferencaTotal)} (acima da tolerância de R$ 0,05). Informe a senha master e o motivo para autorizar o fechamento.`,
+        (senha,motivo)=>executarFechamento(motivo, (currentUser && currentUser.nome) || '—'),
+        null
+      );
+      return;
+    }
+    executarFechamento('', '');
   });
 }
 
@@ -11384,7 +11683,10 @@ function mostrarResultadoFechamento(fechamento, sairAposFechar = false){
       <div class="rc-line"><span>Malote (envelope de depósito)</span><span>${fmt(fechamento.valorEnvelope)}</span></div>
       <div class="rc-line"><span>Ficou no caixa (fundo do próximo)</span><span>${fmt(fechamento.saldoRestante)}</span></div>
       ` : ''}
+      ${fechamento.sangrias > 0 ? `<div class="rc-line"><span>Sangrias já retiradas</span><span style="color:var(--red-400);">− ${fmt(fechamento.sangrias)}</span></div>` : ''}
+      ${fechamento.devolucoes > 0 ? `<div class="rc-line"><span>Devoluções de vendas deste caixa</span><span style="color:var(--slate-400);">${fmt(fechamento.devolucoes)} (já fora das vendas)</span></div>` : ''}
     </div>
+    ${fechamento.justificativa ? `<div style="background:rgba(193,102,107,.12);border:1px solid rgba(193,102,107,.3);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--red-400);"><b>Diferença autorizada:</b> ${escHtml(fechamento.justificativa)}${fechamento.autorizadoPor ? ` · por ${escHtml(fechamento.autorizadoPor)}` : ''}</div>` : ''}
     <p class="modal-sub">Fechado por ${fechamento.fechadoPor||'—'} · registrado pra consulta posterior.</p>
     ${mostrarBotaoAbrirNovo ? `<button class="btn-primary" id="fc-abrir-novo-agora" style="background:linear-gradient(135deg,var(--gold-500),#c78f38);">➕ Abrir novo caixa agora</button>` : ''}
     <button class="btn-secondary" id="fc-imprimir" style="margin-top:${mostrarBotaoAbrirNovo?'10px':'0'};">🖨 Imprimir conciliação</button>
