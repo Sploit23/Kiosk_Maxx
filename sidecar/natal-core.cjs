@@ -28,6 +28,8 @@ const { printBematech } = require('./thermal-print.cjs');
 
 const PORT = parseInt(process.env.NATAL_PORT, 10) || 9877;
 const HOST = process.env.NATAL_HOST || '0.0.0.0';
+const IMPORTER_PORT = parseInt(process.env.NATAL_IMPORTER_PORT, 10) || 8099;
+const IMPORTER_BASE = `http://127.0.0.1:${IMPORTER_PORT}`;
 
 // Build id do PRÓPRIO arquivo (12 chars do sha256). O electron-main calcula o
 // mesmo hash do natal-core.cjs no disco e compara com o /api/health: se forem
@@ -96,6 +98,7 @@ function bindPaths(dataDir) {
   PASTA_IMPORTADAS_FILE = path.join(DB_DIR, 'pasta-importadas.json');
   FILA_IMPRESSAO_FILE = path.join(DB_DIR, 'fila-impressao.json');
   TESTES_FILE = path.join(DB_DIR, 'testes.json');
+  IMPRESSOES_FILE = path.join(DB_DIR, 'impressoes.json');
   GALERIA_DIR = path.join(dataDir, 'galeria');
   FILA_PORTAL_FILE = path.join(DB_DIR, 'fila-portal.json');
   CACHE_PORTAL_FILE = path.join(DB_DIR, 'cache-portal.json');
@@ -137,7 +140,7 @@ function persistFolderPointer(folder) {
 const BOOT_PHOTOS_FOLDER = readBootstrapPhotosFolder();
 let DATA_DIR = computeDataDir(BOOT_PHOTOS_FOLDER);
 let DB_DIR, SESSOES_DIR, PEDIDOS_DIR, PRINT_QUEUE_DIR;
-let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE, FILA_IMPRESSAO_FILE, TESTES_FILE, FILA_PORTAL_FILE, CACHE_PORTAL_FILE, ENVIADOS_PORTAL_FILE, GALERIA_DIR;
+let PEDIDOS_FILE, CAIXA_FILE, CAIXAS_FILE, AUDITORIA_FILE, COUNTER_FILE, RIBBON_FILE, CONFIG_FILE, PASTA_IMPORTADAS_FILE, FILA_IMPRESSAO_FILE, TESTES_FILE, IMPRESSOES_FILE, FILA_PORTAL_FILE, CACHE_PORTAL_FILE, ENVIADOS_PORTAL_FILE, GALERIA_DIR;
 bindPaths(DATA_DIR);
 moverDados(LEGACY_BOOT_DIR, DATA_DIR);
 
@@ -163,6 +166,7 @@ function inicializarDados() {
   if (!fs.existsSync(CAIXAS_FILE)) fs.writeFileSync(CAIXAS_FILE, '[]', 'utf-8');
   if (!fs.existsSync(AUDITORIA_FILE)) fs.writeFileSync(AUDITORIA_FILE, '[]', 'utf-8');
   if (!fs.existsSync(TESTES_FILE)) fs.writeFileSync(TESTES_FILE, '[]', 'utf-8');
+  if (!fs.existsSync(IMPRESSOES_FILE)) fs.writeFileSync(IMPRESSOES_FILE, '[]', 'utf-8');
   if (!fs.existsSync(RIBBON_FILE)) fs.writeFileSync(RIBBON_FILE, '400', 'utf-8');
   if (!fs.existsSync(PASTA_IMPORTADAS_FILE)) fs.writeFileSync(PASTA_IMPORTADAS_FILE, '{}', 'utf-8');
 }
@@ -442,6 +446,7 @@ function isTabletAllowed(method, p) {
     if (p === '/api/config' || p === '/api/events' || p === '/api/import/status') return true;
     if (p === '/api/printer/status' || p === '/api/printer/fila') return true;
     if (p === '/api/pdv/status' || p === '/api/pdv/caixa' || p === '/api/pdv/caixas') return true;
+    if (p === '/api/pdv/papel/resumo') return true;
     if (p === '/api/sessoes' || /^\/api\/sessoes\/[^/]+$/.test(p)) return true;
     if (/^\/api\/fotos\/(originais|previews|thumbs)\//.test(p)) return true;
     if (p === '/api/pedidos' || /^\/api\/pedidos\/[^/]+$/.test(p)) return true;
@@ -460,6 +465,7 @@ function isTabletAllowed(method, p) {
     if (p === '/api/galeria/fila/sincronizar') return true;
     if (p === '/api/portal/fila' || p === '/api/portal/fila/confirmar' || p === '/api/portal/fila/erro') return true;
     if (p === '/api/cache/portal' || p === '/api/cache/portal/conferir') return true;
+    if (p === '/api/testes/baixar') return true;
     return false;
   }
   if (method === 'PUT') return /^\/api\/pedidos\/[^/]+$/.test(p) || /^\/api\/pdv\/caixas\/[^/]+$/.test(p);
@@ -534,6 +540,7 @@ const PHOTOS_SETTLE_MS = 3000;
 let photosWatcherTimer = null;
 let dropState = new Map(); // subpasta -> { first, lastChange, names: {nome:size} }
 let importingLock = false;
+const preparandoSessoes = new Set(); // sessoes com previews sendo gerados em background
 
 // Pastas de fotos JÁ importadas (abs path -> { id, snap }) — persistido em
 // pasta-importadas.json p/ sobreviver a restart. Evita que a MESMA pasta
@@ -581,6 +588,89 @@ function snapshotOf(dir) {
   return JSON.stringify(snap);
 }
 
+function signatureOfEntries(entries) {
+  return JSON.stringify(
+    entries
+      .map(([name, size]) => [String(name).toLowerCase(), Number(size) || 0])
+      .sort((a, b) => a[0].localeCompare(b[0]))
+  );
+}
+
+function sourceSignatureOf(dir, photos) {
+  const entries = [];
+  for (const file of photos) {
+    try { entries.push([file, fs.statSync(path.join(dir, file)).size]); } catch {}
+  }
+  return signatureOfEntries(entries);
+}
+
+function sessionOriginalsSignature(dir) {
+  const entries = [];
+  for (const file of safeReadDir(path.join(dir, 'originais'))) {
+    if (!IMAGE_EXTS.has(path.extname(file).toLowerCase())) continue;
+    try { entries.push([file, fs.statSync(path.join(dir, 'originais', file)).size]); } catch {}
+  }
+  return signatureOfEntries(entries);
+}
+
+function findSessionForBatch(sub, subPath, photos) {
+  const wanted = sourceSignatureOf(subPath, photos);
+  let best = null;
+  for (const sid of safeReadDir(SESSOES_DIR)) {
+    const meta = readJson(sessaoMetaPath(sid), null);
+    if (!meta || meta.importadaDe !== sub) continue;
+    const dir = sessaoDir(sid);
+    if (sessionOriginalsSignature(dir) !== wanted) continue;
+    const ready = Number(meta.prontaEm) || 0;
+    if (!best || ready > best.ready) best = { id: sid, ready };
+  }
+  return best;
+}
+
+// Reconstroi o registro a partir das sessoes existentes. Isso evita que uma
+// perda/restauracao de pasta-importadas.json reimporte todos os lotes antigos
+// e crie uma segunda sessao para cada um.
+function reconcilePastaImportadas() {
+  const importFolder = getImportFolder();
+  if (!importFolder || !fs.existsSync(importFolder)) return 0;
+  const byBatch = new Map();
+  for (const sid of safeReadDir(SESSOES_DIR)) {
+    const meta = readJson(sessaoMetaPath(sid), null);
+    if (!meta || !meta.importadaDe) continue;
+    const batchPath = path.join(importFolder, meta.importadaDe);
+    let st;
+    try { st = fs.statSync(batchPath); } catch { continue; }
+    if (!st.isDirectory()) continue;
+    const list = byBatch.get(meta.importadaDe) || [];
+    list.push({ id: sid, ready: Number(meta.prontaEm) || 0, meta });
+    byBatch.set(meta.importadaDe, list);
+  }
+  let changed = 0;
+  for (const [batch, entries] of byBatch) {
+    const batchPath = path.join(importFolder, batch);
+    const key = path.resolve(batchPath);
+    const atual = pastaImportadas[key];
+    if (atual && typeof atual === 'object' && entries.some((item) => item.id === atual.id)) continue;
+    entries.sort((a, b) => (b.ready - a.ready) || b.id.localeCompare(a.id));
+    const escolhida = entries[0];
+    pastaImportadas[key] = {
+      id: escolhida.id,
+      snap: snapshotOf(batchPath),
+      importadaEm: escolhida.ready || Date.now(),
+      reconciliada: true,
+      preparando: !!escolhida.meta.preparando,
+    };
+    changed += 1;
+  }
+  if (changed) {
+    savePastaImportadas();
+    console.log(`[natal-core] pasta-importadas reconciliado: ${changed} lote(s)`);
+  }
+  return changed;
+}
+
+reconcilePastaImportadas();
+
 function sessionCriadaEm(subPath, photos) {
   try {
     const folderBirth = fs.statSync(subPath).birthtimeMs;
@@ -614,6 +704,13 @@ async function scanPhotosFolder(folder) {
     const jaImportada = pastaImportadas[chave];
     const prev = dropState.get(sub);
     const reimportando = !!(prev && prev.reimportando);
+
+    if (jaImportada && typeof jaImportada === 'object' && jaImportada.preparando) {
+      if (!preparandoSessoes.has(jaImportada.id)) {
+        void prepararSessaoEmSegundoPlano(jaImportada.id, subPath, sub);
+      }
+      continue;
+    }
 
     // Pasta já importada (soma de fotos daquele cliente). NÃO mexemos nela —
     // o programa externo é dono da pasta: se ela sumir, ele recria e o
@@ -701,7 +798,7 @@ async function getImporterStatus(ttlMs = IMPORT_STATUS_TTL_MS) {
   if (importStatusCache.promise) return importStatusCache.promise;
   const promessa = (async () => {
     try {
-      const resp = await fetch('http://127.0.0.1:8099/api/status', {
+      const resp = await fetch(`${IMPORTER_BASE}/api/status`, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(1500),
       });
@@ -749,12 +846,25 @@ function nomeDestinoFoto(file, usados) {
   return nome;
 }
 
+const HARDLINK_ORIGINALS = process.env.NATAL_HARDLINK_ORIGINALS !== '0';
+
+function linkOrCopy(src, dest) {
+  if (HARDLINK_ORIGINALS) {
+    try {
+      fs.linkSync(src, dest);
+      return true;
+    } catch {}
+  }
+  fs.copyFileSync(src, dest);
+  return false;
+}
+
 async function copiarFotoParaSessao(id, subPath, file, destino) {
   const dir = sessaoDir(id);
   const ext = path.extname(destino).toLowerCase() === '.png' ? '.png' : '.jpg';
   const origPath = path.join(dir, 'originais', destino);
   const prevPath = path.join(dir, 'previews', destino);
-  fs.copyFileSync(path.join(subPath, file), origPath);
+  linkOrCopy(path.join(subPath, file), origPath);
   await criarPreviewLeve(origPath, prevPath, ext);
   await criarThumbLeve(prevPath, path.join(dir, 'thumbs', destino), ext);
 }
@@ -943,6 +1053,15 @@ async function scanImportFolder(folder) {
         continue;
       }
 
+      // Se o sidecar caiu no meio da geração de previews, retoma em background
+      // em vez de deixar a sessão presa em RECEBENDO.
+      if (jaImportada && typeof jaImportada === 'object' && jaImportada.preparando) {
+        if (!preparandoSessoes.has(jaImportada.id)) {
+          void prepararSessaoEmSegundoPlano(jaImportada.id, subPath, sub);
+        }
+        continue;
+      }
+
       const snapAtual = snapshotOf(subPath);
       const mesmoConteudo = !!(jaImportada && typeof jaImportada === 'object' && jaImportada.snap === snapAtual);
       if (mesmoConteudo) continue;
@@ -953,17 +1072,9 @@ async function scanImportFolder(folder) {
       // fotógrafo precisa exportar JPEG; o importador pode converter no cartao).
       if (photos.length === 0) continue;
 
-      const prev = dropState.get(stateKey);
-      if (!prev) {
-        dropState.set(stateKey, { first: now, lastChange: now, snap: snapAtual });
-        continue;
-      }
-      if (prev.snap !== snapAtual) {
-        dropState.set(stateKey, { ...prev, lastChange: now, snap: snapAtual });
-        continue;
-      }
-      if (now - prev.lastChange < PHOTOS_SETTLE_MS) continue;
-
+      // O .natal_done é a prova de que o lote terminou de ser gravado. O
+      // settle de 3s existia para pastas sem marcador; aqui só adicionava 3s
+      // em cada lote.
       importingLock = true;
       try {
         await importarSubpastaSessao(subPath, sub, photos, !!jaImportada);
@@ -1170,6 +1281,248 @@ async function criarThumbLeve(srcPath, thumbPath, ext) {
   }
 }
 
+// ─── Previews em lote (background) ───────────────────────────
+// Um processo PowerShell por lote, em vez de dois processos por foto. O
+// gargalo antigo era o startup do PowerShell: 72 fotos levavam ~73s mesmo
+// com 2 processos simultâneos. Aqui cada worker decodifica uma foto por vez e
+// gera preview + thumb no mesmo processo, sem bloquear a criação da sessão.
+const PREVIEW_WORKERS = Math.max(1, Math.min(2, parseInt(process.env.NATAL_PREVIEW_WORKERS, 10) || 2));
+
+function lerResultadoLotePreview(file) {
+  try {
+    const raw = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+    const data = JSON.parse(raw);
+    return Array.isArray(data) ? data : (data ? [data] : []);
+  } catch {
+    return [];
+  }
+}
+
+function executarLotePreview(items) {
+  return new Promise((resolve) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'natal-preview-'));
+    const manifest = path.join(tmp, 'itens.json');
+    const result = path.join(tmp, 'resultado.json');
+    const scriptPath = path.join(tmp, 'gerar.ps1');
+    const script = `param(
+  [string]$Manifest,
+  [string]$Result,
+  [int]$PreviewMax = 1100,
+  [int]$PreviewQuality = 80,
+  [int]$ThumbMax = 360,
+  [int]$ThumbQuality = 70
+)
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Drawing
+$items = Get-Content -LiteralPath $Manifest -Raw -Encoding UTF8 | ConvertFrom-Json
+$jpegCodec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
+$out = New-Object System.Collections.ArrayList
+foreach ($it in @($items)) {
+  $src = [string]$it.src
+  $ok = $true
+  $err = ''
+  $img = $null
+  try {
+    $img = [System.Drawing.Image]::FromFile($src)
+    $png = ([IO.Path]::GetExtension($src).ToLowerInvariant() -eq '.png')
+    $specs = @(
+      @{ dst = [string]$it.preview; max = $PreviewMax; quality = $PreviewQuality },
+      @{ dst = [string]$it.thumb; max = $ThumbMax; quality = $ThumbQuality }
+    )
+    foreach ($spec in $specs) {
+      $dst = [string]$spec.dst
+      $dir = [IO.Path]::GetDirectoryName($dst)
+      if ($dir) { [IO.Directory]::CreateDirectory($dir) | Out-Null }
+      $tmpFile = $dst + '.tmp-' + $PID + '-' + [Guid]::NewGuid().ToString('N')
+      $bmp = $null
+      $g = $null
+      try {
+        $max = [int]$spec.max
+        $scale = [Math]::Min(1.0, $max / [Math]::Max($img.Width, $img.Height))
+        $w = [int][Math]::Max(1, [Math]::Round($img.Width * $scale))
+        $h = [int][Math]::Max(1, [Math]::Round($img.Height * $scale))
+        $bmp = New-Object System.Drawing.Bitmap($w, $h)
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $g.DrawImage($img, 0, 0, $w, $h)
+        try { $op = $img.GetPropertyItem(0x0112); $bmp.SetPropertyItem($op) } catch {}
+        if ($png) {
+          $bmp.Save($tmpFile, [System.Drawing.Imaging.ImageFormat]::Png)
+        } else {
+          $ep = New-Object System.Drawing.Imaging.EncoderParameters(1)
+          $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, [long]$spec.quality)
+          $bmp.Save($tmpFile, $jpegCodec, $ep)
+          $ep.Dispose()
+        }
+        Move-Item -LiteralPath $tmpFile -Destination $dst -Force
+      } catch {
+        try { Remove-Item -LiteralPath $tmpFile -Force -ErrorAction SilentlyContinue } catch {}
+        throw
+      } finally {
+        if ($g) { $g.Dispose() }
+        if ($bmp) { $bmp.Dispose() }
+      }
+    }
+  } catch {
+    $ok = $false
+    $err = $_.Exception.Message
+  } finally {
+    if ($img) { $img.Dispose() }
+  }
+  [void]$out.Add([pscustomobject]@{ src = $src; ok = $ok; error = $err })
+}
+$json = (@($out) | ConvertTo-Json -Compress)
+[IO.File]::WriteAllText($Result, $json, (New-Object System.Text.UTF8Encoding($false)))
+`;
+    fs.writeFileSync(manifest, JSON.stringify(items), 'utf8');
+    fs.writeFileSync(scriptPath, script, 'utf8');
+    execFile(
+      'powershell.exe',
+      [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
+        '-Manifest', manifest, '-Result', result,
+        '-PreviewMax', String(PREVIEW_MAX_DIM), '-PreviewQuality', String(PREVIEW_QUALITY),
+        '-ThumbMax', String(THUMB_MAX_DIM), '-ThumbQuality', String(THUMB_QUALITY),
+      ],
+      { windowsHide: true, timeout: 300000 },
+      (err) => {
+        const results = lerResultadoLotePreview(result);
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+        resolve({ err, results });
+      },
+    );
+  });
+}
+
+async function gerarDerivadosSessao(id, nomes) {
+  const dir = sessaoDir(id);
+  const itens = [];
+  let temGrande = false;
+  for (const nome of nomes) {
+    const src = path.join(dir, 'originais', nome);
+    const preview = path.join(dir, 'previews', nome);
+    const thumb = path.join(dir, 'thumbs', nome);
+    let st;
+    try { st = fs.statSync(src); } catch { continue; }
+    if (!st.isFile() || st.size <= 0) continue;
+    try {
+      // Retomada após queda: não refaz o que já está completo.
+      if (fs.statSync(preview).size > 0 && fs.statSync(thumb).size > 0) continue;
+    } catch {}
+    itens.push({
+      src,
+      preview,
+      thumb,
+      ext: path.extname(nome).toLowerCase(),
+      size: st.size,
+    });
+    if (st.size >= PREVIEW_BIG_BYTES) temGrande = true;
+  }
+  if (!itens.length) return;
+
+  // Fotos grandes decodificam sozinhas (mesma regra do semáforo antigo).
+  const workers = temGrande
+    ? 1
+    : Math.max(1, Math.min(PREVIEW_WORKERS, PREVIEW_CONCURRENCY, itens.length));
+  const peso = temGrande ? PREVIEW_CONCURRENCY : 1;
+  const lotes = Array.from({ length: workers }, () => []);
+  itens.sort((a, b) => b.size - a.size);
+  itens.forEach((item, i) => lotes[i % workers].push(item));
+
+  for (let i = 0; i < workers; i++) await previewAdquirir(peso);
+  let resultados = [];
+  try {
+    resultados = await Promise.all(lotes.map((lote) => executarLotePreview(lote)));
+  } finally {
+    for (let i = 0; i < workers; i++) previewLiberar(peso);
+  }
+
+  const ok = new Set();
+  for (const res of resultados) {
+    for (const item of res.results || []) {
+      if (item && item.ok) ok.add(path.resolve(String(item.src)));
+    }
+  }
+  for (const item of itens) {
+    if (ok.has(path.resolve(item.src))) continue;
+    // Falha isolada no lote: repete só esse arquivo pelo caminho antigo.
+    try {
+      await criarPreviewLeve(item.src, item.preview, item.ext);
+      await criarThumbLeve(item.preview, item.thumb, item.ext);
+    } catch (e) {
+      console.error(`[natal-core] Preview em lote falhou (${path.basename(item.src)}): ${e.message}`);
+    }
+  }
+  // Nunca deixa a sessão sem preview: a rota de thumbs cai no preview.
+  for (const item of itens) {
+    try {
+      if (!fs.existsSync(item.preview)) fs.copyFileSync(item.src, item.preview);
+    } catch {}
+  }
+}
+
+async function prepararSessaoEmSegundoPlano(id, subPath, sub) {
+  if (!id || preparandoSessoes.has(id)) return;
+  preparandoSessoes.add(id);
+  const chave = path.resolve(subPath);
+  try {
+    const dir = sessaoDir(id);
+    const nomes = safeReadDir(path.join(dir, 'originais'))
+      .filter((nome) => IMAGE_EXTS.has(path.extname(nome).toLowerCase()));
+    await gerarDerivadosSessao(id, nomes);
+
+    const meta = readJson(sessaoMetaPath(id), null);
+    if (!meta) return;
+    meta.estado = ESTADOS.PRONTA;
+    meta.fotosEsperadas = nomes.length;
+    meta.prontaEm = Date.now();
+    delete meta.preparando;
+    delete meta.importacaoParcial;
+    delete meta.recebendoDesde;
+    writeJson(sessaoMetaPath(id), meta);
+
+    const reg = pastaImportadas[chave];
+    if (reg && typeof reg === 'object') {
+      reg.preparando = false;
+      reg.importadaEm = Date.now();
+      reg.snap = snapshotOf(subPath);
+      savePastaImportadas();
+    }
+    dropState.delete('cartao:' + sub);
+    dropState.delete(sub);
+    emit('sessao:concluida', { id });
+    emit('sessao:status', {
+      id,
+      estado: ESTADOS.PRONTA,
+      fotosQtd: getSessao(id).fotosQtd,
+    });
+    console.log(`[natal-core] Sessao ${id} pronta (${nomes.length} fotos): ${sub}`);
+  } catch (e) {
+    console.error(`[natal-core] Preparo da sessao ${id} falhou: ${e.message}`);
+    // Mesmo com falha, tira a sessão de RECEBENDO para não travar a tela.
+    try {
+      const meta = readJson(sessaoMetaPath(id), null);
+      if (meta) {
+        meta.estado = ESTADOS.PRONTA;
+        meta.prontaEm = Date.now();
+        delete meta.preparando;
+        writeJson(sessaoMetaPath(id), meta);
+        const reg = pastaImportadas[chave];
+        if (reg && typeof reg === 'object') {
+          reg.preparando = false;
+          savePastaImportadas();
+        }
+        emit('sessao:concluida', { id });
+        emit('sessao:status', { id, estado: ESTADOS.PRONTA, fotosQtd: getSessao(id).fotosQtd });
+      }
+    } catch {}
+  } finally {
+    preparandoSessoes.delete(id);
+  }
+}
+
 async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
   // Re-settle que voltou ao conteúdo JÁ importado (mudança transitória):
   // não cria sessão duplicada.
@@ -1182,12 +1535,33 @@ async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
       return;
     }
   }
+  if (!reimportando) {
+    const existente = findSessionForBatch(sub, subPath, photos);
+    if (existente) {
+      const chave = path.resolve(subPath);
+      pastaImportadas[chave] = {
+        id: existente.id,
+        snap: snapshotOf(subPath),
+        importadaEm: Date.now(),
+        reutilizada: true,
+      };
+      savePastaImportadas();
+      dropState.delete(sub);
+      dropState.delete('cartao:' + sub);
+      console.log(`[natal-core] Lote ${sub} ja tem sessao ${existente.id}; nao duplicou`);
+      return existente.id;
+    }
+  }
+
   const id = nextSessionId();
   const dir = sessaoDir(id);
   fs.mkdirSync(path.join(dir, 'previews'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'thumbs'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'originais'), { recursive: true });
 
+  // Fase 1: só copia os originais (hardlink quando possível). É rápido e não
+  // depende de PowerShell. Assim que a sessão existe, o PDV já a mostra em
+  // RECEBENDO; a geração de previews roda em background.
   const imported = [];
   for (const file of photos) {
     const ext = path.extname(file).toLowerCase() === '.png' ? '.png' : '.jpg';
@@ -1195,11 +1569,7 @@ async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
     const name = base + ext;
     const srcPath = path.join(subPath, file);
     try {
-      const origPath = path.join(dir, 'originais', name);
-      const prevPath = path.join(dir, 'previews', name);
-      fs.copyFileSync(srcPath, origPath);
-      await criarPreviewLeve(origPath, prevPath, ext);
-      await criarThumbLeve(prevPath, path.join(dir, 'thumbs', name), ext);
+      linkOrCopy(srcPath, path.join(dir, 'originais', name));
       imported.push(name);
     } catch (e) {
       console.error(`[natal-core] Falha ao importar ${file}: ${e.message}`);
@@ -1209,25 +1579,41 @@ async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
 
   const meta = {
     id,
-    estado: ESTADOS.PRONTA, // automático: já disponível para venda
+    estado: ESTADOS.RECEBENDO,
     criadaEm: sessionCriadaEm(subPath, photos),
     fotosEsperadas: imported.length,
     operadorFotografo: 'PASTA',
     importadaDe: sub,
-    prontaEm: Date.now(),
+    preparando: true,
+    recebendoDesde: Date.now(),
+    ultimoProgressoEm: Date.now(),
   };
   writeJson(sessaoMetaPath(id), meta);
-  emit('sessao:criada', { id });
-  emit('sessao:concluida', { id });
-  emit('sessao:status', { id, estado: ESTADOS.PRONTA, fotosQtd: imported.length });
-  console.log(`[natal-core] Sessao ${id} importada da pasta (${imported.length} fotos): ${sub}`);
 
   // Registra como importada com o snapshot do conteúdo. A pasta NÃO é movida
   // nem removida: pertence ao programa externo que alimenta a drop zone — se
   // ela sumir, ele a recria e o loop recomeça.
-  pastaImportadas[path.resolve(subPath)] = { id, snap: snapshotOf(subPath), importadaEm: Date.now() };
+  pastaImportadas[path.resolve(subPath)] = {
+    id,
+    snap: snapshotOf(subPath),
+    importadaEm: Date.now(),
+    preparando: true,
+  };
   savePastaImportadas();
   dropState.delete(sub);
+  dropState.delete('cartao:' + sub);
+
+  emit('sessao:criada', { id });
+  emit('sessao:status', {
+    id,
+    estado: ESTADOS.RECEBENDO,
+    fotosQtd: 0,
+    fotosEsperadas: imported.length,
+  });
+  console.log(`[natal-core] Sessao ${id} criada (${imported.length} fotos), gerando previews em background: ${sub}`);
+
+  void prepararSessaoEmSegundoPlano(id, subPath, sub);
+  return id;
 }
 
 // Migração idempotente dos previews antigos (que eram cópia do original).
@@ -1415,13 +1801,255 @@ function testesDoDia(lojaId) {
 }
 function statusTestes() {
   const itens = testesDoDia(machineConfig.lojaId);
+  const pendentes = itens.filter((t) => t.status === 'IMPRESSO' && !t.baixadoEm);
   return {
     limite: TESTES_LIMITE_DIA,
     usados: itens.length,
     restantes: Math.max(0, TESTES_LIMITE_DIA - itens.length),
+    pendentes: pendentes.length,
     itens: itens.map((t) => ({
       id: t.id, sessaoId: t.sessaoId, sessaoSenha: t.sessaoSenha,
       opcao: t.label, criadoEm: t.criadoEm, status: t.status,
+      impressoEm: t.impressoEm || null,
+      baixadoEm: t.baixadoEm || null,
+      baixadoPor: t.baixadoPor || '',
+    })),
+  };
+}
+
+// ─── Ledger de impressões e conciliação de papel ─────────────
+// Cada impressão concluída (venda, reimpressão ou teste) vira um evento
+// imutável. O relatório do dia cruza esses eventos com as leituras de papel
+// informadas na abertura/fechamento do caixa. O ledger é local (não depende do
+// portal) e o snapshot diário leva o resumo para auditoria.
+let impressoes = readJson(IMPRESSOES_FILE, []);
+function saveImpressoes() { writeJson(IMPRESSOES_FILE, impressoes); }
+
+function resumoFotosImpressao(fotos) {
+  let fotos10x15 = 0, fotos15x20 = 0;
+  for (const item of (Array.isArray(fotos) ? fotos : [])) {
+    if (!item) continue;
+    const qtd = Math.max(0, Number(item.qty || item.quantidade || 1) || 0);
+    const modelo = String(item.key || item.modelo || item.produtoId || '').toLowerCase();
+    if (modelo.includes('15x20')) fotos15x20 += qtd;
+    else fotos10x15 += qtd;
+  }
+  return { fotos10x15, fotos15x20, unidadesRibbon: fotos10x15 + fotos15x20 * 2 };
+}
+function resumoPedidoImpressao(p) {
+  if (Array.isArray(p && p.fotos) && p.fotos.length) return resumoFotosImpressao(p.fotos);
+  const f10 = Number(p && p.fotos10x15);
+  const f15 = Number(p && p.fotos15x20);
+  if (Number.isFinite(f10) || Number.isFinite(f15)) {
+    const fotos10x15 = Number.isFinite(f10) ? f10 : 0;
+    const fotos15x20 = Number.isFinite(f15) ? f15 : 0;
+    return { fotos10x15, fotos15x20, unidadesRibbon: fotos10x15 + fotos15x20 * 2 };
+  }
+  return resumoFotosImpressao(p && p.itens);
+}
+function normalizarLeituraPapel(raw) {
+  if (raw === undefined || raw === null || raw === '') return { papel: null };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { error: 'Leitura de papel invalida' };
+  }
+  const papel = { '10x15': null, '15x20': null };
+  for (const size of ['10x15', '15x20']) {
+    const valor = raw[size];
+    if (valor === undefined || valor === null || valor === '') continue;
+    const n = Number(valor);
+    if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+      return { error: `Leitura de papel ${size} invalida` };
+    }
+    papel[size] = n;
+  }
+  if (papel['10x15'] === null && papel['15x20'] === null) return { papel: null };
+  return { papel };
+}
+function mesclarPapelInicio(existente, novo) {
+  const atual = existente && typeof existente === 'object' && !Array.isArray(existente) ? existente : {};
+  const lido = novo && typeof novo === 'object' && !Array.isArray(novo) ? novo : {};
+  const papel = { '10x15': null, '15x20': null };
+  let mudou = false;
+  for (const size of ['10x15', '15x20']) {
+    const antes = Number(atual[size]);
+    const depois = Number(lido[size]);
+    const antesOk = Number.isInteger(antes) && antes > 0;
+    const depoisOk = Number.isInteger(depois) && depois > 0;
+    papel[size] = antesOk ? antes : (depoisOk ? depois : null);
+    if (!antesOk && depoisOk) mudou = true;
+  }
+  return { papel, mudou };
+}
+function testesPendentesDoDia(lojaId = machineConfig.lojaId, dia = dataLocal()) {
+  return testes.filter((t) => t && t.data === dia
+    && String(t.lojaId || '') === String(lojaId || '')
+    && t.status === 'IMPRESSO' && !t.baixadoEm);
+}
+function baixarTestes(ids, operador) {
+  const alvo = new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean));
+  if (!alvo.size) return { atualizados: 0, itens: [] };
+  const agora = Date.now();
+  const itens = [];
+  testes = testes.map((t) => {
+    if (!t || !alvo.has(String(t.id)) || t.status !== 'IMPRESSO' || t.baixadoEm) return t;
+    const atualizado = {
+      ...t,
+      baixadoEm: agora,
+      baixadoPor: String(operador || 'Operador'),
+      baixa: 'DESCARTE',
+    };
+    itens.push(atualizado);
+    return atualizado;
+  });
+  if (itens.length) {
+    saveTestes();
+    emit('teste:baixado', { ids: itens.map((t) => t.id), lojaId: machineConfig.lojaId || '' });
+  }
+  return { atualizados: itens.length, itens };
+}
+function registrarImpressao(pedido, fotos, opts = {}) {
+  const resumo = resumoFotosImpressao(fotos);
+  const tipo = opts.teste ? 'teste' : (opts.reimpressao ? 'reimpressao' : 'venda');
+  const evento = {
+    id: `IMP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
+    tipo,
+    em: Date.now(),
+    data: dataLocal(),
+    lojaId: String(machineConfig.lojaId || ''),
+    lojaNome: String(machineConfig.lojaNome || ''),
+    pdv: String(machineConfig.pdvNome || ''),
+    pedidoId: String(pedido.id),
+    numero: pedido.numero ?? null,
+    testeId: opts.teste ? String(pedido.id) : null,
+    // Reimpressão de pedido antigo continua no caixa de origem; só usa o caixa
+    // aberto quando o próprio pedido não tem vínculo (ex.: teste de impressão).
+    caixaId: String(pedido.caixaId || (caixa && !caixa.fechadoEm ? caixa.id : '') || ''),
+    operador: String((opts.teste ? pedido.operador : (opts.operador || pedido.operador)) || ''),
+    motivo: tipo === 'reimpressao' ? String(opts.motivo || '').trim() : '',
+    fotos10x15: resumo.fotos10x15,
+    fotos15x20: resumo.fotos15x20,
+    unidadesRibbon: resumo.unidadesRibbon,
+    itens: (Array.isArray(fotos) ? fotos : []).slice(0, 50).map((f) => ({
+      key: String(f && f.key || ''),
+      qty: Math.max(1, Number(f && f.qty) || 1),
+      filename: String(f && f.filename || ''),
+    })),
+  };
+  impressoes.push(evento);
+  saveImpressoes();
+  emit('impressao:registrada', {
+    id: evento.id, tipo, pedidoId: evento.pedidoId,
+    fotos10x15: evento.fotos10x15, fotos15x20: evento.fotos15x20,
+  });
+  return evento;
+}
+function resumoPapel(dataIso = dataLocal(), caixaExtra = null) {
+  const dia = /^\d{4}-\d{2}-\d{2}$/.test(String(dataIso || '')) ? String(dataIso) : dataLocal();
+  const lojaAtual = String(machineConfig.lojaId || '');
+  const eventos = impressoes.filter((e) => e && e.data === dia && String(e.lojaId || '') === lojaAtual);
+  const vazio = () => ({ fotos10x15: 0, fotos15x20: 0, unidadesRibbon: 0, eventos: 0 });
+  const porTipo = { venda: vazio(), reimpressao: vazio(), teste: vazio() };
+  const motivos = new Map();
+  for (const e of eventos) {
+    const tipo = porTipo[e.tipo] ? e.tipo : 'venda';
+    const b = porTipo[tipo];
+    const f10 = Math.max(0, Number(e.fotos10x15) || 0);
+    const f15 = Math.max(0, Number(e.fotos15x20) || 0);
+    b.fotos10x15 += f10;
+    b.fotos15x20 += f15;
+    b.unidadesRibbon += f10 + f15 * 2;
+    b.eventos++;
+    if (tipo === 'reimpressao') {
+      const motivo = String(e.motivo || 'Sem motivo registrado').trim() || 'Sem motivo registrado';
+      const m = motivos.get(motivo) || { motivo, vezes: 0, fotos10x15: 0, fotos15x20: 0 };
+      m.vezes++;
+      m.fotos10x15 += f10;
+      m.fotos15x20 += f15;
+      motivos.set(motivo, m);
+    }
+  }
+  const esperado = {
+    '10x15': porTipo.venda.fotos10x15 + porTipo.reimpressao.fotos10x15 + porTipo.teste.fotos10x15,
+    '15x20': porTipo.venda.fotos15x20 + porTipo.reimpressao.fotos15x20 + porTipo.teste.fotos15x20,
+    unidadesRibbon: porTipo.venda.unidadesRibbon + porTipo.reimpressao.unidadesRibbon + porTipo.teste.unidadesRibbon,
+  };
+  const vendidos = vazio();
+  let pedidosVendidos = 0;
+  for (const p of pedidos) {
+    if (!p || !statusPedidoVenda(p)) continue;
+    const quando = Number(p.pagoEm || p.criadoEm || p.em || 0);
+    if (!quando || dataLocal(quando) !== dia) continue;
+    const r = resumoPedidoImpressao(p);
+    vendidos.fotos10x15 += r.fotos10x15;
+    vendidos.fotos15x20 += r.fotos15x20;
+    vendidos.unidadesRibbon += r.unidadesRibbon;
+    vendidos.eventos++;
+    pedidosVendidos++;
+  }
+  const mapaCaixas = new Map();
+  for (const c of [...caixas, ...(caixaExtra ? [caixaExtra] : []), ...(caixa && !caixa.fechadoEm ? [caixa] : [])]) {
+    if (!c || !c.id) continue;
+    const quando = Number(c.abertoEm || c.fechadoEm || 0);
+    if (!quando || dataLocal(quando) !== dia) continue;
+    mapaCaixas.set(String(c.id), c);
+  }
+  const caixasDia = [...mapaCaixas.values()].sort((a, b) => (Number(a.abertoEm) || 0) - (Number(b.abertoEm) || 0));
+  const inicio = { '10x15': null, '15x20': null };
+  const fim = { '10x15': null, '15x20': null };
+  for (const c of caixasDia) {
+    for (const size of ['10x15', '15x20']) {
+      const li = c.papelInicio && Number(c.papelInicio[size]);
+      if (inicio[size] === null && Number.isFinite(li)) inicio[size] = li;
+    }
+  }
+  for (const c of [...caixasDia].reverse()) {
+    for (const size of ['10x15', '15x20']) {
+      const lf = c.papelFim && Number(c.papelFim[size]);
+      if (fim[size] === null && Number.isFinite(lf)) fim[size] = lf;
+    }
+  }
+  const consumo = { '10x15': null, '15x20': null };
+  const divergencia = { '10x15': null, '15x20': null };
+  for (const size of ['10x15', '15x20']) {
+    if (inicio[size] !== null && fim[size] !== null) {
+      consumo[size] = inicio[size] - fim[size];
+      divergencia[size] = consumo[size] - esperado[size];
+    }
+  }
+  const temConsumo = Object.values(consumo).some((v) => v !== null);
+  const temParcial = Object.values(consumo).some((v) => v === null);
+  const temDivergencia = Object.values(divergencia).some((v) => v !== null && Math.abs(v) > 2);
+  const status = !temConsumo ? 'SEM_LEITURA' : (temParcial ? 'PARCIAL' : (temDivergencia ? 'DIVERGENTE' : 'OK'));
+  const pendentes = testesPendentesDoDia(machineConfig.lojaId, dia);
+  return {
+    data: dia,
+    lojaId: String(machineConfig.lojaId || ''),
+    inicio,
+    fim,
+    consumo,
+    divergencia,
+    esperado,
+    vendas: porTipo.venda,
+    reimpressoes: porTipo.reimpressao,
+    testes: {
+      ...porTipo.teste,
+      pendentes: pendentes.length,
+      pendentesDetalhes: pendentes.map((t) => ({
+        id: t.id, sessaoSenha: t.sessaoSenha, opcao: t.label,
+        operador: t.operador || '', impressoEm: t.impressoEm || null,
+      })),
+    },
+    vendidos: { ...vendidos, pedidos: pedidosVendidos },
+    diferencaVendas: {
+      '10x15': vendidos.fotos10x15 - porTipo.venda.fotos10x15,
+      '15x20': vendidos.fotos15x20 - porTipo.venda.fotos15x20,
+    },
+    motivosReimpressao: [...motivos.values()].sort((a, b) => b.vezes - a.vezes),
+    status,
+    caixas: caixasDia.map((c) => ({
+      id: c.id, numero: c.numero || null,
+      abertoEm: c.abertoEm || null, fechadoEm: c.fechadoEm || null,
+      papelInicio: c.papelInicio || null, papelFim: c.papelFim || null,
     })),
   };
 }
@@ -1548,6 +2176,167 @@ function totaisPedidosCaixa(caixaId) {
   }
   return { total: Number(total.toFixed(2)), porMeio };
 }
+function sessaoCriadaEm(id) {
+  const meta = readJson(sessaoMetaPath(id), null);
+  const ts = Number(meta && meta.criadaEm);
+  return Number.isFinite(ts) && ts > 0 ? ts : 0;
+}
+
+// Caixa que estava aberto no instante informado (o mais recente aberto antes dele).
+function caixaDoInstante(ts) {
+  const todos = [...(Array.isArray(caixas) ? caixas : []), caixa].filter((c) => c && c.id);
+  const alvo = Number(ts) || 0;
+  let melhor = null;
+  for (const c of todos) {
+    const abertoEm = Number(c.abertoEm) || 0;
+    if (abertoEm && abertoEm <= alvo + 1000 && (!melhor || abertoEm > (Number(melhor.abertoEm) || 0))) {
+      melhor = c;
+    }
+  }
+  return melhor;
+}
+
+// Periodo real da venda: o pedido de origem (quando veio de edicao) ou a
+// sessao mais antiga. E esse periodo, e nao o momento do clique, que define
+// em qual caixa a venda entra.
+function periodoDoPedido(p) {
+  if (!p) return { ts: 0, origem: null, caixaId: '' };
+  // Edicao em cadeia (editou a edicao): sobe ate o pedido raiz, senao um
+  // segundo "Editar" herdaria a data do primeiro e voltaria para o dia errado.
+  let raiz = p;
+  const vistos = new Set();
+  while (raiz && raiz.origemPedidoId) {
+    const chave = String(raiz.id || '');
+    if (chave) {
+      if (vistos.has(chave)) break;
+      vistos.add(chave);
+    }
+    const origem = pedidos.find((x) => x && (x.id === raiz.origemPedidoId || String(x.numero) === String(raiz.origemPedidoId)));
+    if (!origem) break;
+    raiz = origem;
+  }
+  if (raiz !== p && Number(raiz.criadoEm) > 0) {
+    return { ts: Number(raiz.criadoEm), origem: raiz, caixaId: String(raiz.caixaId || '') };
+  }
+  const ids = [...new Set([p.sessaoId, ...(Array.isArray(p.sessoes) ? p.sessoes.map((s) => (s && s.id) || s) : [])].filter(Boolean))];
+  const datas = ids.map(sessaoCriadaEm).filter((t) => t > 0);
+  if (datas.length) return { ts: Math.min(...datas), origem: null, caixaId: '' };
+  return { ts: Number(p.criadoEm) || 0, origem: null, caixaId: '' };
+}
+
+function caixaObjeto(id) {
+  if (!id) return null;
+  if (caixa && String(caixa.id) === String(id)) return caixa;
+  return (Array.isArray(caixas) ? caixas.find((c) => c && String(c.id) === String(id)) : null) || null;
+}
+
+function adicionarPedidoNoCaixa(caixaId, pedidoId) {
+  const alvo = caixaObjeto(caixaId);
+  if (!alvo || !pedidoId) return false;
+  if (!Array.isArray(alvo.pedidos)) alvo.pedidos = [];
+  if (alvo.pedidos.some((id) => String(id) === String(pedidoId))) return false;
+  alvo.pedidos.push(pedidoId);
+  if (alvo === caixa) saveCaixa(); else writeJson(CAIXAS_FILE, caixas);
+  return true;
+}
+
+function removerPedidoDosCaixas(pedidoId, excetoCaixaId) {
+  let mudou = false;
+  const remover = (c) => {
+    if (!c || !Array.isArray(c.pedidos)) return false;
+    if (excetoCaixaId && String(c.id) === String(excetoCaixaId)) return false;
+    const antes = c.pedidos.length;
+    c.pedidos = c.pedidos.filter((id) => String(id) !== String(pedidoId));
+    return c.pedidos.length !== antes;
+  };
+  if (remover(caixa)) { saveCaixa(); mudou = true; }
+  for (const c of (Array.isArray(caixas) ? caixas : [])) if (remover(c)) mudou = true;
+  if (mudou) writeJson(CAIXAS_FILE, caixas);
+  return mudou;
+}
+
+// Recalcula um caixa FECHADO depois de mover pedidos. Diferente de
+// reconciliarCaixasHistorico, aqui pode DIMINUIR (o caixa de hoje pode ter
+// recebido por engano uma venda de ontem).
+function recalcularCaixaFechado(c) {
+  if (!c || !c.id || !c.fechadoEm) return false;
+  const calc = totaisPedidosCaixa(c.id);
+  const atual = Number(c.totalVendido) || 0;
+  const porMeioAtual = c.totalPorMeio && typeof c.totalPorMeio === 'object' ? c.totalPorMeio : {};
+  if (Math.abs(atual - calc.total) <= 0.004 && JSON.stringify(porMeioAtual) === JSON.stringify(calc.porMeio)) return false;
+  const antes = { totalVendido: c.totalVendido ?? null, totalPorMeio: c.totalPorMeio || {} };
+  c.totalVendido = calc.total;
+  c.totalPorMeio = calc.porMeio;
+  if (c.meiosDeclarados && Object.keys(c.meiosDeclarados).length) {
+    const declarados = {};
+    for (const [forma, valor] of Object.entries(c.meiosDeclarados)) {
+      const chave = normalizarMeioCaixa(forma);
+      if (!chave) continue;
+      declarados[chave] = Number(((declarados[chave] || 0) + (Number(valor) || 0)).toFixed(2));
+    }
+    const sistema = { ...calc.porMeio };
+    sistema.dinheiro = Number((Number(sistema.dinheiro || 0) + (Number(c.valorInicial) || 0) - totalSangriasAbatidas(c)).toFixed(2));
+    let diferenca = 0;
+    for (const forma of new Set([...Object.keys(declarados), ...Object.keys(sistema)])) {
+      diferenca += (Number(declarados[forma]) || 0) - (Number(sistema[forma]) || 0);
+    }
+    c.meiosDeclarados = declarados;
+    c.totalRecebido = Number(Object.values(declarados).reduce((s, v) => s + Math.max(0, Number(v) || 0), 0).toFixed(2));
+    c.diferenca = Number(diferenca.toFixed(2));
+  }
+  c.reconciliacoes = [
+    ...(Array.isArray(c.reconciliacoes) ? c.reconciliacoes : []),
+    { em: new Date().toISOString(), motivo: 'pedido devolvido ao caixa de origem', antes, depois: {
+      totalVendido: c.totalVendido, totalPorMeio: c.totalPorMeio,
+    } },
+  ].slice(-50);
+  c.reconciliadoEm = new Date().toISOString();
+  return true;
+}
+
+// Corrige no boot pedidos pagos de hoje que na verdade sao de um dia anterior
+// (edicao de venda antiga / sessao antiga): devolve ao caixa do periodo.
+function reconciliarPedidosForaDoPeriodo() {
+  const hoje = dataLocal();
+  let mudou = false;
+  const afetados = new Set();
+  for (const p of pedidos) {
+    if (!p) continue;
+    if (String(p.status || '').toUpperCase() === 'CANCELADO') continue;
+    const periodo = periodoDoPedido(p);
+    if (!periodo.ts || dataLocal(periodo.ts) >= hoje) continue;
+    // So mexe em pedido criado hoje ou que veio de edicao explicita.
+    if (dataLocal(p.criadoEm) !== hoje && !periodo.origem) continue;
+    const destino = (periodo.caixaId ? caixaObjeto(periodo.caixaId) : null) || caixaDoInstante(periodo.ts);
+    if (!destino || !destino.id || String(destino.id) === String(p.caixaId)) continue;
+    const anterior = String(p.caixaId || '');
+    p.caixaId = String(destino.id);
+    p.criadoEm = periodo.ts;
+    if (Number(p.pagoEm) > 0 || statusPedidoVenda(p)) {
+      p.pagoEm = (periodo.origem && Number(periodo.origem.pagoEm) > 0) ? Number(periodo.origem.pagoEm) : periodo.ts;
+    }
+    p.periodoEm = periodo.ts;
+    p.caixaReajuste = {
+      de: anterior,
+      para: String(destino.id),
+      motivo: periodo.origem ? 'edicao de pedido de outro dia' : 'sessao de outro dia',
+      em: new Date().toISOString(),
+    };
+    p.atualizadoEm = Date.now();
+    afetados.add(anterior);
+    afetados.add(String(destino.id));
+    removerPedidoDosCaixas(p.id, String(destino.id));
+    adicionarPedidoNoCaixa(String(destino.id), p.id);
+    mudou = true;
+  }
+  if (!mudou) return;
+  savePedidos();
+  for (const id of afetados) {
+    const c = caixaObjeto(id);
+    if (c && recalcularCaixaFechado(c)) writeJson(CAIXAS_FILE, caixas);
+  }
+}
+
 function reconciliarCaixasHistorico() {
   let mudou = false;
   caixas = caixas.map((c) => {
@@ -1607,6 +2396,7 @@ function reconciliarCaixasHistorico() {
   if (mudou) writeJson(CAIXAS_FILE, caixas);
 }
 reconciliarCaixasHistorico();
+reconciliarPedidosForaDoPeriodo();
 
 // ─── Outbox para o portal (fila durável de envio) ─────────────
 // O PDV funciona OFFLINE: nada é enviado direto do balcão. Tudo que o
@@ -1776,9 +2566,11 @@ function recarregarEstadoLocal() {
   pedidos = readJson(PEDIDOS_FILE, []);
   auditoria = readJson(AUDITORIA_FILE, []);
   testes = readJson(TESTES_FILE, []);
+  impressoes = readJson(IMPRESSOES_FILE, []);
   caixa = readJson(CAIXA_FILE, null);
   caixas = readJson(CAIXAS_FILE, []);
   reconciliarCaixasHistorico();
+  reconciliarPedidosForaDoPeriodo();
   pastaImportadas = readJson(PASTA_IMPORTADAS_FILE, {});
   filaImpressao = (() => {
     const arr = readJson(FILA_IMPRESSAO_FILE, []);
@@ -2494,14 +3286,61 @@ let _workerRodando = false;
 function saveFila() {
   try { writeJson(FILA_IMPRESSAO_FILE, filaImpressao); } catch (e) { console.warn('[natal-core] falha ao salvar fila:', e.message); }
 }
+function lerLeituraPapel(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+}
+function infoImpressoraTemLeitura(info) {
+  if (!info) return false;
+  if (/impressora\s+n[ãa]o\s+encontrada/i.test(String(info.lastError || ''))) return false;
+  return lerLeituraPapel(info.paperRemainHalfSize) !== null
+    || lerLeituraPapel(info.paperRemain) !== null;
+}
 // Impressora REAL respondendo (Java sidecar porta 8080 → checkPrinter).
 async function impressoraOnline() {
   try {
     const resp = await fetch(JAVA_CHECK_URL, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(4000) });
     if (!resp.ok) return false;
     const json = await resp.json();
-    return !!(json && json.status === 'OK' && Array.isArray(json.retorno) && json.retorno.length);
+    return !!(json && json.status === 'OK' && Array.isArray(json.retorno)
+      && json.retorno.some(infoImpressoraTemLeitura));
   } catch { return false; }
+}
+async function consultarImpressora() {
+  let status = { connected: false, paper10x15: null, paper15x20: null, lastError: null };
+  try {
+    const resp = await fetch('http://localhost:8080/kws/v1/kiosk/checkPrinter', {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (resp.ok) {
+      const json = await resp.json();
+      if (json.status === 'OK' && Array.isArray(json.retorno) && json.retorno.length) {
+        const info = json.retorno[0];
+        const leitura10x15 = lerLeituraPapel(info.paperRemainHalfSize);
+        const leitura15x20 = lerLeituraPapel(info.paperRemain);
+        const temLeitura = infoImpressoraTemLeitura(info);
+        const erroInfo = String(info.lastError || '').trim();
+        status = {
+          connected: temLeitura,
+          paper10x15: temLeitura ? leitura10x15 : null,
+          paper15x20: temLeitura ? leitura15x20 : null,
+          lastError: temLeitura
+            ? (erroInfo || null)
+            : (erroInfo && erroInfo !== 'Sem erros' ? erroInfo : 'Impressora sem leitura de papel'),
+        };
+      } else {
+        status.lastError = 'Impressora sem resposta (desligada ou sem papel)';
+      }
+    } else {
+      status.lastError = 'HTTP ' + resp.status;
+    }
+  } catch (e) {
+    status.lastError = e.message || String(e);
+  }
+  if (status.connected && filaImpressao.some((j) => j.estado === 'PENDENTE')) kickFila();
+  return status;
 }
 async function callPrinter(url) {
   const ctrl = new AbortController();
@@ -2597,6 +3436,7 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
         testes[idx] = { ...testes[idx], status: 'IMPRESSO', impressoEm: Date.now() };
         saveTestes();
       }
+      registrarImpressao(pedido, listaFotos, { ...opts, teste: true });
       emit('teste:impresso', { testeId: pedido.id, lojaId: pedido.lojaId || '' });
       emit('print-complete', { pedidoId, testeId: pedido.id, success: true, teste: true });
       fs.rmSync(queueDir, { recursive: true, force: true });
@@ -2615,6 +3455,7 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
       emit('sessao:status', { id: pedido.sessaoId, estado: ESTADOS.FINALIZADA });
     }
 
+    registrarImpressao(pedido, listaFotos, { ...opts, reimpressao });
     emit('pedido:impresso', { pedidoId, numero: pedido.numero, reimpressao });
     emit('print-complete', { pedidoId, success: true, reimpressao });
 
@@ -2631,14 +3472,21 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
 }
 
 // Enfileira um pedido PAGO pra impressão (upsert por pedidoId — idempotente).
-// `reimpressao` também permite pedido já IMPRESSO sem alterar o histórico.
-function enfileirarImpressao(pedido, fotos, reimpressao = false) {
+// `opts.reimpressao` também permite pedido já IMPRESSO sem alterar o histórico.
+// `motivo`/`operador` ficam no job persistente para o ledger sobreviver a restart.
+function enfileirarImpressao(pedido, fotos, opts = {}) {
+  const o = typeof opts === 'boolean' ? { reimpressao: opts } : (opts || {});
+  const reimpressao = o.reimpressao === true;
+  const motivo = reimpressao ? String(o.motivo || '').trim() : '';
+  const operador = String(o.operador || pedido.operador || '');
   const pedidoId = String(pedido.id);
   let job = filaImpressao.find((j) => j.pedidoId === pedidoId);
   if (job) {
     job.fotos = fotos;
-    job.reimpressao = reimpressao === true;
+    job.reimpressao = reimpressao;
     job.teste = pedido.teste === true;
+    job.motivo = motivo;
+    job.operador = operador;
     job.estado = 'PENDENTE'; // reenviado manualmente → volta pra fila
     job.tentadoEm = null;
   } else {
@@ -2648,7 +3496,9 @@ function enfileirarImpressao(pedido, fotos, reimpressao = false) {
       sessaoId: pedido.sessaoId || null,
       teste: pedido.teste === true,
       fotos,
-      reimpressao: reimpressao === true,
+      reimpressao,
+      motivo,
+      operador,
       estado: 'PENDENTE',
       tries: 0,
       criadoEm: Date.now(),
@@ -2699,7 +3549,12 @@ async function processarFila() {
     saveFila();
     pedidosImprimindo.add(job.pedidoId);
     try {
-      const ok = await runPrintPipeline(pedido, job.fotos, { reimpressao, teste: !!teste });
+      const ok = await runPrintPipeline(pedido, job.fotos, {
+        reimpressao,
+        teste: !!teste,
+        motivo: job.motivo || '',
+        operador: job.operador || pedido.operador || '',
+      });
       if (ok) {
         filaImpressao = filaImpressao.filter((j) => j !== job);
         saveFila();
@@ -2814,6 +3669,7 @@ function limparDadosLocais(opts = {}) {
   writeJson(CAIXAS_FILE, []);
   writeJson(AUDITORIA_FILE, []);
   writeJson(TESTES_FILE, []);
+  writeJson(IMPRESSOES_FILE, []);
   writeJson(PASTA_IMPORTADAS_FILE, {});
   writeJson(FILA_IMPRESSAO_FILE, []);
   writeJson(FILA_PORTAL_FILE, []);
@@ -2954,32 +3810,7 @@ const server = http.createServer(async (req, res) => {
     }
     // Status real da impressora ASK-400 (proxy do Java sidecar na porta 8080)
     if (method === 'GET' && p === '/api/printer/status') {
-      let status = { connected: false, paper10x15: null, paper15x20: null, lastError: null };
-      try {
-        const resp = await fetch('http://localhost:8080/kws/v1/kiosk/checkPrinter', {
-          headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(5000),
-        });
-        if (resp.ok) {
-          const json = await resp.json();
-          if (json.status === 'OK' && Array.isArray(json.retorno) && json.retorno.length) {
-            const info = json.retorno[0];
-            status = {
-              connected: true,
-              paper10x15: info.paperRemainHalfSize != null ? Number(info.paperRemainHalfSize) : null,
-              paper15x20: info.paperRemain != null ? Number(info.paperRemain) : null,
-              lastError: info.lastError || null,
-            };
-          } else {
-            status.lastError = 'Impressora sem resposta (desligada ou sem papel)';
-          }
-        } else {
-          status.lastError = 'HTTP ' + resp.status;
-        }
-      } catch (e) {
-        status.lastError = e.message || String(e);
-      }
-      if (status.connected && filaImpressao.some((j) => j.estado === 'PENDENTE')) kickFila(); // impressora voltou → retoma a fila já
+      const status = await consultarImpressora();
       return sendJson(res, 200, { success: true, ...status, source: 'ask400' });
     }
     // Fila de impressão: listar (pro modal ⚙) e limpar (1 pedido ou todos).
@@ -3045,7 +3876,7 @@ const server = http.createServer(async (req, res) => {
       let ok = false;
       let erro = null;
       try {
-        const resp = await fetch('http://127.0.0.1:8099/api/sync-now', {
+        const resp = await fetch(`${IMPORTER_BASE}/api/sync-now`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(8000),
@@ -3063,7 +3894,7 @@ const server = http.createServer(async (req, res) => {
       let data = null;
       let erro = null;
       try {
-        const resp = await fetch('http://127.0.0.1:8099/api/camera/scan', {
+        const resp = await fetch(`${IMPORTER_BASE}/api/camera/scan`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(120000),
@@ -3083,7 +3914,7 @@ const server = http.createServer(async (req, res) => {
       let data = null;
       let erro = null;
       try {
-        const resp = await fetch('http://127.0.0.1:8099/api/camera/capture', {
+        const resp = await fetch(`${IMPORTER_BASE}/api/camera/capture`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(15000),
@@ -3104,7 +3935,7 @@ const server = http.createServer(async (req, res) => {
       let erro = null;
       try {
         const body = JSON.parse((await readBody(req, 64 * 1024)).toString() || '{}');
-        const resp = await fetch('http://127.0.0.1:8099/api/camera/settings', {
+        const resp = await fetch(`${IMPORTER_BASE}/api/camera/settings`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -3473,6 +4304,19 @@ const server = http.createServer(async (req, res) => {
         }
         if (!pagamentos.length) pagamentos = null;
       }
+
+      // A venda pertence ao dia da SESSAO (ou ao caixa do pedido de origem,
+      // quando veio de edicao), nao ao caixa aberto no momento do clique.
+      const periodo = periodoDoPedido({
+        origemPedidoId: body.origemPedidoId || null,
+        sessaoId: sessao.id,
+        sessoes: sessoesPedido,
+      });
+      const periodoEm = periodo.ts > 0 ? periodo.ts : Date.now();
+      let caixaDestino = periodo.caixaId ? caixaObjeto(periodo.caixaId) : null;
+      if (!caixaDestino && dataLocal(periodoEm) !== dataLocal()) caixaDestino = caixaDoInstante(periodoEm);
+      if (!caixaDestino) caixaDestino = caixaAtual;
+      const foraDoDia = dataLocal(periodoEm) !== dataLocal();
       const numero = nextPedidoNumero();
       const meio = pagamentos && pagamentos.length
         ? (pagamentos.length === 1 ? pagamentos[0].meio : 'MULTI')
@@ -3489,10 +4333,14 @@ const server = http.createServer(async (req, res) => {
         itens: body.itens || [],       // fotos: [{ key, qty }]
         produtos: body.produtos || [], // produtos físicos
         total: totalPedido,
-        caixaId: caixaAtual.id,
+        caixaId: String(caixaDestino.id),
         origemTerminal: isLoopbackReq(req) ? 'caixa' : 'tablet',
         status: 'AGUARDANDO',
-        criadoEm: Date.now(),
+        // Pedido de outro dia entra com a data do periodo para aparecer no
+        // dia certo (lista, snapshot e DRE do portal), nao no dia do clique.
+        criadoEm: foraDoDia ? periodoEm : Date.now(),
+        periodoEm,
+        registradoEm: Date.now(),
         meio,
         pagamentos,
         origemPedidoId: body.origemPedidoId || null,
@@ -3503,8 +4351,9 @@ const server = http.createServer(async (req, res) => {
         impressoEm: null,
       };
       pedidos.push(pedido);
-      if (caixa.pedidos && !caixa.pedidos.includes(pedido.id)) caixa.pedidos.push(pedido.id);
-      saveCaixa();
+      if (!Array.isArray(caixaDestino.pedidos)) caixaDestino.pedidos = [];
+      if (!caixaDestino.pedidos.includes(pedido.id)) caixaDestino.pedidos.push(pedido.id);
+      if (caixaDestino === caixa) saveCaixa(); else writeJson(CAIXAS_FILE, caixas);
       savePedidos();
       atualizarSessao(sessao.id, { estado: ESTADOS.EM_ATENDIMENTO, pedidoNumero: numero });
       emit('pedido:criado', { pedidoId: pedido.id, numero, sessaoId: sessao.id, total: pedido.total });
@@ -3560,7 +4409,12 @@ const server = http.createServer(async (req, res) => {
       pedido.pagamentos = pgs;
       pedido.meio = pgs.length === 0 ? 'CORTESIA' : (pgs.length === 1 ? pgs[0].meio : 'MULTI');
       pedido.status = 'PAGO';
-      pedido.pagoEm = Date.now();
+      // Venda de outro dia (sessao/edicao antiga) mantem a data do periodo;
+      // sem isso o portal jogaria o valor no DRE/ranking de hoje.
+      pedido.pagoEm = (Number(pedido.periodoEm) > 0 && dataLocal(pedido.periodoEm) !== dataLocal())
+        ? Number(pedido.periodoEm)
+        : Date.now();
+      pedido.atualizadoEm = Date.now();
       savePedidos();
       atualizarSessao(pedido.sessaoId, { estado: ESTADOS.VENDIDA });
       emit('pedido:pago', { pedidoId: pedido.id, numero: pedido.numero, meio: pedido.meio });
@@ -3662,6 +4516,9 @@ const server = http.createServer(async (req, res) => {
           if (st === 'CANCELADO') pedido.canceladoEm = pedido.canceladoEm || Date.now();
         }
       }
+      // Marca a última alteração (correção de pagamento, cancelamento etc.)
+      // para o PDV saber que o snapshot do dia mudou e reenviá-lo ao portal.
+      pedido.atualizadoEm = Date.now();
       pedidos[idx] = pedido;
       savePedidos();
       emit('pedido:atualizado', { pedidoId: pedido.id, status: pedido.status, total: pedido.total });
@@ -3706,6 +4563,11 @@ const server = http.createServer(async (req, res) => {
       const pedido = pedidos.find((x) => x.id === imprimirMatch[1] || String(x.numero) === imprimirMatch[1]);
       if (!pedido) return sendJson(res, 404, { success: false, error: 'Pedido nao encontrado' });
       const reimpressao = body.reimpressao === true;
+      const motivo = reimpressao ? String(body.motivo || '').trim() : '';
+      if (reimpressao && motivo.length < 3) {
+        return sendJson(res, 400, { success: false, error: 'Informe o motivo da reimpressao (minimo 3 caracteres)' });
+      }
+      const operador = String(body.operador || pedido.operador || '');
       const statusPermitido = pedido.status === 'PAGO'
         || (reimpressao && pedido.status === 'IMPRESSO');
       if (!statusPermitido) {
@@ -3733,7 +4595,7 @@ const server = http.createServer(async (req, res) => {
       }
       // Se já está IMPRIMINDO agora, ignora (não duplica); se está aguardando,
       // atualiza as fotos e mantém. O worker resolve o resto.
-      if (!jaAtivo) enfileirarImpressao(pedido, fotos, reimpressao);
+      if (!jaAtivo) enfileirarImpressao(pedido, fotos, { reimpressao, motivo, operador });
       kickFila(); // online → imprime já; offline → fica na fila e o worker retoma
       return sendJson(res, 200, { success: true, enfileirado: !jaAtivo });
     }
@@ -3804,12 +4666,23 @@ const server = http.createServer(async (req, res) => {
       teste.status = 'ENFILEIRADO';
       teste.tentadoEm = Date.now();
       saveTestes();
-      if (!pedidosImprimindo.has(teste.id)) enfileirarImpressao(teste, fotos, false);
+      if (!pedidosImprimindo.has(teste.id)) enfileirarImpressao(teste, fotos, { operador: teste.operador || '' });
       kickFila();
       return sendJson(res, 200, { success: true, enfileirado: !pedidosImprimindo.has(teste.id), teste });
     }
+    if (method === 'POST' && p === '/api/testes/baixar') {
+      const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      const ids = Array.isArray(body.ids) ? body.ids : [];
+      if (!ids.length) return sendJson(res, 400, { success: false, error: 'Nenhum teste selecionado' });
+      const r = baixarTestes(ids, body.operador);
+      return sendJson(res, 200, { success: true, ...r, ...statusTestes() });
+    }
 
     // ── Caixa ──
+    if (method === 'GET' && p === '/api/pdv/papel/resumo') {
+      const data = url.searchParams.get('data') || dataLocal();
+      return sendJson(res, 200, { success: true, ...resumoPapel(data) });
+    }
     if (method === 'GET' && p === '/api/pdv/caixa') {
       return sendJson(res, 200, { success: true, caixa: caixa });
     }
@@ -3899,6 +4772,8 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST' && p === '/api/pdv/caixa/abrir') {
       if (requireCaixaAberto()) return sendJson(res, 400, { success: false, error: 'Caixa ja esta aberto' });
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      const leituraInicio = normalizarLeituraPapel(body.papelInicio);
+      if (leituraInicio.error) return sendJson(res, 400, { success: false, error: leituraInicio.error });
       caixa = {
         id: `CX-${Date.now().toString(36).toUpperCase()}`,
         operador: String(body.operador || 'Operador'),
@@ -3908,10 +4783,40 @@ const server = http.createServer(async (req, res) => {
         pedidos: [],
         meios: {},
         sangrias: [],
+        papelInicio: leituraInicio.papel,
       };
       saveCaixa();
       emit('caixa:aberto', { id: caixa.id, operador: caixa.operador });
       return sendJson(res, 200, { success: true, caixa });
+    }
+    if (method === 'POST' && p === '/api/pdv/caixa/papel-inicio') {
+      if (!requireCaixaAberto()) return sendJson(res, 400, { success: false, error: 'Caixa nao esta aberto' });
+      let body = {};
+      try {
+        body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      } catch {
+        return sendJson(res, 400, { success: false, error: 'JSON invalido' });
+      }
+      let leitura = normalizarLeituraPapel(body.papelInicio);
+      if (leitura.error) return sendJson(res, 400, { success: false, error: leitura.error });
+      if (!leitura.papel) {
+        const status = await consultarImpressora();
+        if (status.connected) {
+          leitura = normalizarLeituraPapel({
+            '10x15': status.paper10x15,
+            '15x20': status.paper15x20,
+          });
+          if (leitura.error) return sendJson(res, 400, { success: false, error: leitura.error });
+        }
+      }
+      const mesclado = mesclarPapelInicio(caixa.papelInicio, leitura.papel);
+      if (!mesclado.mudou) {
+        return sendJson(res, 200, { success: true, salvo: false, caixa });
+      }
+      caixa = { ...caixa, papelInicio: mesclado.papel };
+      saveCaixa();
+      emit('caixa:papel-inicio', { id: caixa.id, papelInicio: caixa.papelInicio });
+      return sendJson(res, 200, { success: true, salvo: true, caixa });
     }
     if (method === 'POST' && p === '/api/pdv/caixa/sangria') {
       if (!requireCaixaAberto()) return sendJson(res, 400, { success: false, error: 'Caixa nao esta aberto' });
@@ -3947,6 +4852,21 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST' && p === '/api/pdv/caixa/fechar') {
       if (!requireCaixaAberto()) return sendJson(res, 400, { success: false, error: 'Caixa nao esta aberto' });
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
+      const pendentes = testesPendentesDoDia();
+      if (pendentes.length) {
+        return sendJson(res, 409, {
+          success: false,
+          codigo: 'TESTES_PENDENTES',
+          error: `Baixe ${pendentes.length} teste(s) de impressao antes de fechar o caixa`,
+          testes: pendentes.map((t) => ({
+            id: t.id, sessaoSenha: t.sessaoSenha, opcao: t.label,
+            operador: t.operador || '', impressoEm: t.impressoEm || null,
+          })),
+          ...statusTestes(),
+        });
+      }
+      const leituraFim = normalizarLeituraPapel(body.papelFim);
+      if (leituraFim.error) return sendJson(res, 400, { success: false, error: leituraFim.error });
       const lido = lerMeiosDeclarados(body.meios);
       if (lido.error) return sendJson(res, 400, { success: false, error: lido.error });
       const meios = lido.meios;
@@ -4020,11 +4940,19 @@ const server = http.createServer(async (req, res) => {
         fechadoPor,
         observacoes: body.observacoes || '',
         sangrias: Array.isArray(caixa.sangrias) ? caixa.sangrias : [],
+        papelFim: leituraFim.papel,
       };
+      let papelRelatorio = null;
+      try {
+        papelRelatorio = resumoPapel(dataLocal(caixa.abertoEm), caixa);
+      } catch (e) {
+        console.warn('[natal-core] nao consegui montar o relatorio de papel:', e.message);
+      }
+      caixa.papelRelatorio = papelRelatorio;
       arquivarCaixa(caixa);
       saveCaixa();
       emit('caixa:fechado', { id: caixa.id, totalVendido });
-      return sendJson(res, 200, { success: true, caixa });
+      return sendJson(res, 200, { success: true, caixa, papelRelatorio });
     }
 
     return sendJson(res, 404, { success: false, error: 'Rota nao encontrada' });

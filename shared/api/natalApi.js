@@ -70,6 +70,7 @@ const natalApi = {
   caixaEstado: () => api('GET', '/api/pdv/caixa'),
   caixasHistorico: () => api('GET', '/api/pdv/caixas'),
   caixaAbrir: (data) => api('POST', '/api/pdv/caixa/abrir', data),
+  caixaPapelInicio: (data) => api('POST', '/api/pdv/caixa/papel-inicio', data || {}),
   caixaFechar: (data) => api('POST', '/api/pdv/caixa/fechar', data),
   caixaSangria: (data) => api('POST', '/api/pdv/caixa/sangria', data),
   caixaCorrigir: (id, data) => api('PUT', `/api/pdv/caixas/${encodeURIComponent(id)}`, data),
@@ -107,9 +108,17 @@ const natalApi = {
   uploadImpressao: (pedidoId, filename, blob) =>
     api('POST', `/api/pedidos/${encodeURIComponent(pedidoId)}/impressao/${encodeURIComponent(filename)}`, blob, true),
   // Inicia a fila de impressão de um pedido PAGO/IMPRESSO. fotos: [{ key, filename, qty }]
-  imprimirPedido: (pedidoId, fotos, reimpressao) =>
-    api('POST', `/api/pedidos/${encodeURIComponent(pedidoId)}/imprimir`,
-      reimpressao ? { fotos, reimpressao: true } : { fotos }),
+  // opts: { reimpressao, motivo, operador } (aceita boolean legado).
+  imprimirPedido: (pedidoId, fotos, opts = {}) => {
+    const o = typeof opts === 'boolean' ? { reimpressao: opts } : (opts || {});
+    const body = { fotos };
+    if (o.reimpressao) {
+      body.reimpressao = true;
+      body.motivo = o.motivo || '';
+      body.operador = o.operador || '';
+    }
+    return api('POST', `/api/pedidos/${encodeURIComponent(pedidoId)}/imprimir`, body);
+  },
 
   // Teste de impressão do fotógrafo (2 por loja/dia): registra no sidecar,
   // sobe o JPEG composto e enfileira na ASK-400 sem criar pedido/venda.
@@ -119,6 +128,11 @@ const natalApi = {
     api('POST', `/api/testes/${encodeURIComponent(testeId)}/impressao/${encodeURIComponent(filename)}`, blob, true),
   imprimirTeste: (testeId, fotos) =>
     api('POST', `/api/testes/${encodeURIComponent(testeId)}/imprimir`, { fotos }),
+  baixarTestes: (ids, operador) => api('POST', '/api/testes/baixar', { ids, operador }),
+
+  // Relatório diário de papel: cruza vendas/reimpressões/testes com as leituras
+  // de início/fim do caixa e as leituras atuais da impressora.
+  papelResumo: (data) => api('GET', `/api/pdv/papel/resumo${data ? `?data=${encodeURIComponent(data)}` : ''}`),
 
   // ─── Saúde / config ──────────────────────────────────────
   health: () => api('GET', '/api/health'),

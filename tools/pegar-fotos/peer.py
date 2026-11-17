@@ -1,6 +1,7 @@
 import os
 import json
 import hashlib
+import re
 import socket
 import shutil
 import threading
@@ -246,11 +247,24 @@ class PeerSync:
                 remote_hash = batch.get("hash", "")
                 local_hash = self.local_hash(name)
                 if local_hash and remote_hash and local_hash != remote_hash:
-                    # conflito de nome (os PCs trabalharam offline): preserva a
-                    # pasta local e baixa a do outro PC com um sufixo
-                    alt = f"{name}-{remote_hash[:6]}"
-                    if not self.is_complete(alt):
-                        self._download_batch(batch, alt)
+                    # conflito de nome (os PCs trabalharam offline). Antes de
+                    # baixar, confere se o conteudo ja existe com outro nome;
+                    # senao o mesmo lote seria copiado de novo em cada ciclo.
+                    if self.has_content(remote_hash):
+                        self.on_duplicate(batch)
+                        continue
+                    # Nome enderecado pelo CONTEUDO, sempre a partir do nome
+                    # base. Nunca sufixar um nome que ja tem sufixo, senao os
+                    # ciclos entre os PCs criam NATAL-S0020-a-b-c-d...
+                    alt = self._alt_name(name, remote_hash)
+                    if self.is_complete(alt):
+                        if self.local_hash(alt) == remote_hash:
+                            continue
+                        # Colisao improvavel: nome alternativo ocupado por
+                        # outro conteudo. Nao cria outro nivel de sufixo.
+                        self.on_error(f"{alt}: nome alternativo ja usado por outro conteudo")
+                        continue
+                    self._download_batch(batch, alt)
                     continue
                 if self.is_complete(name):
                     continue
@@ -307,6 +321,14 @@ class PeerSync:
     def is_complete(self, name):
         folder = os.path.join(self.root, name)
         return os.path.isdir(folder) and self._marker_complete(folder)
+
+    @staticmethod
+    def _alt_name(name, remote_hash):
+        """Nome alternativo estavel, sem acumular sufixos de conflitos."""
+        base = re.sub(r"(?:-[0-9a-f]{4,10})+$", "", name or "", flags=re.IGNORECASE)
+        if not base:
+            base = name or "NATAL"
+        return f"{base}-{str(remote_hash or '')[:6].lower()}"
 
     def local_hash(self, name):
         """Hash de conteudo do lote local (ou None)."""
@@ -367,6 +389,11 @@ class PeerSync:
             return
 
         batch_dir = os.path.join(self.root, name)
+        existing_hash = self.local_hash(name)
+        remote_hash = str(batch.get("hash") or "")
+        if existing_hash and remote_hash and existing_hash != remote_hash and self.is_complete(name):
+            self.on_error(f"{name}: pasta ja completa com outro conteudo; download cancelado")
+            return
         try:
             os.makedirs(batch_dir, exist_ok=True)
         except Exception as e:

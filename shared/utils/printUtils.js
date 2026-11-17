@@ -12,6 +12,31 @@ function canvasToBlob(canvas) {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', config.image.jpegQuality));
 }
 
+// Marca visual obrigatória dos testes de impressão do fotógrafo. A faixa é
+// desenhada antes da rotação final: o driver gira a folha de volta, então o
+// texto sai legível no papel nos dois modelos (10x15 e 15x20).
+function drawTesteStamp(ctx, w, h) {
+  const texto = 'TESTE - NAO ENTREGAR';
+  const fonte = Math.max(48, Math.round(Math.min(w, h) * 0.075));
+  const faixa = Math.round(fonte * 1.8);
+  ctx.save();
+  ctx.translate(w / 2, h / 2);
+  ctx.rotate(-Math.PI / 7);
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = 'rgba(255,255,255,.82)';
+  ctx.fillRect(-w, -faixa / 2, w * 2, faixa);
+  ctx.strokeStyle = '#b91c1c';
+  ctx.lineWidth = Math.max(4, Math.round(fonte * 0.12));
+  ctx.strokeRect(-w, -faixa / 2, w * 2, faixa);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#b91c1c';
+  ctx.font = `900 ${fonte}px Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(texto, 0, 0);
+  ctx.restore();
+}
+
 // Rotaciona um canvas 90° e retorna novo canvas (ccw=true → anti-horário).
 function rotateCanvas(src, ccw) {
   const rot = document.createElement('canvas');
@@ -226,6 +251,8 @@ export async function composePrintImage(photo) {
     const logoImg = await loadImage(overlayInfo.image);
     ctx.drawImage(logoImg, 0, 0, printW, printH);
   }
+
+  if (photo.teste) drawTesteStamp(ctx, printW, printH);
 
   // 15x20 (media=6x8): o Java sidecar gera SEMPRE BMP retrato (1844x2436) para
   // media=6x8. Compomos em paisagem (editor paisagem) e rotacionamos 90° CCW

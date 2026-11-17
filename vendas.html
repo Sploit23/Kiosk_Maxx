@@ -1128,6 +1128,13 @@
   }
   .ped-stat .n{font-family:Arial,sans-serif;font-size:24px;color:var(--gold-300);}
   .ped-stat .l{font-size:11px;color:var(--slate-400);margin-top:4px;}
+  .ped-stat.ped-stat-pagto{
+    border-color:rgba(79,174,127,.55);
+    box-shadow:inset 0 0 0 1px rgba(79,174,127,.12);
+  }
+  .ped-stat.ped-stat-pagto .n{color:var(--green-300);}
+  #vendas-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));}
+  @media (max-width:760px){#vendas-summary{grid-template-columns:repeat(2,minmax(0,1fr));}}
   .ped-columns{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:8px;}
   .ped-col h3{font-size:13px;color:var(--gold-050);margin:0 0 10px;}
   .ped-table{width:100%;border-collapse:collapse;font-size:12.5px;}
@@ -2068,7 +2075,7 @@ let USERS = [];
 let equipeCarregando = true;
 let currentUser = null;
 let loginSelecionado = null;
-let testesFotografoStatus = { limite: 2, usados: 0, restantes: 2, itens: [] };
+let testesFotografoStatus = { limite: 2, usados: 0, restantes: 2, pendentes: 0, itens: [] };
 async function carregarTestesStatus(){
   try{
     const r = await natalApi.testesStatus();
@@ -2077,6 +2084,7 @@ async function carregarTestesStatus(){
         limite: Number(r.limite) || 2,
         usados: Number(r.usados) || 0,
         restantes: Number.isFinite(Number(r.restantes)) ? Number(r.restantes) : 2,
+        pendentes: Number(r.pendentes) || 0,
         itens: Array.isArray(r.itens) ? r.itens : [],
       };
     }
@@ -2580,6 +2588,7 @@ function mapearPedido(p){
     id: String(p.numero ?? p.id),
     _realId: p.id, numero: p.numero, horario,
     pagoEm: p.pagoEm ? new Date(p.pagoEm) : null,
+    atualizadoEm: p.atualizadoEm ? new Date(p.atualizadoEm) : null,
     impresso: p.status === 'IMPRESSO' || !!p.impressoEm,
     impressoEm: p.impressoEm ? new Date(p.impressoEm) : null,
     desconto: (p.desconto && Number(p.desconto.valor) > 0)
@@ -2656,6 +2665,18 @@ async function carregarCaixa(){
   }catch{ }
 }
 
+/* Um pedido pertence ao caixa atual quando o caixaId bate. Pedidos legados sem
+   caixaId (anteriores ao vínculo pedido↔caixa) caem na janela de tempo usada
+   antes. Isso evita que uma venda de outro caixa entre na consulta/fechamento
+   de hoje só porque o horário é maior que a abertura. */
+function pedidoPertenceCaixaAtual(p, caixa, desde){
+  if(!p || p.status !== 'pago') return false;
+  const caixaId = caixa && caixa.id ? String(caixa.id) : '';
+  const doPedido = String(p.caixaId || '');
+  if(caixaId && doPedido) return doPedido === caixaId;
+  return !p.horario || +p.horario >= Number(desde || 0);
+}
+
 function fechamentoDeCaixaServidor(c){
   const fundo = Number(c.valorInicial || 0);
   const idsDoCaixa = new Set((Array.isArray(c.pedidos) ? c.pedidos : []).map(String));
@@ -2691,6 +2712,9 @@ function fechamentoDeCaixaServidor(c){
     corrigidoEm: c.corrigidoEm || null,
     corrigidoPor: c.corrigidoPor || null,
     motivoCorrecao: c.motivoCorrecao || '',
+    papelInicio: c.papelInicio || null,
+    papelFim: c.papelFim || null,
+    papelRelatorio: c.papelRelatorio || null,
     porForma: Object.keys({ ...(c.totalPorMeio||{}), ...(c.meiosDeclarados||{}) }).map(m => {
       const sistema = +(Number(c.totalPorMeio?.[m] || 0) - (m === 'dinheiro' ? sangrias : 0)).toFixed(2);
       const declarado = c.meiosDeclarados?.[m];
@@ -3959,7 +3983,7 @@ async function enfileirarCaixaPortal(cx){
    O dia de um pedido é o dia da CRIAÇÃO (mesmo critério do pedido.push),
    para o portal conseguir reconciliar snapshot × pedidos. Ribbon/papel são
    o valor ATUAL (o portal não guarda histórico de estoque). */
-function montarSnapshotDia(dataIso){
+function montarSnapshotDia(dataIso, papelRelatorio = null){
   const pagos = pedidosRealizados.filter(p =>
     p.status === 'pago' && p.horario instanceof Date && !isNaN(p.horario) && isoDataLocal(p.horario) === dataIso);
   const meios = { dinheiro: 0, debito: 0, credito: 0, pix: 0 };
@@ -4002,11 +4026,15 @@ function montarSnapshotDia(dataIso){
     meios,
     // null quando o contador de ribbon não está disponível (portal não força 0)
     ribbonRestante: Number.isFinite(+ribbonBalanceBase) ? +ribbonBalanceBase : null,
-    papel10x15: (printerReal && printerReal.connected !== false && Number.isFinite(+printerReal.paper10x15)) ? +printerReal.paper10x15 : null,
-    papel15x20: (printerReal && printerReal.connected !== false && Number.isFinite(+printerReal.paper15x20)) ? +printerReal.paper15x20 : null,
+    papel10x15: (printerReal && printerReal.connected !== false && leituraPapelValida(printerReal.paper10x15)) ? +printerReal.paper10x15 : null,
+    papel15x20: (printerReal && printerReal.connected !== false && leituraPapelValida(printerReal.paper15x20)) ? +printerReal.paper15x20 : null,
     ultimaVenda: ultimaHora instanceof Date && !isNaN(ultimaHora) ? ultimaHora.toISOString() : null,
     // número sequencial do caixa (não o id CX-...) — volta ao id se o numero não existir
     caixa: { numero: (caixaReal && (caixaReal.numero || caixaReal.id)) || '', aberto: !!caixaAberto },
+    // Relatório local do sidecar: vendas impressas × reimpressões × testes,
+    // leituras de papel no início/fim e divergências. Vai junto do snapshot
+    // para o portal/admin sem depender de uma consulta extra.
+    papelRelatorio: papelRelatorio || null,
   };
 }
 
@@ -4073,12 +4101,23 @@ async function enfileirarPendentesPortal(){
     let precisa = d === hoje || !enviados.has(k);
     if(!precisa){
       const enviadoEm = Number(enviadosAt[k] || 0);
-      precisa = pedidosRealizados.some(p =>
-        p.status === 'cancelado' && p.horario instanceof Date && isoDataLocal(p.horario) === d &&
-        p.canceladoEm instanceof Date && +p.canceladoEm > enviadoEm);
+      // Reenvia o dia quando algum pedido dele mudou depois do último envio:
+      // cancelamento OU correção de forma de pagamento (atualizadoEm).
+      precisa = pedidosRealizados.some(p => {
+        if(!(p.horario instanceof Date) || isoDataLocal(p.horario) !== d) return false;
+        if(p.status !== 'pago' && p.status !== 'cancelado') return false;
+        const mudouEm = p.atualizadoEm instanceof Date ? p.atualizadoEm
+          : (p.canceladoEm instanceof Date ? p.canceladoEm : null);
+        return !!mudouEm && +mudouEm > enviadoEm;
+      });
     }
     if(!precisa) continue;
-    if(await enfileirarPortal('vendas', d, montarSnapshotDia(d))) novos++;
+    let papelRelatorio = null;
+    try{
+      const rel = await natalApi.papelResumo(d);
+      if(rel && rel.success) papelRelatorio = rel;
+    }catch{ }
+    if(await enfileirarPortal('vendas', d, montarSnapshotDia(d, papelRelatorio))) novos++;
   }
   if(novos) console.log('[sync] ' + novos + ' registro(s) na fila do portal');
   return novos;
@@ -4298,7 +4337,10 @@ function montarPedidoPortal(p){
     fotos10x15: resumoUnidades.fotos10x15,
     fotos15x20: resumoUnidades.fotos15x20,
     unidadesRibbon: resumoUnidades.unidadesRibbon,
-    caixaId: p.caixaId || (typeof caixaReal === 'object' && caixaReal && caixaReal.id ? caixaReal.id : ''),
+    // O caixa do pedido é o que ficou gravado na criação/pagamento. Nunca
+    // herdar o caixa aberto AGORA: um reenvio de pedido antigo (correção de
+    // pagamento, restart, sync periódico) jogaria a venda no caixa de hoje.
+    caixaId: p.caixaId ? String(p.caixaId) : '',
     origemTerminal: p.origemTerminal || null,
     origemPedidoId: p.origemPedidoId || null,
     guiaImpressa: !!p.guiaImpressa,
@@ -4394,6 +4436,31 @@ function normalizarComboPortal(c){
     if(fotos.filter(it => it.produtoId === '15x20').length === 1){
       const trocado = fotos.find(it => it.produtoId === '10x15');
       if(trocado) trocado.produtoId = '15x20';
+    }
+  }
+  const duasDigitais = combo.id === 'encarte-2-foto-15x20-2-digitais'
+    || combo.id === 'combo-encarte-2x15x20-digital'
+    || /2\s*(?:fotos?\s*)?digitais?/i.test(combo.nome);
+  if(duasDigitais){
+    const garantirDuas = (lista, campoTipo)=>{
+      if(!Array.isArray(lista)) return;
+      let qtd = lista
+        .filter(it => it.produtoId === 'foto-digital')
+        .reduce((s, it) => s + Math.max(1, Number(it.qtd) || 1), 0);
+      if(qtd >= 2) return;
+      const digital = lista.find(it => it.produtoId === 'foto-digital');
+      if(digital){
+        digital.qtd = Math.max(1, Number(digital.qtd) || 1) + (2 - qtd);
+      } else {
+        lista.push({ produtoId: 'foto-digital', [campoTipo]: 'extra', qtd: 2 - qtd });
+      }
+    };
+    if(combo.modo === 'slots'){
+      combo.regras = combo.regras || { slots: [] };
+      combo.regras.obrigatorios = Array.isArray(combo.regras.obrigatorios) ? combo.regras.obrigatorios : [];
+      garantirDuas(combo.regras.obrigatorios, 'tipo');
+    } else {
+      garantirDuas(combo.itens, 'tipoProduto');
     }
   }
   return combo;
@@ -4715,6 +4782,7 @@ function finalizarRestauracaoOperador(){
   carregarRibbon();
   definirFullscreen(true);
   if(!caixaAberto && currentUser.funcao !== 'Fotógrafo') askAbrirCaixa();
+  else if(caixaAberto) void registrarPapelInicioCaixa();
 }
 
 /* ---------------- PEDIDO REAL (criação + pagamento no sidecar) ---------------- */
@@ -4792,8 +4860,15 @@ function sessaoDaFoto(sessId, fileName){
 
 async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
   const reimpressao = opts.reimpressao === true;
+  const motivo = reimpressao ? String(opts.motivo || '').trim() : '';
+  const operador = String(opts.operador || (currentUser && currentUser.nome) || '');
+  if(reimpressao && motivo.length < 3){
+    toast('⚠ Informe o motivo da reimpressão');
+    return;
+  }
   const fotos = itens.filter(c => c.tipo === 'tamanho' && c.fotoSeed);
   if(!fotos.length){ _printPendente = null; return; }
+  void registrarPapelInicioCaixa();
   // Agrupar por arquivo+filtro pra não imprimir a mesma foto duas vezes se vier duplicada no carrinho
   const agrupado = new Map();
   for(const f of fotos){
@@ -4825,7 +4900,7 @@ async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
   }
   const lista = [...agrupado.values()];
   if(!lista.length) return;
-  _printPendente = { pedidoId, itens, total: lista.length, reimpressao };
+  _printPendente = { pedidoId, itens, total: lista.length, reimpressao, motivo, operador };
   _printProgress = { current: 0, total: lista.length };
   printando = true;
   renderRibbonChip();
@@ -4843,7 +4918,11 @@ async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
       renderRibbonChip();
     }
     etapa = 'início da impressão';
-    const res = await natalApi.imprimirPedido(pedidoId, lista.map(f => ({ key: f.key, filename: f.filename, qty: f.qty })), reimpressao);
+    const res = await natalApi.imprimirPedido(
+      pedidoId,
+      lista.map(f => ({ key: f.key, filename: f.filename, qty: f.qty })),
+      { reimpressao, motivo, operador },
+    );
     if(!res.success) throw new Error(res.error || 'Falha ao iniciar impressão');
     /* enfileirou: o estado real chega por SSE (print-start se a impressora estiver
        ligada, print-waiting se estiver desligada). Não trava o chip em "Imprimindo". */
@@ -5246,6 +5325,7 @@ async function finalizarVendaImpl(){
   if(r.error){ toast('⚠ ' + r.error); return; }
 
   const novoPedido = r.pedido;
+  void registrarPapelInicioCaixa();
   closeCartDrawer();
   const pedidoId = novoPedido._realId || novoPedido.id;
   const pedidoNumero = novoPedido.numero ?? novoPedido.id;
@@ -5421,9 +5501,9 @@ function mostrarFalhaImpressao(titulo, detalhe){
 async function imprimirFotosPendentes(fechaModal = false){
   if(!_printPendente) return;
   if(printando){ toast('🖨️ Já existe uma impressão em andamento...'); return; }
-  const { pedidoId, itens, reimpressao } = _printPendente;
+  const { pedidoId, itens, reimpressao, motivo, operador } = _printPendente;
   if(fechaModal) closeModal();
-  await iniciarImpressaoFotos(pedidoId, itens, { reimpressao });
+  await iniciarImpressaoFotos(pedidoId, itens, { reimpressao, motivo, operador });
 }
 window.imprimirFotosPendentes = imprimirFotosPendentes;
 
@@ -5754,7 +5834,7 @@ function renderPainel(){
         lastTapSessionId = null;
         lastTapAt = 0;
         if(s.status==='recebendo'){
-          toast(`Sessão #${s.senha} ainda recebendo fotos — aguarde o download terminar`);
+          toast(`Sessão #${s.senha} ainda recebendo/preparando as fotos — aguarde alguns segundos`);
           return;
         }
         if(currentUser && currentUser.funcao==='Fotógrafo'){
@@ -5849,7 +5929,7 @@ function openVenda(sessionId){
   const sessao = sessions.find(s=>s.id===sessionId);
   if(!sessao) return;
   if(sessao.status==='recebendo' || sessao.estado==='RECEBENDO'){
-    toast(`Sessão #${sessao.senha} ainda recebendo fotos — aguarde o download terminar`);
+    toast(`Sessão #${sessao.senha} ainda recebendo/preparando as fotos — aguarde alguns segundos`);
     return;
   }
   if(!sessao.fotos.length){
@@ -6143,6 +6223,111 @@ function comboSomaIndividual(combo){
     return s + (p?p.preco:0)*(it.qtd||1);
   },0);
 }
+function comboTemFotoDigital(combo){
+  if(!combo) return false;
+  const itens = combo.modo === 'slots'
+    ? ((combo.regras && combo.regras.obrigatorios) || [])
+    : (combo.itens || []);
+  return itens.some(it => it && it.produtoId === 'foto-digital');
+}
+
+function comboDigitaisCasadas(itens){
+  const digitais = (itens || []).filter(it => it && it.produtoId === 'foto-digital');
+  if(!digitais.length) return true;
+  const fotos = (itens || []).filter(it => it && it.tipo === 'tamanho' && it.fotoSeed);
+  const usadas = new Set();
+  for(const digital of digitais){
+    const seed = String(digital.fotoSeed || '');
+    if(!seed) return false;
+    const idx = fotos.findIndex((foto, i) => !usadas.has(i) && String(foto.fotoSeed || '') === seed);
+    if(idx < 0) return false;
+    usadas.add(idx);
+  }
+  return true;
+}
+
+function _autoComboEntradas(itens){
+  const out = [];
+  let seq = 0;
+  (itens || []).forEach(c=>{
+    if(!c || !c.produtoId) return;
+    if(c.tipo !== 'tamanho' && c.tipo !== 'extra') return;
+    if(c.zeradoPorCombo || c.comboAplicadoId) return;
+    const qtd = c.qtd == null ? 1 : Math.max(0, Number(c.qtd)||0);
+    const base = c.cartId || ('auto-item-' + (seq++));
+    for(let i=0;i<qtd;i++){
+      out.push({ id: base + '#' + i, key: c.tipo + ':' + c.produtoId, item: c });
+    }
+  });
+  return out;
+}
+
+function _autoComboEscolherEntradas(recipe, entradas, usados, exigirDigital){
+  const porChave = new Map();
+  entradas.forEach(e=>{
+    if(usados.has(e.id)) return;
+    const cur = porChave.get(e.key) || [];
+    cur.push(e);
+    porChave.set(e.key, cur);
+  });
+  const slots = [];
+  (recipe.req || []).forEach(req=>{
+    const qtd = Math.max(1, Number(req.qtd)||1);
+    for(let i=0;i<qtd;i++) slots.push(req);
+  });
+  if(exigirDigital){
+    const prioridade = req => req.key === 'extra:foto-digital' ? 0 : (req.key.startsWith('tamanho:') ? 1 : 2);
+    slots.sort((a,b)=>prioridade(a)-prioridade(b));
+  }
+  const escolhidos = [];
+  const usadosLocal = new Set();
+  function buscar(pos){
+    if(pos >= slots.length){
+      return !exigirDigital || comboDigitaisCasadas(escolhidos.map(e=>e.item)) ? escolhidos.slice() : null;
+    }
+    const req = slots[pos];
+    for(const e of (porChave.get(req.key) || [])){
+      if(usadosLocal.has(e.id)) continue;
+      usadosLocal.add(e.id);
+      escolhidos.push(e);
+      const ok = buscar(pos+1);
+      if(ok) return ok;
+      escolhidos.pop();
+      usadosLocal.delete(e.id);
+    }
+    return null;
+  }
+  return buscar(0);
+}
+
+function _autoComboAplicacoesDigitais(entradas, recipes){
+  const usados = new Set();
+  const apps = [];
+  recipes.slice().sort((a,b)=>b.desconto-a.desconto).forEach(recipe=>{
+    while(true){
+      const escolhidos = _autoComboEscolherEntradas(recipe, entradas, usados, true);
+      if(!escolhidos || !escolhidos.length) break;
+      escolhidos.forEach(e=>usados.add(e.id));
+      const ref = (escolhidos.find(e=>e.item.produtoId === 'foto-digital' && e.item.fotoSeed)
+        || escolhidos.find(e=>e.item.fotoSeed)
+        || escolhidos[0]).item;
+      apps.push({ recipe, ref });
+    }
+  });
+  return { apps, usados };
+}
+
+function _autoComboDisponiveisDeEntradas(entradas){
+  const disponiveis = new Map();
+  (entradas || []).forEach(e=>{
+    const cur = disponiveis.get(e.key) || { key: e.key, count: 0, ref: e.item };
+    cur.count += 1;
+    if(!cur.ref || !cur.ref.fotoSeed) cur.ref = e.item;
+    disponiveis.set(e.key, cur);
+  });
+  return disponiveis;
+}
+
 function _autoComboRecipes(){
   const recipes = [];
   COMBOS.forEach(combo=>{
@@ -6229,36 +6414,42 @@ function recalcularCombosAutomaticos(){
   // cima dele aplicaria desconto em dobro. O operador pode remover a linha para
   // liberar o recálculo automático.
   if(cart.some(c=>c.reaberto)) return;
-  const disponiveis = new Map();
-  cart.forEach(c=>{
-    if(!c || !c.produtoId) return;
-    if(c.tipo !== 'tamanho' && c.tipo !== 'extra') return;
-    if(c.zeradoPorCombo || c.comboAplicadoId) return;
-    const qtd = c.qtd == null ? 1 : Math.max(0, Number(c.qtd)||0);
-    if(!qtd) return;
-    const key = c.tipo + ':' + c.produtoId;
-    const cur = disponiveis.get(key) || { key, count: 0, ref: c };
-    cur.count += qtd;
-    if(!cur.ref || !cur.ref.fotoSeed) cur.ref = c;
-    disponiveis.set(key, cur);
-  });
-  if(!disponiveis.size) return;
   const recipes = _autoComboRecipes();
   if(!recipes.length) return;
-  const best = _autoComboBest(disponiveis, recipes);
-  if(!best || !best.apps.length) return;
+  const digitais = recipes.filter(r=>comboTemFotoDigital(r.combo));
+  const normais = recipes.filter(r=>!comboTemFotoDigital(r.combo));
+  const entradas = _autoComboEntradas(cart);
+  let restantes = entradas;
+  const aplicacoes = [];
+  if(digitais.length){
+    const casadas = _autoComboAplicacoesDigitais(entradas, digitais);
+    aplicacoes.push(...casadas.apps);
+    restantes = entradas.filter(e=>!casadas.usados.has(e.id));
+  }
+  const disponiveis = _autoComboDisponiveisDeEntradas(restantes);
+  if(normais.length && disponiveis.size){
+    const best = _autoComboBest(disponiveis, normais);
+    if(best && best.apps.length){
+      best.apps.forEach(recipe=>aplicacoes.push({ recipe, ref: null }));
+    }
+  }
+  if(!aplicacoes.length) return;
   const porCombo = new Map();
-  best.apps.forEach(r=>{
-    const cur = porCombo.get(r.combo.id) || { combo: r.combo, vezes: 0, descontoUnitario: r.desconto };
+  aplicacoes.forEach(app=>{
+    const r = app.recipe;
+    const cur = porCombo.get(r.combo.id) || { combo: r.combo, vezes: 0, descontoUnitario: r.desconto, ref: app.ref || null };
     cur.vezes += 1;
+    if(!cur.ref && app.ref) cur.ref = app.ref;
     porCombo.set(r.combo.id, cur);
   });
   porCombo.forEach(entry=>{
-    let ref = null;
-    for(const it of (entry.combo.itens||[])){
-      const tipo = it.tipoProduto === 'tamanho' ? 'tamanho' : 'extra';
-      const disp = disponiveis.get(tipo + ':' + it.produtoId);
-      if(disp && disp.ref){ ref = disp.ref; break; }
+    let ref = entry.ref;
+    if(!ref){
+      for(const it of (entry.combo.itens||[])){
+        const tipo = it.tipoProduto === 'tamanho' ? 'tamanho' : 'extra';
+        const disp = disponiveis.get(tipo + ':' + it.produtoId);
+        if(disp && disp.ref){ ref = disp.ref; break; }
+      }
     }
     ref = ref || {};
     const totalDesc = +(entry.descontoUnitario * entry.vezes).toFixed(2);
@@ -6673,6 +6864,11 @@ function aplicarComboComSlots(combo, slots){
     item.comboAplicadoId = combo.id;
     adicionados.push(item);
   }
+  if(comboTemFotoDigital(combo) && !comboDigitaisCasadas(adicionados)){
+    desfazer();
+    toast('Digital e foto precisam ser da mesma imagem');
+    return false;
+  }
   restaurarEditor();
   const diferenca = +(somaIndividual - combo.valorCombo).toFixed(2);
   if(diferenca > 0){
@@ -6821,6 +7017,11 @@ function aplicarCombo(comboId){
     }
     item.comboAplicadoId = combo.id;
     adicionados.push(item);
+  }
+  if(comboTemFotoDigital(combo) && !comboDigitaisCasadas(adicionados)){
+    desfazerAdicionados();
+    toast('Digital e foto precisam ser da mesma imagem');
+    return false;
   }
   const diferenca = +(somaIndividual - combo.valorCombo).toFixed(2);
   if(diferenca > 0){
@@ -7451,6 +7652,9 @@ function unidadesNoCarrinho(){ return cart.reduce((s,c)=>s+unidadesRibbon(c),0);
 function saldoRibbonProjetado(){ return ribbonBalanceBase === null ? null : ribbonBalanceBase - unidadesNoCarrinho(); }
 
 let printerReal = null; // { connected, paper10x15, paper15x20, lastError } vindo do Java ASK-400 (via proxy do sidecar)
+function leituraPapelValida(v){
+  return v !== null && v !== undefined && v !== '' && Number.isFinite(+v) && +v >= 0;
+}
 let printando = false; // true entre print-start e print-complete (feedback no chip de papel)
 let _printPedidoId = null;
 let _printProgress = null; // { current, total } — progresso exibido no chip ("Imprimindo X/Y")
@@ -7473,7 +7677,7 @@ async function carregarRibbon(){
     /* 2) fallback: contador de ribbon do sidecar (quando a impressora não responde) */
     try{
       const res = await natalApi.health();
-      if(res && res.ok && Number.isFinite(+res.ribbon)) ribbonBalanceBase = +res.ribbon;
+      if(res && res.ok && res.ribbon !== null && res.ribbon !== undefined && Number.isFinite(+res.ribbon)) ribbonBalanceBase = +res.ribbon;
     }catch{ }
   }finally{
     _cargandoRibbon = false;
@@ -7504,16 +7708,17 @@ function renderRibbonChip(){
   }
   const temResposta = !!(printerReal && printerReal.success);
   const conectada = temResposta && printerReal.connected !== false;
-  const usarImpressora = conectada
-    && (Number.isFinite(+printerReal.paper10x15) || Number.isFinite(+printerReal.paper15x20));
+  const p10Ok = !!(printerReal && leituraPapelValida(printerReal.paper10x15));
+  const p15Ok = !!(printerReal && leituraPapelValida(printerReal.paper15x20));
+  const usarImpressora = conectada && (p10Ok || p15Ok);
   if(usarImpressora){
-    const p10 = Number.isFinite(+printerReal.paper10x15) ? +printerReal.paper10x15 : '—';
-    const p15 = Number.isFinite(+printerReal.paper15x20) ? +printerReal.paper15x20 : '—';
+    const p10 = p10Ok ? +printerReal.paper10x15 : '—';
+    const p15 = p15Ok ? +printerReal.paper15x20 : '—';
     chip.innerHTML = `<span class="dot"></span>🖨️ ` +
       `<span class="rb-p"><b>10x15</b><em class="rb-n">${p10}</em></span>` +
       `<span class="rb-p"><b>15x20</b><em class="rb-n">${p15}</em></span>`;
-    const menor = Math.min(Number.isFinite(+printerReal.paper10x15) ? +printerReal.paper10x15 : Infinity,
-                           Number.isFinite(+printerReal.paper15x20) ? +printerReal.paper15x20 : Infinity);
+    const menor = Math.min(p10Ok ? +printerReal.paper10x15 : Infinity,
+                           p15Ok ? +printerReal.paper15x20 : Infinity);
     if(Number.isFinite(menor)){
       const alerta = menor < 30;
       chip.classList.add(alerta ? 'ribbon-alert' : 'ribbon-ok');
@@ -8265,9 +8470,17 @@ function numpadGravar(){
   el.dispatchEvent(new Event('change', { bubbles: true }));
   atualizarNumpad();
 }
+function numpadEhSenha(el){
+  return !!(el && el.tagName === 'INPUT' && String(el.type || '').toLowerCase() === 'password');
+}
 function atualizarNumpad(){
   const disp = document.getElementById('numpad-display');
   if(!numpadTarget){ disp.innerHTML = '&nbsp;'; return; }
+  if(numpadEhSenha(numpadTarget)){
+    const n = String(numpadBuf || '').length;
+    disp.textContent = n ? '*'.repeat(n) : '\u00a0';
+    return;
+  }
   let v = numpadMoney ? numpadDinheiroTexto(numpadBuf) : (numpadBuf || '');
   disp.innerHTML = v === '' ? '&nbsp;' : v.replace(/[^\d.,]+/g, '').replace(/</g, '&#60;');
 }
@@ -8599,6 +8812,18 @@ async function showConfigModal(tabInicial){
     </div>
 
     <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:4px;">Voltar para uma versão anterior</div>
+      <div style="font-size:12px;color:var(--slate-400);margin-bottom:10px;">Se uma atualização nova der problema, reinstale em segundos uma versão que estava funcionando. O instalador fica guardado neste PC.</div>
+      <div id="cfg-rollback-list" style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--slate-400);">Carregando...</div>
+      <div id="cfg-rollback-status" style="font-size:11.5px;color:var(--slate-500);margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button id="cfg-rollback-refresh" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">Atualizar lista</button>
+        <button id="cfg-rollback-save" style="padding:8px 14px;border:1px solid var(--green-500);border-radius:8px;background:transparent;color:var(--green-300);font-size:12px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">Salvar instalador de segurança</button>
+        <button id="cfg-rollback-shortcut" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:transparent;color:var(--slate-400);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;" title="Cria um .cmd na Área de Trabalho para restaurar a versão anterior mesmo se o app não abrir">Criar atalho de emergência</button>
+      </div>
+    </div>
+
+    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
       <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px;">Manutenção</div>
       <div style="font-size:12px;color:var(--slate-400);margin-bottom:8px;">
         Zera os dados de teste desta máquina (sessões e fotos, pedidos, caixa, fila de impressão,
@@ -8899,6 +9124,95 @@ const r = await natalApi.limparFila({ pedidoId });
         }
       }catch(e){ toast('⚠ ' + (e && e.message ? e.message : 'Erro')); updBtn.disabled = false; }
     };
+  }
+
+  {
+    const rbList = document.getElementById('cfg-rollback-list');
+    const rbStatus = document.getElementById('cfg-rollback-status');
+    const rbRefresh = document.getElementById('cfg-rollback-refresh');
+    const rbSave = document.getElementById('cfg-rollback-save');
+    const rbShortcut = document.getElementById('cfg-rollback-shortcut');
+
+    const confirmarRollback = async (versao) => {
+      if(typeof _impressaoEmAndamento === 'function' && _impressaoEmAndamento()){
+        toast('🖨️ Aguarde a impressão terminar para trocar de versão');
+        return;
+      }
+      const ok = window.confirm(`Voltar o PDV para a versão v${versao}?\n\nO app vai fechar e o instalador abre na hora (o Windows pode pedir permissão). Ao terminar, o PDV volta na v${versao}.`);
+      if(!ok) return;
+      rbStatus.textContent = `Preparando v${versao}...`;
+      const res = await window.natal.ipcInvoke('natal:rollbackInstall', versao).catch(e => ({ success:false, error:e && e.message }));
+      if(res && res.success){ rbStatus.textContent = `Fechando o app e reinstalando a v${versao}...`; }
+      else { rbStatus.textContent = 'Erro: ' + ((res && res.error) || 'falha ao reinstalar'); }
+    };
+
+    const renderRollback = (d) => {
+      if(!rbList) return;
+      if(!d){ rbList.textContent = 'Não foi possível ler os instaladores.'; return; }
+      const itens = d.installers || [];
+      const partes = [];
+      partes.push(`<div style="display:flex;align-items:center;gap:10px;background:var(--navy-800);border:1px solid var(--green-400);border-radius:8px;padding:8px 10px;">
+        <span style="font-weight:800;color:var(--green-300);">v${escHtml(d.current)}</span>
+        <span style="color:var(--slate-400);">em uso agora</span>
+      </div>`);
+      const antigos = itens.filter(i => i.previous);
+      if(!antigos.length){
+        partes.push(`<div style="font-size:12px;color:var(--amber-500);">Nenhum instalador anterior salvo ainda. Clique em "Salvar instalador de segurança".</div>`);
+      } else {
+        antigos.forEach(i => {
+          partes.push(`<div style="display:flex;align-items:center;gap:10px;background:var(--navy-800);border:1px solid var(--navy-line);border-radius:8px;padding:8px 10px;">
+            <span style="font-weight:700;color:var(--gold-300);">v${escHtml(i.version)}</span>
+            <span style="color:var(--slate-500);">${Math.round((i.size||0)/1048576)} MB</span>
+            <button data-rollback-install="${escHtml(i.version)}" style="margin-left:auto;padding:6px 12px;border:1px solid var(--gold-500);border-radius:7px;background:transparent;color:var(--gold-300);font-size:12px;font-weight:700;cursor:pointer;font-family:Arial,sans-serif;">Voltar para v${escHtml(i.version)}</button>
+          </div>`);
+        });
+      }
+      if(d.blockedVersion){
+        partes.push(`<div style="font-size:11.5px;color:var(--amber-500);margin-top:2px;">A versão v${escHtml(d.blockedVersion)} está bloqueada para o auto-update não reinstalar sozinho. <button id="cfg-rollback-unblock" style="padding:2px 8px;border:1px solid var(--slate-600);border-radius:6px;background:transparent;color:var(--slate-300);font-size:11px;cursor:pointer;font-family:Arial,sans-serif;">Liberar</button></div>`);
+      }
+      rbList.innerHTML = partes.join('');
+      rbList.querySelectorAll('[data-rollback-install]').forEach(btn => {
+        btn.onclick = () => confirmarRollback(btn.getAttribute('data-rollback-install'));
+      });
+      const unblock = document.getElementById('cfg-rollback-unblock');
+      if(unblock) unblock.onclick = async () => {
+        await window.natal.ipcInvoke('natal:rollbackUnblock').catch(() => {});
+        rbStatus.textContent = 'Atualizações liberadas.';
+        carregarRollback();
+      };
+    };
+
+    const carregarRollback = async () => {
+      if(!rbList) return;
+      try{
+        const d = await window.natal.ipcInvoke('natal:rollbackList');
+        renderRollback(d);
+      }catch(e){ rbList.textContent = 'Falha ao ler os instaladores salvos.'; }
+    };
+
+    if(rbRefresh) rbRefresh.onclick = carregarRollback;
+    if(rbSave) rbSave.onclick = async () => {
+      rbSave.disabled = true;
+      const rotulo = rbSave.textContent;
+      rbSave.textContent = 'Baixando...';
+      rbStatus.textContent = 'Baixando o instalador de segurança (pode demorar alguns minutos)...';
+      const res = await window.natal.ipcInvoke('natal:rollbackSeed').catch(e => ({ success:false, error:e && e.message }));
+      rbSave.disabled = false;
+      rbSave.textContent = rotulo;
+      if(res && res.success){
+        renderRollback(res);
+        rbStatus.textContent = res.savedPrevious ? 'Instalador salvo. Já pode voltar de versão.' : 'Instalador da versão atual salvo.';
+      } else {
+        rbStatus.textContent = 'Não foi possível baixar agora: ' + ((res && res.error) || 'sem internet?');
+      }
+    };
+    if(rbShortcut) rbShortcut.onclick = async () => {
+      const res = await window.natal.ipcInvoke('natal:rollbackShortcut').catch(e => ({ success:false, error:e && e.message }));
+      if(res && res.success){ toast('🛟 Atalho criado na Área de Trabalho: ' + String(res.path || '').split(/[\\/]/).pop()); }
+      else { toast('⚠ ' + ((res && res.error) || 'Não foi possível criar o atalho')); }
+    };
+
+    carregarRollback();
   }
 
   const cfgThermalInput = document.getElementById('cfg-thermal-printer');
@@ -9537,7 +9851,9 @@ function applyRoleVisibility(){
   const isFotografo = isFotografoAtual();
   if(isFotografo) resetPrinterAlert();
   document.getElementById('btn-teste-impressao').style.display = isFotografo ? 'inline-flex' : 'none';
-  document.getElementById('btn-pdv-tablet').style.display = (currentUser && currentUser.isAdmin) ? 'inline-flex' : 'none';
+  // PDV Tablet: qualquer operador de venda pode abrir o QR (o link em si só é
+  // gerado no loopback deste PC). O fotógrafo continua sem acesso à venda.
+  document.getElementById('btn-pdv-tablet').style.display = (currentUser && !isFotografo) ? 'inline-flex' : 'none';
   // login de fotógrafo: nada de caixa, vendas ou pedidos — só sessões e teste de impressão
   document.getElementById('btn-abrir-pedidos').style.display = isFotografo ? 'none' : 'inline-flex';
   document.getElementById('btn-abrir-vendas').style.display = isFotografo ? 'none' : 'inline-flex';
@@ -9617,7 +9933,7 @@ function renderPedidosScreen(){
   }
   const pedidosHoje = filtrarPedidosDoDia(pedidosRealizados, pedidosDiaSelecionado);
   const desde = caixaAbertoEm ? +caixaAbertoEm : 0;
-  const pagosCaixa = pedidosRealizados.filter(p=>p.status==='pago' && (!p.horario || +p.horario >= desde));
+  const pagosCaixa = pedidosRealizados.filter(p=>pedidoPertenceCaixaAtual(p, caixaReal, desde));
   const pagos = pedidosHoje.filter(p=>p.status==='pago');
   const totalVendas = pagos.reduce((s,p)=>s+p.total,0);
   const ticketMedio = pagos.length ? totalVendas/pagos.length : 0;
@@ -9736,6 +10052,19 @@ function diasComVendas(){
 
 let vendasDiaSelecionado = null;
 
+function resumoPagamentosPorMeio(pedidos){
+  const meios = { dinheiro:0, debito:0, pix:0, credito:0 };
+  (pedidos || []).forEach(p=>{
+    (p.pagamentosEfetivos || []).forEach(pg=>{
+      const meio = [pg.meio, pg.forma]
+        .map(v=>String(meioInfoDeForma(v).meio || '').toLowerCase())
+        .find(v=>Object.prototype.hasOwnProperty.call(meios, v));
+      if(meio) meios[meio] += Number(pg.valor) || 0;
+    });
+  });
+  return meios;
+}
+
 function renderVendasScreen(){
   const dias = diasComVendas();
   if(!vendasDiaSelecionado || !dias.includes(vendasDiaSelecionado)) vendasDiaSelecionado = dias[0];
@@ -9749,12 +10078,17 @@ function renderVendasScreen(){
   const totalDia = pagosDoDia.reduce((s,p)=>s+p.total,0);
   const ticketDia = pagosDoDia.length ? totalDia/pagosDoDia.length : 0;
   const canceladosDia = pedidosDoDia.filter(p=>p.status==='cancelado').length;
+  const porMeioDia = resumoPagamentosPorMeio(pagosDoDia);
 
   document.getElementById('vendas-summary').innerHTML = `
     <div class="ped-stat"><div class="n">${pagosDoDia.length}</div><div class="l">vendas em ${vendasDiaSelecionado}</div></div>
     <div class="ped-stat"><div class="n">${fmt(totalDia)}</div><div class="l">valor total do dia</div></div>
-    <div class="ped-stat"><div class="n">${fmt(ticketDia)}</div><div class="l">ticket médio do dia</div></div>
+    <div class="ped-stat"><div class="n">${fmt(ticketDia)}</div><div class="l">ticket m&eacute;dio do dia</div></div>
     <div class="ped-stat"><div class="n">${canceladosDia}</div><div class="l">pedidos cancelados no dia</div></div>
+    <div class="ped-stat ped-stat-pagto"><div class="n">${fmt(porMeioDia.dinheiro)}</div><div class="l">dinheiro</div></div>
+    <div class="ped-stat ped-stat-pagto"><div class="n">${fmt(porMeioDia.debito)}</div><div class="l">D&eacute;bito</div></div>
+    <div class="ped-stat ped-stat-pagto"><div class="n">${fmt(porMeioDia.pix)}</div><div class="l">PIX</div></div>
+    <div class="ped-stat ped-stat-pagto"><div class="n">${fmt(porMeioDia.credito)}</div><div class="l">Cr&eacute;dito</div></div>
   `;
 
   // dia a dia desde o início da operação
@@ -10276,6 +10610,9 @@ function showReprintModal(p){
       <span id="rp-resumo">Nenhuma foto selecionada</span>
       <button class="fc-btn" id="rp-todas" style="padding:8px 12px;border-radius:8px;font-size:12px;">Marcar todas</button>
     </div>
+    <label style="display:block;font-size:11px;color:var(--slate-400);margin:0 0 6px;">Motivo da reimpressão (obrigatório)</label>
+    <input type="text" id="rp-motivo" maxlength="160" autocomplete="off" placeholder="Ex.: atolamento, foto manchada, cliente voltou"
+      style="width:100%;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:14px;">
     <div class="reopen-actions">
       <button class="btn-primary" id="rp-confirmar" disabled>🖨️ Reimprimir selecionadas</button>
       <button class="btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -10286,6 +10623,7 @@ function showReprintModal(p){
   const linhas = [...document.querySelectorAll('#rp-lista .reprint-row')];
   const btnConfirmar = document.getElementById('rp-confirmar');
   const resumo = document.getElementById('rp-resumo');
+  const motivoInput = document.getElementById('rp-motivo');
 
   const selecionadas = () => linhas.map((row, idx) => {
     const check = row.querySelector('.rp-check');
@@ -10310,13 +10648,14 @@ function showReprintModal(p){
     resumo.textContent = copias
       ? `${copias} cópia(s) — ~${unidades} unidade(s) de ribbon`
       : 'Nenhuma foto selecionada';
-    btnConfirmar.disabled = copias === 0;
+    btnConfirmar.disabled = copias === 0 || motivoInput.value.trim().length < 3;
   };
 
   linhas.forEach(row => {
     row.querySelector('.rp-check').addEventListener('change', atualizar);
     row.querySelector('.rp-qty').addEventListener('change', atualizar);
   });
+  motivoInput.addEventListener('input', atualizar);
 
   document.getElementById('rp-todas').addEventListener('click', () => {
     linhas.forEach((row, idx) => {
@@ -10327,10 +10666,16 @@ function showReprintModal(p){
   });
 
   btnConfirmar.addEventListener('click', () => {
+    const motivo = motivoInput.value.trim();
+    if(motivo.length < 3){ toast('⚠ Informe o motivo da reimpressão (mínimo 3 caracteres)'); return; }
     const itens = selecionadas();
     if(!itens.length) return;
     closeModal();
-    iniciarImpressaoFotos(p._realId || p.id, itens, { reimpressao: true });
+    iniciarImpressaoFotos(p._realId || p.id, itens, {
+      reimpressao: true,
+      motivo,
+      operador: (currentUser && currentUser.nome) || '',
+    });
   });
 
   atualizar();
@@ -10628,7 +10973,39 @@ function reabrirParaEdicao(pedidoId){
 }
 
 /* ================= CAIXA: ABERTURA, CONSULTA, FECHAMENTO ================= */
-function askAbrirCaixa(){
+function papelInicioSugerido(size){
+  if(!printerReal || printerReal.connected === false) return '';
+  const v = size === '15x20' ? printerReal.paper15x20 : printerReal.paper10x15;
+  if(!leituraPapelValida(v) || +v <= 0) return '';
+  return String(Math.round(+v));
+}
+function lerLeiturasPapel(id10, id15){
+  const ler = (id)=>{
+    const el = document.getElementById(id);
+    if(!el || String(el.value).trim() === '') return null;
+    const n = Number(el.value);
+    if(!Number.isFinite(n) || !Number.isInteger(n) || n < 0) return NaN;
+    return n;
+  };
+  const a = ler(id10), b = ler(id15);
+  if(Number.isNaN(a) || Number.isNaN(b)) return { error: 'Leitura de papel inválida' };
+  if(a === null && b === null) return { papel: null };
+  return { papel: { '10x15': a, '15x20': b } };
+}
+let _registrandoPapelInicio = false;
+async function registrarPapelInicioCaixa(){
+  if(!caixaAberto || _registrandoPapelInicio) return;
+  const atual = caixaReal && caixaReal.papelInicio;
+  const completo = atual && ['10x15', '15x20'].every(s => Number.isInteger(Number(atual[s])) && Number(atual[s]) > 0);
+  if(completo) return;
+  _registrandoPapelInicio = true;
+  try{
+    const res = await natalApi.caixaPapelInicio();
+    if(res && res.success && res.caixa) caixaReal = res.caixa;
+  }catch{ }
+  finally{ _registrandoPapelInicio = false; }
+}
+async function askAbrirCaixa(){
   const numeroProximoCaixa = caixasHoje.length + 1;
   const jaTeveCaixaHoje = caixasHoje.length > 0;
   const temSaldoHerdado = saldoEsperadoProximoCaixa !== null;
@@ -10674,7 +11051,10 @@ function askAbrirCaixa(){
     const fundo = parseFloat(document.getElementById('ac-fundo').value)||0;
     const diferencaAbertura = temSaldoHerdado ? +(fundo - saldoEsperadoProximoCaixa).toFixed(2) : 0;
     /* PRODUÇÃO: abre o caixa no sidecar antes de registrar na tela */
-    const res = await natalApi.caixaAbrir({ operador: (currentUser && currentUser.nome) || 'Operador', valorInicial: fundo });
+    const res = await natalApi.caixaAbrir({
+      operador: (currentUser && currentUser.nome) || 'Operador',
+      valorInicial: fundo,
+    });
     if(!res || !res.success){
       toast('⚠ ' + ((res && res.error) || 'Não foi possível abrir o caixa'));
       return;
@@ -10689,6 +11069,7 @@ function askAbrirCaixa(){
     saldoEsperadoProximoCaixa = null; // consumido — só vale pro caixa que acabou de abrir
     renderCaixaChip();
     toast(diferencaAbertura!==0 ? `Caixa nº ${numero} aberto com ${fmt(fundo)} — diferença de ${fmt(diferencaAbertura)} em relação ao esperado, registrada` : `Caixa nº ${numero} aberto com fundo de troco de ${fmt(fundo)}`);
+    void registrarPapelInicioCaixa();
     askEquipeDoDia(numero);
   });
 }
@@ -10850,7 +11231,7 @@ document.getElementById('cx-consultar').addEventListener('click', (e)=>{
   e.stopPropagation();
   document.getElementById('caixa-menu').style.display='none';
   const desde = caixaAbertoEm ? +caixaAbertoEm : 0;
-  const pagosCaixa = pedidosRealizados.filter(p=>p.status==='pago' && (!p.horario || +p.horario >= desde));
+  const pagosCaixa = pedidosRealizados.filter(p=>pedidoPertenceCaixaAtual(p, caixaReal, desde));
   // Total do caixa por forma (todas as vendas desde a abertura). O fundo de
   // troco NÃO entra aqui: ele pertence só à gaveta e é somado no saldo em
   // dinheiro mais abaixo, como antes.
@@ -11356,16 +11737,42 @@ function conciliacaoReceiptTexto(f){
     if(f.corrigidoPor) out.push(centro('por ' + f.corrigidoPor));
     if(f.motivoCorrecao) out.push('Motivo: ' + f.motivoCorrecao);
   }
+  const pr = f.papelRelatorio;
+  if(pr){
+    const n = (v) => Number.isFinite(+v) ? String(Math.round(+v)) : '—';
+    const par = (a,b) => n(a) + '/' + n(b);
+    out.push(sep);
+    out.push(centro('PAPEL DO DIA'));
+    out.push(linha('Vendas 10/15', par(pr.vendas && pr.vendas.fotos10x15, pr.vendas && pr.vendas.fotos15x20)));
+    out.push(linha('Reimpressoes 10/15', par(pr.reimpressoes && pr.reimpressoes.fotos10x15, pr.reimpressoes && pr.reimpressoes.fotos15x20)));
+    out.push(linha('Testes 10/15', par(pr.testes && pr.testes.fotos10x15, pr.testes && pr.testes.fotos15x20)));
+    if(pr.inicio && (pr.inicio['10x15'] != null || pr.inicio['15x20'] != null)){
+      out.push(linha('Inicio 10/15', par(pr.inicio['10x15'], pr.inicio['15x20'])));
+    }
+    if(pr.fim && (pr.fim['10x15'] != null || pr.fim['15x20'] != null)){
+      out.push(linha('Fim 10/15', par(pr.fim['10x15'], pr.fim['15x20'])));
+    }
+    if(pr.divergencia && (pr.divergencia['10x15'] != null || pr.divergencia['15x20'] != null)){
+      const sinal = (v) => v == null ? '—' : ((v > 0 ? '+' : '') + v);
+      out.push(linha('Divergencia 10/15', sinal(pr.divergencia['10x15']) + '/' + sinal(pr.divergencia['15x20'])));
+    }
+  }
   out.push(sep);
   out.push(centro('Fechado por ' + (f.fechadoPor||'—')));
   out.push('');
   return out.join('\n');
 }
 
-function abrirTelaFechamento(){
-  // escopo = pedidos pagos DESTE caixa (janela desde a abertura), não o histórico todo
+async function abrirTelaFechamento(){
+  const diaDoCaixa = caixaAbertoEm ? isoDataLocal(new Date(caixaAbertoEm)) : undefined;
+  const [_, resumoPapelDia] = await Promise.all([
+    carregarTestesStatus().catch(()=>null),
+    natalApi.papelResumo(diaDoCaixa).catch(()=>null),
+  ]);
+  let pendentesTestes = (testesFotografoStatus.itens || []).filter(t => t.status === 'IMPRESSO' && !t.baixadoEm);
+  // escopo = pedidos pagos DESTE caixa (caixaId; legado sem caixaId usa a janela)
   const desde = caixaAbertoEm ? +caixaAbertoEm : 0;
-  const pagos = pedidosRealizados.filter(p=>p.status==='pago' && (!p.horario || +p.horario >= desde));
+  const pagos = pedidosRealizados.filter(p=>pedidoPertenceCaixaAtual(p, caixaReal, desde));
   // Vendas do SISTEMA por forma (sem o fundo de troco): o fundo aparece
   // separado e o operador digita somente o que realmente entrou no caixa.
   // Crédito fica em uma única linha (à vista + parcelado), sem 2x/3x separados.
@@ -11475,6 +11882,30 @@ function abrirTelaFechamento(){
     </div>
   `).join('');
 
+  const rs = (resumoPapelDia && resumoPapelDia.success) ? resumoPapelDia : null;
+  const num = (v) => Number.isFinite(+v) ? String(Math.round(+v)) : '—';
+  const statusPapel = rs ? ({ OK: 'OK', DIVERGENTE: 'DIVERGENTE', SEM_LEITURA: 'sem leitura', PARCIAL: 'leitura parcial' }[rs.status] || rs.status) : '';
+  const papelResumoDiaHtml = rs ? `
+    <div style="border:1px solid var(--navy-line);background:var(--navy-850);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:12px;color:var(--slate-300);">
+      <div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:6px;">
+        <b style="color:var(--cream-100);">Papel do dia</b>
+        <span style="color:${rs.status==='DIVERGENTE'?'var(--red-400)':rs.status==='OK'?'var(--green-500)':'var(--slate-400)'};font-weight:700;">${escHtml(statusPapel)}</span>
+      </div>
+      <div>Vendas: 10x15 ${num(rs.vendas && rs.vendas.fotos10x15)} · 15x20 ${num(rs.vendas && rs.vendas.fotos15x20)} · ribbon ${num(rs.vendas && rs.vendas.unidadesRibbon)}</div>
+      <div>Reimpressões: 10x15 ${num(rs.reimpressoes && rs.reimpressoes.fotos10x15)} · 15x20 ${num(rs.reimpressoes && rs.reimpressoes.fotos15x20)}</div>
+      <div>Testes: 10x15 ${num(rs.testes && rs.testes.fotos10x15)} · 15x20 ${num(rs.testes && rs.testes.fotos15x20)}${rs.testes && rs.testes.pendentes ? ` · <span style="color:var(--red-400);">${rs.testes.pendentes} sem baixa</span>` : ''}</div>
+      ${(rs.inicio && (rs.inicio['10x15']!=null || rs.inicio['15x20']!=null)) ? `<div>Leituras: início 10x15 ${num(rs.inicio['10x15'])} · 15x20 ${num(rs.inicio['15x20'])}</div>` : ''}
+      ${(rs.fim && (rs.fim['10x15']!=null || rs.fim['15x20']!=null)) ? `<div>Fim: 10x15 ${num(rs.fim['10x15'])} · 15x20 ${num(rs.fim['15x20'])}</div>` : ''}
+      ${rs.divergencia && (rs.divergencia['10x15']!=null || rs.divergencia['15x20']!=null) ? `<div style="color:${rs.status==='DIVERGENTE'?'var(--red-400)':'var(--slate-300)'};">Diferença: 10x15 ${rs.divergencia['10x15']==null?'—':(rs.divergencia['10x15']>0?'+':'')+rs.divergencia['10x15']} · 15x20 ${rs.divergencia['15x20']==null?'—':(rs.divergencia['15x20']>0?'+':'')+rs.divergencia['15x20']}</div>` : ''}
+    </div>` : '';
+  const pendentesTestesHtml = pendentesTestes.length ? `
+    <div id="fc-testes-pendentes" style="border:1px solid rgba(193,102,107,.45);background:rgba(193,102,107,.1);border-radius:10px;padding:12px 14px;margin-bottom:16px;">
+      <b style="font-size:12px;color:var(--red-400);">${pendentesTestes.length} teste(s) impresso(s) sem baixa</b>
+      <p style="font-size:11px;color:var(--slate-300);margin:6px 0 8px;">Todo teste leva a marca "TESTE - NAO ENTREGAR" e precisa ser descartado antes de fechar o caixa.</p>
+      <div style="font-size:11.5px;color:var(--slate-300);margin-bottom:10px;">${pendentesTestes.map(t => `Sessão #${escHtml(t.sessaoSenha || '—')} · ${escHtml(t.opcao || 'Teste')} · ${escHtml(t.id)}`).join('<br>')}</div>
+      <button type="button" class="btn-secondary" id="fc-baixar-testes" style="width:100%;">Dar baixa / descartar testes</button>
+    </div>` : '';
+
   openModal(`
     <div class="modal-head"><div><div class="modal-step-label">Fechamento de caixa</div><h3>Conciliação por forma de pagamento</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
     <div class="pay-row" style="margin-bottom:6px;padding:0 2px;">
@@ -11485,6 +11916,8 @@ function abrirTelaFechamento(){
     </div>
     <div class="pay-rows" id="fc-linhas" style="margin-bottom:16px;">${linhasHtml}</div>
     ${canceladosHtml}
+    ${papelResumoDiaHtml}
+    ${pendentesTestesHtml}
 
     <div style="border-top:1px solid var(--navy-line);padding-top:14px;margin-bottom:16px;">
       <span style="font-size:11px;color:var(--slate-400);display:block;margin-bottom:4px;">Valor enviado no malote (múltiplos de 50 — apenas registro, não entra na diferença do caixa)</span>
@@ -11499,6 +11932,20 @@ function abrirTelaFechamento(){
           <input type="number" id="fc-saldo-restante-input" step="0.01" value="${fundoTrocoCaixa.toFixed(2)}" autocomplete="off"
             style="width:110px;background:transparent;border:1px solid currentColor;color:inherit;border-radius:6px;padding:6px 8px;font-size:14px;font-weight:800;text-align:right;">
         </span>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--navy-line);padding-top:14px;margin-bottom:16px;">
+      <span style="font-size:11px;color:var(--slate-400);display:block;margin-bottom:8px;">Leitura do papel no fim do turno <span style="color:var(--slate-500);">(opcional — fecha o relatório de papel)</span></span>
+      <div style="display:flex;gap:10px;">
+        <label style="flex:1;font-size:11px;color:var(--slate-400);">10x15
+          <input type="number" min="0" step="1" id="fc-papel-10x15" value="${papelInicioSugerido('10x15')}" placeholder="—"
+            style="width:100%;margin-top:4px;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:9px 10px;font-size:14px;">
+        </label>
+        <label style="flex:1;font-size:11px;color:var(--slate-400);">15x20
+          <input type="number" min="0" step="1" id="fc-papel-15x20" value="${papelInicioSugerido('15x20')}" placeholder="—"
+            style="width:100%;margin-top:4px;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:9px 10px;font-size:14px;">
+        </label>
       </div>
     </div>
 
@@ -11524,7 +11971,7 @@ function abrirTelaFechamento(){
   const fcConfirmar = document.getElementById('fc-confirmar');
   const atualizarPreenchimento = ()=>{
     const completo = fcInputs.every(inp=>String(inp.value).trim() !== '');
-    fcConfirmar.disabled = !completo;
+    fcConfirmar.disabled = !completo || pendentesTestes.length > 0;
     return completo;
   };
   const atualizarDiferencas = ()=>{
@@ -11572,7 +12019,33 @@ function abrirTelaFechamento(){
   atualizarPreenchimento();
   atualizarDiferencas();
 
+  const btnBaixarTestes = document.getElementById('fc-baixar-testes');
+  if(btnBaixarTestes) btnBaixarTestes.addEventListener('click', async ()=>{
+    if(!pendentesTestes.length) return;
+    btnBaixarTestes.disabled = true;
+    btnBaixarTestes.textContent = 'Dando baixa...';
+    const r = await natalApi.baixarTestes(
+      pendentesTestes.map(t => t.id),
+      (currentUser && currentUser.nome) || 'Operador',
+    );
+    if(!r || !r.success){
+      toast('⚠ ' + ((r && r.error) || 'Não foi possível dar baixa nos testes'));
+      btnBaixarTestes.disabled = false;
+      btnBaixarTestes.textContent = 'Dar baixa / descartar testes';
+      return;
+    }
+    pendentesTestes = [];
+    const box = document.getElementById('fc-testes-pendentes');
+    if(box) box.remove();
+    atualizarPreenchimento();
+    toast('Testes baixados — descarte as cópias marcadas como TESTE');
+  });
+
   document.getElementById('fc-confirmar').addEventListener('click', ()=>{
+    if(pendentesTestes.length){
+      toast('⚠ Dê baixa nos testes de impressão antes de fechar o caixa');
+      return;
+    }
     if(!atualizarPreenchimento()){
       toast('⚠ Informe as 4 formas de pagamento — digite 0 quando não houve movimento');
       return;
@@ -11605,6 +12078,8 @@ function abrirTelaFechamento(){
       const saldoRestante = saldoInput.value.trim() === ''
         ? +(fundoTrocoCaixa + dinheiroRecebido - valorEnvelope).toFixed(2)
         : +(parseFloat(saldoInput.value)||0).toFixed(2);
+      const leituraFim = lerLeiturasPapel('fc-papel-10x15', 'fc-papel-15x20');
+      if(leituraFim.error){ toast('⚠ ' + leituraFim.error); return; }
       const fechado = await natalApi.caixaFechar({
         meios,
         observacoes: 'Fechamento pelo PDV',
@@ -11613,14 +12088,20 @@ function abrirTelaFechamento(){
         fechadoPor: (currentUser && currentUser.nome) || '—',
         justificativa,
         autorizadoPor,
+        papelFim: leituraFim.papel,
       });
       if(!fechado || !fechado.success){
         toast('⚠ ' + ((fechado && fechado.error) || 'Não foi possível fechar o caixa'));
+        if(fechado && fechado.codigo === 'TESTES_PENDENTES') await carregarTestesStatus();
         abrirTelaFechamento();
         return;
       }
       caixaReal = fechado.caixa || null;
       enfileirarCaixaPortal(caixaReal);
+      try{
+        const rel = (fechado && fechado.papelRelatorio) || (caixaReal && caixaReal.papelRelatorio) || null;
+        if(rel && rel.data) await enfileirarPortal('vendas', rel.data, montarSnapshotDia(rel.data, rel));
+      }catch(e){ console.warn('[sync] não consegui atualizar o snapshot com o papel do dia', e); }
 
       const caixaEntry = caixasHoje.find(c=>c.aberto);
       const numeroFechado = caixaEntry ? caixaEntry.numero : caixasHoje.length;
@@ -11641,6 +12122,9 @@ function abrirTelaFechamento(){
         devolucoes: devolucoesCaixa,
         justificativa,
         autorizadoPor,
+        papelRelatorio: (fechado && fechado.papelRelatorio) || (fechado.caixa && fechado.caixa.papelRelatorio) || null,
+        papelInicio: (caixaReal && caixaReal.papelInicio) || null,
+        papelFim: (caixaReal && caixaReal.papelFim) || null,
       };
       conciliacoesCaixa.push(ultimoFechamentoCaixa);
       saldoEsperadoProximoCaixa = saldoRestante; // trava o valor de abertura do próximo caixa
@@ -11660,6 +12144,30 @@ function abrirTelaFechamento(){
     }
     executarFechamento('', '');
   });
+}
+
+function papelRelatorioHtml(pr){
+  if(!pr) return '';
+  const n = (v) => Number.isFinite(+v) ? String(Math.round(+v)) : '—';
+  const cor = pr.status === 'DIVERGENTE' ? 'var(--red-400)'
+    : pr.status === 'OK' ? 'var(--green-500)' : 'var(--slate-400)';
+  const status = { OK: 'OK', DIVERGENTE: 'DIVERGENTE', SEM_LEITURA: 'sem leitura', PARCIAL: 'leitura parcial' }[pr.status] || pr.status || '';
+  const motivos = (pr.motivosReimpressao || []).slice(0, 3).map(m =>
+    `<div style="font-size:11px;color:var(--slate-400);">• ${escHtml(m.motivo)} — ${m.vezes}x (${n(m.fotos10x15)} de 10x15 / ${n(m.fotos15x20)} de 15x20)</div>`
+  ).join('');
+  return `
+    <div style="border:1px solid var(--navy-line);background:var(--navy-850);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:var(--slate-300);">
+      <div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:6px;">
+        <b style="color:var(--cream-100);">Relatório de papel do dia</b>
+        <span style="color:${cor};font-weight:700;">${escHtml(status)}</span>
+      </div>
+      <div>Vendas impressas: 10x15 ${n(pr.vendas && pr.vendas.fotos10x15)} · 15x20 ${n(pr.vendas && pr.vendas.fotos15x20)} · ribbon ${n(pr.vendas && pr.vendas.unidadesRibbon)}</div>
+      <div>Reimpressões: 10x15 ${n(pr.reimpressoes && pr.reimpressoes.fotos10x15)} · 15x20 ${n(pr.reimpressoes && pr.reimpressoes.fotos15x20)}</div>
+      <div>Testes: 10x15 ${n(pr.testes && pr.testes.fotos10x15)} · 15x20 ${n(pr.testes && pr.testes.fotos15x20)}${pr.testes && pr.testes.pendentes ? ` · ${pr.testes.pendentes} pendente(s)` : ''}</div>
+      <div style="margin-top:4px;">Leituras: início 10x15 ${n(pr.inicio && pr.inicio['10x15'])} · 15x20 ${n(pr.inicio && pr.inicio['15x20'])} — fim 10x15 ${n(pr.fim && pr.fim['10x15'])} · 15x20 ${n(pr.fim && pr.fim['15x20'])}</div>
+      ${pr.divergencia ? `<div style="color:${pr.status==='DIVERGENTE'?'var(--red-400)':'var(--slate-300)'};">Diferença de papel: 10x15 ${pr.divergencia['10x15']==null?'—':(pr.divergencia['10x15']>0?'+':'')+pr.divergencia['10x15']} · 15x20 ${pr.divergencia['15x20']==null?'—':(pr.divergencia['15x20']>0?'+':'')+pr.divergencia['15x20']}</div>` : ''}
+      ${motivos ? `<div style="border-top:1px solid var(--navy-line);margin-top:8px;padding-top:8px;">${motivos}</div>` : ''}
+    </div>`;
 }
 
 function mostrarResultadoFechamento(fechamento, sairAposFechar = false){
@@ -11686,6 +12194,7 @@ function mostrarResultadoFechamento(fechamento, sairAposFechar = false){
       ${fechamento.sangrias > 0 ? `<div class="rc-line"><span>Sangrias já retiradas</span><span style="color:var(--red-400);">− ${fmt(fechamento.sangrias)}</span></div>` : ''}
       ${fechamento.devolucoes > 0 ? `<div class="rc-line"><span>Devoluções de vendas deste caixa</span><span style="color:var(--slate-400);">${fmt(fechamento.devolucoes)} (já fora das vendas)</span></div>` : ''}
     </div>
+    ${papelRelatorioHtml(fechamento.papelRelatorio)}
     ${fechamento.justificativa ? `<div style="background:rgba(193,102,107,.12);border:1px solid rgba(193,102,107,.3);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--red-400);"><b>Diferença autorizada:</b> ${escHtml(fechamento.justificativa)}${fechamento.autorizadoPor ? ` · por ${escHtml(fechamento.autorizadoPor)}` : ''}</div>` : ''}
     <p class="modal-sub">Fechado por ${fechamento.fechadoPor||'—'} · registrado pra consulta posterior.</p>
     ${mostrarBotaoAbrirNovo ? `<button class="btn-primary" id="fc-abrir-novo-agora" style="background:linear-gradient(135deg,var(--gold-500),#c78f38);">➕ Abrir novo caixa agora</button>` : ''}
@@ -11837,7 +12346,7 @@ async function executarTesteFotografo(sessao, fotoSeed, t, btn){
     const blob = await composePrintImage({
       key: modelo, url: natalApi.fotoUrl(sessId, 'originais', fileName),
       scale: 100, diffx: 0, diffy: 0, angle: 0, orientation: 'paisagem',
-      pdv: true, logo: false,
+      pdv: true, logo: false, teste: true,
     });
     const uploadName = 'teste__' + teste.id + '.jpg';
     const up = await natalApi.uploadImpressaoTeste(teste.id, uploadName, blob);

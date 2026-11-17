@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const net = require('net');
 const http = require('http');
+const https = require('https');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 
@@ -868,6 +869,12 @@ ipcMain.handle('natal:updateApp', async (event) => {
       return { success: true, upToDate: true };
     }
     updateVersion = result.updateInfo.version;
+    const bloqueada = versaoBloqueada();
+    if (bloqueada && updateVersion === bloqueada) {
+      isUpdating = false;
+      event.sender.send('natal:updateProgress', 'Versao v' + bloqueada + ' bloqueada apos rollback');
+      return { success: false, error: 'A versao v' + bloqueada + ' foi bloqueada apos um rollback. Publique uma versao mais nova.' };
+    }
     event.sender.send('natal:updateProgress', `Baixando v${updateVersion}...`);
     await baixarAtualizacao();
     updateReady = true;
@@ -884,6 +891,11 @@ ipcMain.handle('natal:updateApp', async (event) => {
 autoUpdater.on('update-available', (info) => {
   isUpdating = false;
   updateVersion = (info && info.version) || updateVersion;
+  const bloqueada = versaoBloqueada();
+  if (bloqueada && updateVersion === bloqueada) {
+    console.warn('[AutoUpdate] v' + bloqueada + ' bloqueada apos rollback; ignorando');
+    return;
+  }
   enviarUpdate('natal:updateAvailable', { version: updateVersion, downloading: true });
   /* baixa em segundo plano: quando terminar, avisa o renderer em qualquer tela */
   baixarAtualizacao().catch((e) => {
@@ -920,6 +932,295 @@ async function performAutoUpdate(force = false) {
   });
 }
 
+// ─── 6b. Rollback (guardar instalador de uma versao anterior) ─
+// Mantemos uma copia local do instalador da versao atual e da anterior. Se uma
+// atualizacao nova quebrar o PDV, o operador volta em segundos pelo
+// Config > Sistema ou por um atalho de emergencia na Area de Trabalho, sem
+// depender do electron-updater nem da versao nova estar funcionando.
+const ROLLBACK_DIR = path.join('C:', 'ProgramData', 'MaxxNatal', 'installers');
+const ROLLBACK_KEEP = 3;
+const ROLLBACK_DL_TIMEOUT_MS = 180000;
+const GH_RELEASES_URL = 'https://api.github.com/repos/Sploit23/Kiosk_Maxx/releases?per_page=40';
+const GH_DOWNLOAD_BASE = 'https://github.com/Sploit23/Kiosk_Maxx/releases/download';
+const ROLLBACK_UA = 'Maxx-Foto-Vendas-Rollback';
+
+let _rollbackBaixando = false;
+
+function rollbackDirSeguro() {
+  try {
+    fs.mkdirSync(ROLLBACK_DIR, { recursive: true });
+    return ROLLBACK_DIR;
+  } catch {
+    const alt = path.join(app.getPath('userData'), 'installers');
+    try { fs.mkdirSync(alt, { recursive: true }); } catch {}
+    return alt;
+  }
+}
+
+function cmpVersao(a, b) {
+  const pa = String(a || '').replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b || '').replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+  const n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+function nomeInstalador(versao) {
+  return `Maxx-Foto-Vendas-Setup-${String(versao).replace(/^v/i, '')}.exe`;
+}
+
+function arquivoEstadoRollback() {
+  return path.join(rollbackDirSeguro(), 'state.json');
+}
+
+function lerEstadoRollback() {
+  try { return JSON.parse(fs.readFileSync(arquivoEstadoRollback(), 'utf-8')) || {}; } catch { return {}; }
+}
+
+function salvarEstadoRollback(patch) {
+  try {
+    const atual = lerEstadoRollback();
+    const novo = { ...atual, ...(patch || {}) };
+    fs.writeFileSync(arquivoEstadoRollback(), JSON.stringify(novo, null, 2), 'utf-8');
+    return novo;
+  } catch (e) {
+    console.warn('[Rollback] nao consegui salvar estado: ' + ((e && e.message) || e));
+    return lerEstadoRollback();
+  }
+}
+
+function versaoBloqueada() {
+  return String(lerEstadoRollback().blockedVersion || '').replace(/^v/i, '');
+}
+
+function listarRollback() {
+  const dir = rollbackDirSeguro();
+  const atual = app.getVersion();
+  const itens = [];
+  try {
+    for (const nome of fs.readdirSync(dir)) {
+      const m = nome.match(/^Maxx-Foto-Vendas-Setup-(.+)\.exe$/i);
+      if (!m) continue;
+      const versao = m[1].replace(/^v/i, '');
+      const completo = path.join(dir, nome);
+      let st = null;
+      try { st = fs.statSync(completo); } catch { continue; }
+      if (!st.isFile() || st.size < 1024 * 1024) continue;
+      itens.push({
+        version: versao,
+        path: completo,
+        size: st.size,
+        current: cmpVersao(versao, atual) === 0,
+        previous: cmpVersao(versao, atual) < 0,
+      });
+    }
+  } catch {}
+  itens.sort((a, b) => cmpVersao(b.version, a.version));
+  return { current: atual, dir, installers: itens };
+}
+
+function podarRollback() {
+  try {
+    const atual = app.getVersion();
+    const antigos = listarRollback().installers
+      .filter(i => cmpVersao(i.version, atual) < 0)
+      .slice(ROLLBACK_KEEP);
+    for (const item of antigos) {
+      try { fs.unlinkSync(item.path); } catch {}
+    }
+  } catch {}
+}
+
+function httpGetTexto(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error('redirecionamentos demais'));
+    const req = https.get(url, { headers: { 'User-Agent': ROLLBACK_UA, Accept: 'application/vnd.github+json' } }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume();
+        const next = new URL(res.headers.location, url).toString();
+        return resolve(httpGetTexto(next, redirects + 1));
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error('HTTP ' + res.statusCode));
+      }
+      let dados = '';
+      res.setEncoding('utf8');
+      res.on('data', c => { if (dados.length < 4 * 1024 * 1024) dados += c; });
+      res.on('end', () => resolve(dados));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => req.destroy(new Error('timeout')));
+  });
+}
+
+async function versaoAnteriorRemota() {
+  const bruto = await httpGetTexto(GH_RELEASES_URL);
+  const dados = JSON.parse(bruto);
+  const atual = app.getVersion();
+  const candidatas = (Array.isArray(dados) ? dados : [])
+    .filter(r => r && !r.draft && !r.prerelease && r.tag_name)
+    .map(r => ({ version: String(r.tag_name).replace(/^v/i, ''), assets: r.assets || [] }))
+    .filter(x => cmpVersao(x.version, atual) < 0)
+    .filter(x => x.assets.some(a => a && a.name === nomeInstalador(x.version)))
+    .sort((a, b) => cmpVersao(b.version, a.version));
+  return candidatas.length ? candidatas[0].version : '';
+}
+
+function baixarInstalador(versao) {
+  const v = String(versao).replace(/^v/i, '');
+  const dir = rollbackDirSeguro();
+  const destino = path.join(dir, nomeInstalador(v));
+  if (fs.existsSync(destino)) {
+    try { if (fs.statSync(destino).size > 1024 * 1024) return destino; } catch {}
+  }
+  const url = `${GH_DOWNLOAD_BASE}/v${v}/${nomeInstalador(v)}`;
+  const parcial = destino + '.part';
+  return new Promise((resolve, reject) => {
+    const requisitar = (alvo, redirects = 0) => {
+      if (redirects > 5) return reject(new Error('redirecionamentos demais'));
+      const req = https.get(alvo, { headers: { 'User-Agent': ROLLBACK_UA } }, (res) => {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+          res.resume();
+          return requisitar(new URL(res.headers.location, alvo).toString(), redirects + 1);
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error('HTTP ' + res.statusCode));
+        }
+        const out = fs.createWriteStream(parcial);
+        let erro = null;
+        out.on('error', (e) => { erro = e; });
+        res.on('error', (e) => { erro = e; });
+        res.pipe(out);
+        out.on('finish', () => {
+          out.close(() => {
+            if (erro) { try { fs.unlinkSync(parcial); } catch {} return reject(erro); }
+            try {
+              const st = fs.statSync(parcial);
+              if (st.size < 1024 * 1024) throw new Error('arquivo baixado invalido');
+              const fd = fs.openSync(parcial, 'r');
+              const buf = Buffer.alloc(2);
+              fs.readSync(fd, buf, 0, 2, 0);
+              fs.closeSync(fd);
+              if (buf[0] !== 0x4d || buf[1] !== 0x5a) throw new Error('download nao e um instalador Windows');
+              fs.renameSync(parcial, destino);
+              resolve(destino);
+            } catch (e) {
+              try { fs.unlinkSync(parcial); } catch {}
+              reject(e);
+            }
+          });
+        });
+      });
+      req.on('error', reject);
+      req.setTimeout(ROLLBACK_DL_TIMEOUT_MS, () => req.destroy(new Error('timeout')));
+    };
+    requisitar(url);
+  });
+}
+
+async function garantirRollbackCache() {
+  if (!app.isPackaged || _rollbackBaixando) return listarRollback();
+  _rollbackBaixando = true;
+  try {
+    const atual = app.getVersion();
+    const existentes = listarRollback().installers;
+    const temAnterior = existentes.some(i => cmpVersao(i.version, atual) < 0);
+    /* prioridade: a versao anterior (o rollback imediato). Se nao houver
+       nenhuma, pergunta ao GitHub qual e a ultima release publicada abaixo da
+       versao atual e baixa o instalador dela. */
+    if (!temAnterior) {
+      const anterior = await versaoAnteriorRemota().catch((e) => {
+        console.warn('[Rollback] nao consegui listar releases: ' + ((e && e.message) || e));
+        return '';
+      });
+      if (anterior) {
+        try { await baixarInstalador(anterior); }
+        catch (e) { console.warn('[Rollback] falha ao baixar v' + anterior + ': ' + ((e && e.message) || e)); }
+      }
+    }
+    /* guarda tambem o instalador da versao atual, para que a proxima
+       atualizacao ja tenha de onde voltar. */
+    if (!fs.existsSync(path.join(rollbackDirSeguro(), nomeInstalador(atual)))) {
+      try { await baixarInstalador(atual); }
+      catch (e) { console.warn('[Rollback] falha ao baixar a versao atual: ' + ((e && e.message) || e)); }
+    }
+    podarRollback();
+  } finally {
+    _rollbackBaixando = false;
+  }
+  return listarRollback();
+}
+
+function descreverRollback() {
+  return {
+    ...listarRollback(),
+    blockedVersion: versaoBloqueada(),
+    downloading: _rollbackBaixando,
+  };
+}
+
+ipcMain.handle('natal:rollbackList', () => descreverRollback());
+
+ipcMain.handle('natal:rollbackSeed', async () => {
+  try {
+    await garantirRollbackCache();
+    const anterior = listarRollback().installers.some(i => i.previous);
+    return {
+      success: true,
+      savedPrevious: anterior,
+      ...descreverRollback(),
+    };
+  } catch (e) {
+    return { success: false, error: (e && e.message) || 'Falha ao salvar instalador', ...descreverRollback() };
+  }
+});
+
+ipcMain.handle('natal:rollbackInstall', async (_event, version) => {
+  try {
+    const v = String(version || '').replace(/^v/i, '').trim();
+    const alvo = listarRollback().installers.find(i => i.version === v);
+    if (!alvo) return { success: false, error: 'Instalador da versao v' + v + ' nao encontrado' };
+    if (cmpVersao(v, app.getVersion()) >= 0) {
+      return { success: false, error: 'So da para voltar para uma versao anterior a atual' };
+    }
+    salvarEstadoRollback({
+      blockedVersion: app.getVersion(),
+      rolledBackTo: v,
+      rolledBackAt: new Date().toISOString(),
+    });
+    const child = spawn(alvo.path, ['/S', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true });
+    child.unref();
+    setTimeout(() => { try { app.exit(0); } catch { app.quit(); } }, 1500);
+    return { success: true, installing: true, version: v };
+  } catch (e) {
+    return { success: false, error: (e && e.message) || 'Falha ao reinstalar versao anterior' };
+  }
+});
+
+ipcMain.handle('natal:rollbackUnblock', () => {
+  const estado = salvarEstadoRollback({ blockedVersion: '', unblockedAt: new Date().toISOString() });
+  return { success: true, blockedVersion: String(estado.blockedVersion || '') };
+});
+
+ipcMain.handle('natal:rollbackShortcut', async () => {
+  try {
+    const prev = listarRollback().installers.find(i => i.previous);
+    if (!prev) return { success: false, error: 'Salve um instalador de versao anterior primeiro' };
+    const destino = path.join(app.getPath('desktop'), `Restaurar Maxx Foto (v${prev.version}).cmd`);
+    const conteudo = `@echo off\r\n"${prev.path}" /S --force-run\r\nexit /b 0\r\n`;
+    fs.writeFileSync(destino, conteudo, 'utf-8');
+    return { success: true, path: destino, version: prev.version };
+  } catch (e) {
+    return { success: false, error: (e && e.message) || 'Falha ao criar atalho' };
+  }
+});
+
 // ─── 7. Lifecycle ───────────────────────────────────────────
 app.whenReady().then(() => {
   aplicarPastaDeFotosPadrao();
@@ -933,6 +1234,10 @@ app.whenReady().then(() => {
      curto; performAutoUpdate aplica o throttle de 1 min). */
   setTimeout(() => performAutoUpdate(true), 10000);
   setInterval(() => performAutoUpdate(true), UPDATE_CHECK_MS);
+
+  /* Guarda o instalador da versao atual/anterior para o rollback em segundos.
+     Roda em segundo plano, so no app empacotado, e nao bloqueia o boot. */
+  setTimeout(() => { garantirRollbackCache().catch(() => {}); }, 30000);
 
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

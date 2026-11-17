@@ -811,6 +811,30 @@ function catLojas($v): array
     return $out;
 }
 
+function garantirDigitaisCombo(array $lista, string $campoTipo, string $tipo): array
+{
+    $qtd = 0;
+    foreach ($lista as $item) {
+        if (($item['produtoId'] ?? '') === 'foto-digital') {
+            $qtd += max(1, (int) ($item['qtd'] ?? 1));
+        }
+    }
+    if ($qtd >= 2) return $lista;
+    foreach ($lista as &$item) {
+        if (($item['produtoId'] ?? '') !== 'foto-digital') continue;
+        $item['qtd'] = max(1, (int) ($item['qtd'] ?? 1)) + (2 - $qtd);
+        unset($item);
+        return $lista;
+    }
+    unset($item);
+    $lista[] = [
+        'produtoId' => 'foto-digital',
+        $campoTipo => $tipo,
+        'qtd' => 2 - $qtd,
+    ];
+    return $lista;
+}
+
 // Valida/normaliza o catálogo vindo do admin. Devolve null quando inválido
 // (sem 10x15/15x20, que são a base da impressão e dos combos).
 function sanitizarCatalogo($cat): ?array
@@ -921,9 +945,24 @@ function sanitizarCatalogo($cat): ?array
             }
             if (!$itens) continue;
         }
+        $nomeCombo = catTexto($it['nome'] ?? $id) ?: $id;
+        $duasDigitais = $id === 'encarte-2-foto-15x20-2-digitais'
+            || $id === 'combo-encarte-2x15x20-digital'
+            || preg_match('/2\s*(?:fotos?\s*)?digitais?/i', $nomeCombo);
+        if ($duasDigitais && isset($tipos['foto-digital'])) {
+            if ($regras) {
+                $regras['obrigatorios'] = garantirDigitaisCombo(
+                    $regras['obrigatorios'] ?? [],
+                    'tipo',
+                    $tipos['foto-digital']
+                );
+            } else {
+                $itens = garantirDigitaisCombo($itens, 'tipoProduto', $tipos['foto-digital']);
+            }
+        }
         $row = [
             'id' => $id,
-            'nome' => catTexto($it['nome'] ?? $id) ?: $id,
+            'nome' => $nomeCombo,
             'valorCombo' => catPreco($it['valorCombo'] ?? 0),
         ];
         if ($regras) {
@@ -1224,6 +1263,129 @@ function totaisPedidosDoCaixaPortal(array $pedidos, string $caixaId): array
         return abs((float) $valor) > 0.004;
     });
     return ['total' => round($total, 2), 'porMeio' => $porMeio];
+}
+
+function sanitizarLeituraPapel($raw): ?array
+{
+    if (!is_array($raw)) return null;
+    $out = ['10x15' => null, '15x20' => null];
+    $tem = false;
+    foreach (['10x15', '15x20'] as $size) {
+        $valor = $raw[$size] ?? null;
+        if ($valor === null || $valor === '' || !is_numeric($valor)) continue;
+        $n = (int) $valor;
+        if ($n < 0) continue;
+        $out[$size] = min($n, 1000000);
+        $tem = true;
+    }
+    return $tem ? $out : null;
+}
+
+function sanitizarPapelRelatorio($raw): ?array
+{
+    if (!is_array($raw)) return null;
+    $contador = function ($v): int {
+        return is_numeric($v) ? min(1000000, max(0, (int) $v)) : 0;
+    };
+    $sinal = function ($v): ?int {
+        if ($v === null || $v === '' || !is_numeric($v)) return null;
+        return max(-1000000, min(1000000, (int) $v));
+    };
+    $bloco = function ($x) use ($contador): array {
+        $x = is_array($x) ? $x : [];
+        return [
+            'fotos10x15' => $contador($x['fotos10x15'] ?? 0),
+            'fotos15x20' => $contador($x['fotos15x20'] ?? 0),
+            'unidadesRibbon' => $contador($x['unidadesRibbon'] ?? 0),
+            'eventos' => $contador($x['eventos'] ?? 0),
+        ];
+    };
+    $leitura = function ($x): array {
+        $s = sanitizarLeituraPapel($x);
+        return $s ?: ['10x15' => null, '15x20' => null];
+    };
+    $divergencia = ['10x15' => null, '15x20' => null];
+    $consumo = ['10x15' => null, '15x20' => null];
+    foreach (['10x15', '15x20'] as $size) {
+        $divergencia[$size] = $sinal(is_array($raw['divergencia'] ?? null) ? ($raw['divergencia'][$size] ?? null) : null);
+        $consumo[$size] = $sinal(is_array($raw['consumo'] ?? null) ? ($raw['consumo'][$size] ?? null) : null);
+    }
+    $status = trim((string) ($raw['status'] ?? ''));
+    if (!in_array($status, ['SEM_LEITURA', 'PARCIAL', 'OK', 'DIVERGENTE'], true)) $status = 'SEM_LEITURA';
+
+    $vendas = $bloco($raw['vendas'] ?? []);
+    $reimpressoes = $bloco($raw['reimpressoes'] ?? []);
+    $rawTestes = is_array($raw['testes'] ?? null) ? $raw['testes'] : [];
+    $testes = $bloco($rawTestes);
+    $testes['pendentes'] = $contador($rawTestes['pendentes'] ?? 0);
+    $testes['pendentesDetalhes'] = [];
+    $pendentes = is_array($rawTestes['pendentesDetalhes'] ?? null) ? $rawTestes['pendentesDetalhes'] : [];
+    foreach (array_slice($pendentes, 0, 20) as $t) {
+        if (!is_array($t)) continue;
+        $testes['pendentesDetalhes'][] = [
+            'id' => substr(trim((string) ($t['id'] ?? '')), 0, 80),
+            'sessaoSenha' => substr(trim((string) ($t['sessaoSenha'] ?? '')), 0, 40),
+            'opcao' => substr(trim((string) ($t['opcao'] ?? '')), 0, 80),
+            'operador' => substr(trim((string) ($t['operador'] ?? '')), 0, 80),
+            'impressoEm' => is_numeric($t['impressoEm'] ?? null) ? (int) $t['impressoEm'] : null,
+        ];
+    }
+
+    $vendidos = $bloco($raw['vendidos'] ?? []);
+    $vendidos['pedidos'] = $contador(is_array($raw['vendidos'] ?? null) ? ($raw['vendidos']['pedidos'] ?? 0) : 0);
+
+    $motivos = [];
+    foreach ((is_array($raw['motivosReimpressao'] ?? null) ? $raw['motivosReimpressao'] : []) as $m) {
+        if (!is_array($m)) continue;
+        $motivo = substr(trim((string) ($m['motivo'] ?? '')), 0, 120);
+        if ($motivo === '') continue;
+        $motivos[] = [
+            'motivo' => $motivo,
+            'vezes' => $contador($m['vezes'] ?? 0),
+            'fotos10x15' => $contador($m['fotos10x15'] ?? 0),
+            'fotos15x20' => $contador($m['fotos15x20'] ?? 0),
+        ];
+        if (count($motivos) >= 20) break;
+    }
+
+    $caixas = [];
+    foreach ((is_array($raw['caixas'] ?? null) ? $raw['caixas'] : []) as $c) {
+        if (!is_array($c)) continue;
+        $num = $c['numero'] ?? null;
+        $caixas[] = [
+            'id' => substr(trim((string) ($c['id'] ?? '')), 0, 80),
+            'numero' => is_numeric($num) ? (int) $num : null,
+            'abertoEm' => is_numeric($c['abertoEm'] ?? null) ? (int) $c['abertoEm'] : null,
+            'fechadoEm' => is_numeric($c['fechadoEm'] ?? null) ? (int) $c['fechadoEm'] : null,
+            'papelInicio' => sanitizarLeituraPapel($c['papelInicio'] ?? null),
+            'papelFim' => sanitizarLeituraPapel($c['papelFim'] ?? null),
+        ];
+        if (count($caixas) >= 20) break;
+    }
+
+    $diferenca = ['10x15' => null, '15x20' => null];
+    foreach (['10x15', '15x20'] as $size) {
+        $diferenca[$size] = $sinal(is_array($raw['diferencaVendas'] ?? null) ? ($raw['diferencaVendas'][$size] ?? null) : null);
+    }
+
+    return [
+        'data' => substr(trim((string) ($raw['data'] ?? '')), 0, 10),
+        'lojaId' => substr(trim((string) ($raw['lojaId'] ?? '')), 0, 80),
+        'status' => $status,
+        'inicio' => $leitura($raw['inicio'] ?? null),
+        'fim' => $leitura($raw['fim'] ?? null),
+        'consumo' => $consumo,
+        'divergencia' => $divergencia,
+        'esperado' => $bloco($raw['esperado'] ?? []),
+        'vendas' => $vendas,
+        'reimpressoes' => $reimpressoes,
+        'testes' => $testes,
+        'vendidos' => $vendidos,
+        'diferencaVendas' => $diferenca,
+        'motivosReimpressao' => $motivos,
+        'caixas' => $caixas,
+        'enviadoEm' => gmdate('c'),
+    ];
 }
 
 function reconciliarCaixaComPedidos(array $caixa, array $pedidos): array
@@ -1732,6 +1894,7 @@ try {
                 'caixa' => (isset($p['caixa']) && is_array($p['caixa']))
                     ? ['numero' => (string) ($p['caixa']['numero'] ?? ''), 'aberto' => !empty($p['caixa']['aberto'])]
                     : null,
+                'papelRelatorio' => sanitizarPapelRelatorio($p['papelRelatorio'] ?? null),
                 'enviadoEm' => gmdate('c'),
             ];
 
@@ -1944,6 +2107,9 @@ try {
                 'valorEnvelope' => round((float) ($c['valorEnvelope'] ?? 0), 2),
                 'saldoRestante' => round((float) ($c['saldoRestante'] ?? 0), 2),
                 'observacoes' => trim((string) ($c['observacoes'] ?? '')),
+                'papelInicio' => sanitizarLeituraPapel($c['papelInicio'] ?? null),
+                'papelFim' => sanitizarLeituraPapel($c['papelFim'] ?? null),
+                'papelRelatorio' => sanitizarPapelRelatorio($c['papelRelatorio'] ?? null),
                 'enviadoEm' => gmdate('c'),
             ];
 

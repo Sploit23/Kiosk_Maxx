@@ -192,8 +192,9 @@ via `getimagesizefromstring`, tamanho ≤ 5 MB e proporção 1864×1228 / 2422×
 (tolerância 0.02); arquivos em `data/overlays/`, metadados em
 `data/overlays.json`; atualiza `updatedAt` e apaga o arquivo anterior),
 Os relatórios `vendas.resumo`, `pedido.list`, `caixa.list`, `auditoria.list` e
-`despesas.list` omitem lojas com `teste:true` por padrão; `incluirTeste=1`
-(query ou body) as inclui. `vendas.resumo` (todos os snapshots de
+`despesas.list` omitem lojas com `teste:true` por padrão; a API ainda aceita
+`incluirTeste=1` (query ou body), mas o admin **não envia mais** esse parâmetro
+e a loja de teste não aparece em nenhuma tela de relatório/seletor. `vendas.resumo` (todos os snapshots de
 `data/vendas.json`, data desc → lojaId asc → `{ ok, vendas }`), `pedido.list`
 (pedidos consolidados de `data/pedidos.json`,
 filtros `lojaId`/`dataIni`/`dataFim`/`q`/`status` — `status` é case-insensitive,
@@ -339,8 +340,9 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 
 - **Loja:** `{ id, nome, pdv, ativo, teste?, kioskCode?, kioskCodes?, pareamentos?,
   pareamento?, pairingCode? }` — `teste: true` marca a loja de homologação: ela
-  continua `ativo:true` e pareada (login/push funcionam), mas fica **fora dos
-  relatórios por padrão** (`incluirTeste` liga a exibição). `pareamentos = [
+  continua `ativo:true` e pareada (login/push funcionam), mas fica **fora de
+  todos os relatórios e seletores do admin** (o parâmetro `incluirTeste` ainda
+  existe na API, mas o admin não usa). `pareamentos = [
   { pdvNome, machineId, kioskCode, emparelhadoEm }]` (1 máquina por item;
   `pareamento` é o legado = última máquina) gravado por
   `kiosk.pair`/`lojas.addKiosk`. `kioskCodes` é a
@@ -372,8 +374,16 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `sessoesCriadas`, `sessoesVendidas`, `taxacombo`, `ribbonRestante`,
   `papel10x15`/`papel15x20` (papel real da impressora, `null` se sem resposta),
   `meios {dinheiro,debito,credito,pix}`, `ultimaVenda`, `caixa {numero,aberto}`,
-  `enviadoEm`. Administrado pelas telas "Dashboard" (KPIs de vendas de hoje) e
-  "Vendas & BI" (`admin.html`, `vendas.resumo`); a tela "Estoque" usa o papel
+  `enviadoEm`. A tela "Dashboard" (`admin.html`) calcula os KPIs a partir dos
+  pedidos consolidados de `pedido.list` (mesma base da Auditoria), não dos
+  snapshots — assim vendas sincronizadas depois (loja offline) não desaparecem.
+  O Dashboard mostra apenas KPIs de vendas; cadastro de lojas/equipe fica nas
+  abas próprias. O admin abre no **modo claro** por padrão e tem alternância
+  para o escuro (opcional) persistida em `localStorage` (`nac_theme`), além de
+  layout mobile com menu lateral, filtros que quebram linha e tabelas com
+  rolagem horizontal. O login tem animação própria (cadeado flutuante e chave
+  girando) executada só no login manual; erro de senha treme o card.
+  "Vendas & BI" continua usando `vendas.resumo`; a tela "Estoque" usa o papel
   real (menor dos dois gaveteiros) como saldo efetivo, com o ribbon como fallback.
 - **Pedidos (`data/pedidos.json`):** array de pedidos consolidados por `pedido.id`
   (`pedido.push`), em ordem de chegada. Alimenta as telas "Financeiro"
@@ -389,8 +399,9 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `uso.id` (`auditoria.push`). Campos: `id`, `lojaId`, `lojaNome`, `pdvNome`,
   `machineId`, `data`, `criadoEm`, `titulo` (perda/desconto/cancelamento/
   cobrança de diferença), `operador`, `motivo`, `pedidoContexto`,
-  `pedidoGeradoId`, `enviadoEm`. A aba "Auditoria" foi removida do admin; os
-  dados continuam disponíveis via `auditoria.list`.
+  `pedidoGeradoId`, `enviadoEm`. A tela "Auditoria" (`admin.html`) lista os
+  pedidos de `pedido.list` (mais recentes primeiro, por `criadoEm`) e exporta
+  Excel; os usos de senha master continuam disponíveis via `auditoria.list`.
 - **Parâmetros (`data/parametros.json`):** parâmetros globais da gestão
   (`parametros.save`), defaults em `PARAMS_DEFAULT` do `api.php` — ver sessão
   "Admin (token)" acima.
@@ -665,10 +676,10 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   1KB ou com tail `.part/.tmp/.crdownload/.download` são ignorados (cópia pela
   metade). Troca de pasta na config vale na hora.
 - **Loja de teste (admin, `admin.html`)** — `lojas.save` aceita `teste` (checkbox
-  “Loja de teste” no modal); a lista de Lojas mostra o badge `TESTE`. O toggle
-  “Mostrar dados de teste” no topbar (desligado por padrão) manda
-  `incluirTeste=1` para os relatórios e libera a loja nos seletores de
-  Estoque/Despesas. O kiosk continua ativo/pareado; **não** use “Inativa”
+  “Loja de teste” no modal); a lista de Lojas mostra o badge `TESTE`. A loja de
+  teste fica **fora de todos os relatórios, KPIs e seletores** do admin
+  (`lojasVisiveis()` sempre filtra `teste:true`; o admin não envia
+  `incluirTeste`). O kiosk continua ativo/pareado; **não** use “Inativa”
   (quebra login/push).
 - **Financeiro (admin, `admin.html`)** — tela `#screen-financeiro` (`renderFinanc`):
   filtros por mês/intervalo e "Todo o período", cards (faturamento, taxas,
@@ -685,6 +696,17 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   itens `tamanho`/`extra` dos pedidos `pago`/`impresso` desde o `contadoEm`;
   alterar a contagem reinicia a data-base. O card de papel/ribbon continua
   abaixo, usando o snapshot do PDV.
+- **Produtos Vendidos (admin, `admin.html`)** — tela `#screen-produtos`
+  (`renderProdutosVendidos`) soma a quantidade vendida de **todas as lojas
+  reais** (a loja de teste fica sempre fora; ranking por `qtd`). Usa os pedidos
+  `pago`/`impresso` de `pedido.list`, a mesma base da Auditoria, e agrupa por
+  `produtoId`; o rótulo/grupo canônico vem de `catalogo.get` (fallback:
+  `label`/`tipo` do item). Ignora linhas `tipo:'ajuste'`, descontos e subtotais
+  negativos; combos contam os produtos constituintes, não a linha de desconto.
+  `qtd` é a quantidade do produto (não `unidades` de ribbon). O card principal é
+  a **receita líquida** (mesmo total do Dashboard/Auditoria); a tabela mostra a
+  receita bruta por produto e uma nota concilia bruto − descontos = líquido.
+  Períodos: Hoje, 7 dias, Este mês e Temporada (padrão).
 - **`vite.config.js`** — alias `@shared` → `./shared`, dedupe de React, porta
   de dev 5173.
 
@@ -710,6 +732,18 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   Feed do update = GitHub releases (`Sploit23/Kiosk_Maxx`, tag `v*` →
   release.yml). Nova versão só é oferecida se a tag > installed `app.getVersion()`.
 
+- **Rollback de versão (Config > Sistema):** o main mantém em
+  `C:\ProgramData\MaxxNatal\installers` uma cópia do instalador da versão anterior
+  (baixada do GitHub via API de releases) e o instalador da versão atual. A seção
+  "Voltar para uma versão anterior" lista as versões salvas com botão "Voltar
+  para vX": ela roda o NSIS salvo com `/S --force-run`, fecha o app e reinstala.
+  A versão de onde se voltou fica em `blockedVersion` (state.json ao lado dos
+  instaladores) e o auto-update a ignora até clicar em "Liberar". O botão "Criar
+  atalho de emergência" grava um `.cmd` na Área de Trabalho para restaurar a
+  versão anterior mesmo se o app não abrir. `garantirRollbackCache()` semeia isso
+  no boot (30s, só empacotado). IPC: `natal:rollbackList`, `natal:rollbackSeed`,
+  `natal:rollbackInstall`, `natal:rollbackUnblock`, `natal:rollbackShortcut`.
+
 ## Caveats conhecidos
 
 - **Atualização nunca é automática:** o PDV **só instala quando o operador
@@ -722,9 +756,9 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   em `maxxfoto.com.br` tem as mudanças novas (autorização por `machineId`,
   `lojaNome`).
 - **Loja de teste:** a loja `teste`/“Kiosk Teste” deve ficar `ativo:true` com
-  `teste:true`; `teste` só oculta dos relatórios, enquanto `ativo:false`
-  desautoriza o kiosk (`LOJA_INVALIDA`). O toggle “Mostrar dados de teste” é só
-  de visualização e não altera dados.
+  `teste:true`; `teste` a mantém fora de **todos** os relatórios/seletores do
+  admin, enquanto `ativo:false` desautoriza o kiosk (`LOJA_INVALIDA`). Não há
+  mais toggle “Mostrar dados de teste” no admin.
 - **Senhas em claro no código:** fallback de login em `vendas.html`
   (`FALLBACK_USERS`, senha `0000`) e `SENHA_MASTER_PDV = '1234'` (senha master
   de desconto/perda). O cache offline (TOFU) guarda só sha256.
