@@ -148,7 +148,8 @@ Autenticação pública por usuário; ações admin exigem header `X-Token` (ou 
 | `kiosk.seed` | `kioskCode`, `nome` (+ `pdvNome`, `machineId`, `machineName`, `lojaId`, `lojaNome`, `ip`) | Registra o PDV em `db.pendentes[kioskCode]` para o admin autorizar sem copiar código (não cria loja — senão o `kiosk.pair` casaria cedo demais) → `{ ok, pendente }`; loja já existente com o código (confere `kioskCodes`) → `{ ok, jaRegistrado }`; `DADOS_INCOMPLETOS`/`NOME_INVALIDO` |
 | `kiosk.pair` | `kioskCode` (+ `pdvNome`, `machineId`; legado `lojaId`+`pairingCode`) | Emparelha o kiosk com a loja. **Primeiro** resolve pelo registro permanente `devices[machineId]` (não depende mais do código local); senão resolve pelo código exibido NA TELA do PDV, grava `pareamento` + `devices`, e bloqueia máquina já usada por outra loja (`KIOSK_NAO_EMPARELELHADO`, `MAQUINA_JA_EMPARELHADA`) → `{ loja, pareamento }` |
 | `vendas.push` | `lojaId`, `machineId`, `data` (YYYY-MM-DD) + snapshot | PDV → portal: snapshot diário de vendas por loja. Exige `machineId` == `pareamento.machineId` da loja (`LOJA_NAO_EMPARELELHADA` 403, com delay anti-bruteforce). Upsert em `data/vendas.json` por loja+data: `lojaNome`, `pdvNome`, `totalVendido`, `pedidos`, `sessoesCriadas`, `sessoesVendidas`, `taxacombo`, `ribbonRestante`, `papel10x15`/`papel15x20` (papel REAL da impressora via checkPrinter, `null` se sem resposta), `meios {dinheiro,debito,credito,pix}`, `ultimaVenda`, `caixa {numero,aberto}`, `enviadoEm` |
-| `pedido.push` | `lojaId`, `machineId` + `pedido` (objeto) | PDV → portal: pedido completo, **idempotente pelo `pedido.id`** (reenvio só sobrescreve). Exige máquina pareada (mesmo bloqueio do `vendas.push`). Normaliza `itens [{tipo,produtoId,label,qtd,unidades,precoUnit,subtotal}]` — `precoUnit`/`subtotal` podem ser **negativos** (linha de ajuste de desconto/diferença) —, `pagamentos [{meio,forma,valor,parcelas}]`, `pagoEm` (hora real do pagamento), `sessoes`, `desconto`, `caixaId`, `origemPedidoId`, `guiaImpressa`, `unidadesTotal` (somada dos itens de tamanho). Alimenta Pedidos/Ranking/DRE. Persistido em `data/pedidos.json` |
+| `pedido.push` | `lojaId`, `machineId` + `pedido` (objeto) | PDV → portal: pedido completo, **idempotente pelo `pedido.id`** (reenvio só sobrescreve). Exige máquina pareada (mesmo bloqueio do `vendas.push`). Normaliza `itens [{tipo,produtoId,label,qtd,unidades,precoUnit,subtotal}]` — `precoUnit`/`subtotal` podem ser **negativos** (linha de ajuste de desconto/diferença) —, `pagamentos [{meio,forma,valor,parcelas}]`, `pagoEm` (hora real do pagamento), `sessoes`, `desconto`, `caixaId`, `origemPedidoId`, `guiaImpressa`, `unidadesTotal` (somada dos itens de tamanho). Também carrega `cancelamentoSolicitado`/`…Em`/`…Por`: cria `cancelamento:{status:'pendente',solicitadoEm,solicitadoPor,pdvNome}` (sem motivo), remove se o PDV desfizer; **preserva a decisão do admin** e força `status:'cancelado'` quando `cancelamento.status==='aprovado'` (um push atrasado não “descancela”). Alimenta Pedidos/Ranking/DRE. Persistido em `data/pedidos.json` |
+| `cancelamento.decisoes` | `lojaId`, `machineId` (+ `desde` opcional) | Portal → PDV: decisões já tomadas pelo admin nos pedidos da loja (`aprovado`/`recusado` + `estoque` `voltar`/`perder` + `reembolso {forma,valor}` + `decididoEm`). O PDV consulta a cada 60 s e aplica no pedido local (baixa/estorno e cancelamento sem abrir tela de itens). Exige máquina pareada |
 | `auditoria.push` | `lojaId`, `machineId` + `uso` (objeto) | PDV → portal: uso de senha master (perda, desconto/cancelamento, cobrança de diferença), **idempotente pelo `uso.id`**. Campos: `titulo`, `operador`, `motivo`, `data`, `criadoEm`, `pedidoContexto`, `pedidoGeradoId`. Persistido em `data/auditoria.json` (a aba "Auditoria" foi removida do admin; os dados continuam disponíveis via `auditoria.list`) |
 
 **Admin (token):** `admin.login` (valida senha SHA-256 → `{ token, expiraEm }`),
@@ -212,6 +213,14 @@ despesas manuais da gestão em `data/despesas.json`,
 contada, `vendidos` desde `contadoEm` e `saldo` = quantidade − vendidos),
 `estoque.save` (`{lojaId, itens:[{produtoId, quantidade}]}` grava
 `data/estoque.json`; mudar a quantidade reinicia `contadoEm`),
+`cancelamento.pendentes` (pedidos com `cancelamento.status==='pendente'`, mais
+recentes primeiro, máx. 500 → `{ ok, pedidos, total }` — badge da aba
+Auditoria; omite `teste:true` como `pedido.list`, então para validar com o PDV
+de teste desmarque "Loja de teste" na loja), `cancelamento.decidir` (`{ pedidoId, decisao:'aprovar'|'recusar',
+estoque:'voltar'|'perder', reembolso:{forma:'nao'|'dinheiro'|'cartao', valor} }`;
+aprovar grava `cancelamento.status='aprovado'`, `status='cancelado'`,
+`canceladoEm`, `devolucao`; recusar limpa estoque/reembolso; 404
+`PEDIDO_NAO_ENCONTRADO`, 409 `CANCELAMENTO_NAO_PENDENTE`),
 `admin.changePassword`. Ação desconhecida → `ACAO_DESCONHECIDA`.
 
 **Parâmetros globais (`data/parametros.json`, defaults em `PARAMS_DEFAULT` do
@@ -565,6 +574,16 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   sobe todo o histórico `PAGO` (flag `_pushHistoricoPedidos`), depois só os de
   hoje; `agendarPedidosPortal(ms)` dispara ~800ms após uma venda nova
   (`finalizarVenda`) e após cancelamento (idempotente pelo `pedido.id` = `_realId`).
+- **Cancelamento pelo portal (`vendas.html`)** — no PDV, "Cancelar pedido" abre
+  um modal com dois caminhos: senha master `2512` (cancela na hora, com escolha
+  de itens/estoque + forma de devolução) ou **Solicitar ao administrador** (sem
+  motivo; botão "Desfazer solicitação" enquanto pendente). A solicitação vai no
+  `pedido.push` (`cancelamentoSolicitado`) e o pedido **continua pago no PDV**.
+  O admin vê o badge na aba Auditoria (`cancelamento.pendentes`), aprova/recusa
+  escolhendo estoque e reembolso (`cancelamento.decidir`), e o PDV consulta
+  `cancelamento.decisoes` a cada 60 s: aprovado → `aplicarCancelamentoRemoto` →
+  `efetivarCancelamento(..., {silencioso:true})` (sem abrir o relatório de
+  perda); recusado → só limpa a pendência e avisa.
 - **Auditoria → portal (`vendas.html`)** — usos de senha master
   (`usosSenhaLog`) são persistidos no sidecar (`persistirAuditoria` →
   `natalApi.auditoriaSave`, arquivo `auditoria.json` local) e enviados ao portal
@@ -610,7 +629,7 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   `#login-card` (não clicável) mostra `Cartão processado — pode remover` em
   `ready_existing`/`all_imported`/`finished` (com o número da sessão) e o erro
   em `copy_error`/`publish_error`;
-  **🔒 Sistema** (exige senha **`8694`**, `SENHA_CFG_SISTEMA`, digitada
+  **🔒 Sistema** (exige senha **`2512`**, `SENHA_CFG_SISTEMA`, digitada
   num campo dentro do próprio modal — `#cfg-senha-box`; **nunca** usar
   `window.prompt`, que o Electron não implementa e lança erro) = pasta de fotos
   nativa (IPC `natal:selectFolder` →
@@ -760,8 +779,10 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   admin, enquanto `ativo:false` desautoriza o kiosk (`LOJA_INVALIDA`). Não há
   mais toggle “Mostrar dados de teste” no admin.
 - **Senhas em claro no código:** fallback de login em `vendas.html`
-  (`FALLBACK_USERS`, senha `0000`) e `SENHA_MASTER_PDV = '1234'` (senha master
-  de desconto/perda). O cache offline (TOFU) guarda só sha256.
+  (`FALLBACK_USERS`, senha `0000`) e `SENHA_MASTER_PDV = '2512'` (senha master
+  de desconto/perda/cancelamento/cobrança — substituiu o antigo `8694`, que todos
+  os operadores conheciam; `SENHA_DESCONTO_PDV` continua `1206`). O cache
+  offline (TOFU) guarda só sha256.
 - **Limpar a fila de envio exige senha** (`HCss221087`) justamente para o
   operador não apagar pendências sem querer.
 - **`window.prompt` não existe no Electron** (lança "prompt() is not supported"

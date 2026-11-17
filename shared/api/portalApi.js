@@ -175,6 +175,12 @@ const portalApi = {
     });
   },
 
+  // Decisões de cancelamento tomadas pelo admin no portal (aprovado/recusado
+  // + estoque/reembolso). O PDV consulta periodicamente e aplica no pedido.
+  cancelamentoDecisoes({ lojaId = '', machineId = '', desde = '' } = {}) {
+    return post('cancelamento.decisoes', { lojaId, machineId, desde });
+  },
+
   // Sobe um uso de senha master (auditoria.push). Idempotente pelo id.
   auditoriaPush(uso = {}) {
     const ident = portalApi.identidadeAtiva();

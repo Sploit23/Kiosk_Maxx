@@ -2368,7 +2368,7 @@ const PLACEHOLDER_IMG = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent
 const PLACEHOLDER_BLANK = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
 const URL_POR_FOTO = {}; // seed (filename da sessão) -> URL real no sidecar
 const URL_POR_THUMB = {}; // seed -> miniatura leve (grade/vitrine)
-const SENHA_MASTER_PDV = '8694';
+const SENHA_MASTER_PDV = '2512';
 const SENHA_DESCONTO_PDV = '1206';
 let caixaReal = null; // última resposta de caixaEstado/caixaAbrir/caixaFechar
 let _recarregando = false;
@@ -2617,6 +2617,10 @@ function mapearPedido(p){
       forma: String(p.devolucao.forma || ''),
       valor: Number(p.devolucao.valor) || 0,
     } : null,
+    cancelamentoSolicitado: !!p.cancelamentoSolicitado,
+    cancelamentoSolicitadoEm: p.cancelamentoSolicitadoEm ? new Date(p.cancelamentoSolicitadoEm) : null,
+    cancelamentoSolicitadoPor: p.cancelamentoSolicitadoPor || '',
+    cancelamentoDecisao: (p.cancelamentoDecisao && typeof p.cancelamentoDecisao === 'object') ? p.cancelamentoDecisao : null,
   };
 }
 
@@ -4345,6 +4349,11 @@ function montarPedidoPortal(p){
     origemPedidoId: p.origemPedidoId || null,
     guiaImpressa: !!p.guiaImpressa,
     codigoDigital: p.codigoDigital || null,
+    cancelamentoSolicitado: !!p.cancelamentoSolicitado,
+    cancelamentoSolicitadoEm: (p.cancelamentoSolicitadoEm instanceof Date && !isNaN(p.cancelamentoSolicitadoEm))
+      ? p.cancelamentoSolicitadoEm.toISOString()
+      : (p.cancelamentoSolicitadoEm || ''),
+    cancelamentoSolicitadoPor: p.cancelamentoSolicitadoPor || '',
   };
 }
 
@@ -8844,7 +8853,7 @@ async function showConfigModal(tabInicial){
   // operador não mexer em pasta/loja/impressora/manutenção sem querer. Nada de
   // window.prompt aqui: o Electron não implementa prompt() (lança erro), então a
   // senha é pedida num campo dentro do próprio modal.
-  const SENHA_CFG_SISTEMA = '8694';
+  const SENHA_CFG_SISTEMA = '2512';
   let cfgUnlocked = false;
   const cfgTabBtns = [...document.querySelectorAll('[data-cfg-tab]')];
   const cfgSecs = [...document.querySelectorAll('[data-cfg-sec]')];
@@ -9993,7 +10002,7 @@ function renderPedidosScreen(){
         <td>#${p.sessoes.map(s=>s.senha).join(', #')}</td>
         <td>${fmt(p.total)}</td>
         <td style="font-size:11.5px;">${formatarFormasPagamento(p.pagamentosEfetivos)}</td>
-        <td><span class="ped-status ${p.status}">${p.status}</span></td>
+        <td><span class="ped-status ${p.status}">${p.status}</span>${p.cancelamentoSolicitado ? '<div style="margin-top:4px;"><span class="ped-status" style="background:rgba(212,162,76,.18);color:var(--gold-300);">cancel. solicitado</span></div>' : ''}</td>
         <td style="font-size:11px;">${vinculo}</td>
         <td>${p.pedidoGeradoId ? '' : `<button class="ped-action-btn" data-reopen="${p.id}">Reabrir</button>`}${p.codigoDigital ? `<button class="ped-action-btn" data-qr="${p.codigoDigital}">📲 QR</button>` : ''}</td>
       </tr>
@@ -10703,15 +10712,87 @@ function askFormaDevolucao(p, onConfirm){
   document.getElementById('dv-nao').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'nao', valor:0}); });
 }
 
+function registrarUsoSenha(titulo, motivo, pedidoContexto){
+  const uso = {
+    id: 'AUD-' + Date.now().toString(36).toUpperCase(),
+    titulo, motivo,
+    operador: currentUser ? currentUser.nome : '—',
+    data: new Date(),
+    pedidoContexto: pedidoContexto || editingPedidoId || null,
+    pedidoGeradoId: null,
+  };
+  usosSenhaLog.push(uso);
+  persistirAuditoria();
+  enviarAuditoriaPendente();
+}
+
+/* Cancelamento: a senha master (2512) cancela na hora; sem senha, o operador
+   solicita ao administrador — sem motivo. A decisão volta pelo portal e o PDV
+   aplica o estoque/reembolso escolhidos pelo ADM. */
 function askCancelarPedido(p){
+  if(p.cancelamentoSolicitado){
+    openModal(`
+      <div class="modal-head">
+        <div><div class="modal-step-label">Cancelamento do ${p.id}</div><h3>Solicitação aguardando o administrador</h3></div>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <p class="modal-sub">Solicitado${p.cancelamentoSolicitadoPor ? ' por '+escHtml(p.cancelamentoSolicitadoPor) : ''} em ${p.cancelamentoSolicitadoEm ? p.cancelamentoSolicitadoEm.toLocaleString('pt-BR') : '—'}. Você ainda pode cancelar agora com a senha master, ou desfazer a solicitação.</p>
+      <div class="pay-rows" style="margin-bottom:12px;">
+        <input type="password" id="cx-senha" maxlength="4" placeholder="Senha master (4 dígitos)" inputmode="numeric"
+          style="background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:14px;letter-spacing:3px;text-align:center;width:100%;">
+      </div>
+      <button class="btn-primary" id="cx-agora" disabled style="margin-bottom:8px;">Cancelar agora (com senha)</button>
+      <button class="btn-secondary" id="cx-desfazer" style="width:100%;">Desfazer solicitação</button>
+    `);
+    const senhaEl = document.getElementById('cx-senha');
+    const btnAgora = document.getElementById('cx-agora');
+    senhaEl.addEventListener('input', ()=>{ btnAgora.disabled = senhaEl.value.length !== 4; });
+    setTimeout(()=>{ try{ senhaEl.focus(); }catch{} }, 30);
+    btnAgora.addEventListener('click', ()=>{
+      if(senhaEl.value !== SENHA_MASTER_PDV){ toast('⚠ Senha master incorreta'); senhaEl.value=''; btnAgora.disabled=true; try{ senhaEl.focus(); }catch{} return; }
+      closeModal();
+      registrarUsoSenha('Cancelar pedido', '', p._realId || p.id);
+      continuarCancelamento(p, SENHA_MASTER_PDV);
+    });
+    document.getElementById('cx-desfazer').addEventListener('click', ()=> desfazerCancelamentoPortal(p));
+    return;
+  }
+
+  openModal(`
+    <div class="modal-head">
+      <div><div class="modal-step-label">Cancelar pedido ${p.id}</div><h3>Como deseja cancelar?</h3></div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <p class="modal-sub">Digite a senha master para cancelar agora, ou solicite ao administrador — não precisa informar motivo. A solicitação aparece no portal para aprovação.</p>
+    <div class="pay-rows" style="margin-bottom:10px;">
+      <input type="password" id="cx-senha" maxlength="4" placeholder="Senha master (4 dígitos)" inputmode="numeric"
+        style="background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:14px;letter-spacing:3px;text-align:center;width:100%;">
+    </div>
+    <button class="btn-primary" id="cx-agora" disabled style="margin-bottom:8px;">Cancelar agora (com senha)</button>
+    <button class="btn-secondary" id="cx-solicitar" style="width:100%;">Solicitar ao administrador</button>
+  `);
+  const senhaEl = document.getElementById('cx-senha');
+  const btnAgora = document.getElementById('cx-agora');
+  senhaEl.addEventListener('input', ()=>{ btnAgora.disabled = senhaEl.value.length !== 4; });
+  setTimeout(()=>{ try{ senhaEl.focus(); }catch{} }, 30);
+  btnAgora.addEventListener('click', ()=>{
+    if(senhaEl.value !== SENHA_MASTER_PDV){ toast('⚠ Senha master incorreta'); senhaEl.value=''; btnAgora.disabled=true; try{ senhaEl.focus(); }catch{} return; }
+    closeModal();
+    registrarUsoSenha('Cancelar pedido', '', p._realId || p.id);
+    continuarCancelamento(p, SENHA_MASTER_PDV);
+  });
+  document.getElementById('cx-solicitar').addEventListener('click', ()=>{ closeModal(); solicitarCancelamentoPortal(p); });
+}
+
+/* Parte do cancelamento com senha: o operador escolhe o que volta ao estoque
+   e como o cliente foi reembolsado (o motivo não é mais exigido). */
+function continuarCancelamento(p, senha){
   const itensReais = p.itens.filter(it=>!['combo-desconto','ajuste','desconto-catalogo','desconto-senha-master','desconto-falha-operacional','desconto-comercial'].includes(it.tipo) && it.preco>=0);
   if(itensReais.length===0){
     // pedido só com linhas de ajuste/desconto — cancela direto, sem nada pra devolver
-    askSenhaMotivo('Cancelar pedido', `Isso vai cancelar o ${p.id} por completo (${fmt(p.total)}).`, (senha,motivo)=>{
-      askFormaDevolucao(p, (devolucao)=>{
-        efetivarCancelamento(p, [], [], senha, motivo, new Map(), devolucao);
-      });
-    }, p.id);
+    askFormaDevolucao(p, (devolucao)=>{
+      efetivarCancelamento(p, [], [], senha, '', new Map(), devolucao);
+    });
     return;
   }
   const impressoPadrao = p.impresso === true;
@@ -10810,22 +10891,15 @@ function askCancelarPedido(p){
     atualizarResumo();
   }));
   document.getElementById('cnc-continuar').addEventListener('click', ()=>{
-    const { voltam, perdaInfo, valorPerda } = calcular();
-    const perdidos = itensReais.length - voltam.length;
-    const subtitulo = `Isso vai cancelar o ${p.id} por completo (${fmt(p.total)}). `
-      + (perdidos > 0
-        ? `${voltam.length} iten${voltam.length===1?'':'s'} volta${voltam.length===1?'':'m'} ao estoque e ${perdidos} ser${perdidos===1?'á':'ão'} registrado${perdidos===1?'':'s'} como perda (${fmt(valorPerda)}).`
-        : 'Nenhum item será registrado como perda.');
-    askSenhaMotivo('Cancelar pedido', subtitulo, (senha,motivo)=>{
-      askFormaDevolucao(p, (devolucao)=>{
-        efetivarCancelamento(p, itensReais, voltam, senha, motivo, perdaInfo, devolucao);
-      });
-    }, p.id);
+    const { voltam, perdaInfo } = calcular();
+    askFormaDevolucao(p, (devolucao)=>{
+      efetivarCancelamento(p, itensReais, voltam, senha, '', perdaInfo, devolucao);
+    });
   });
   atualizarResumo();
 }
 
-function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perdaInfo, devolucao){
+function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perdaInfo, devolucao, opts = {}){
   itensQueVoltam.forEach(it=>{
     if(it.tipo==='tamanho'){
       const t = TAMANHOS.find(x=>x.id===it.produtoId);
@@ -10839,15 +10913,26 @@ function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perd
   const itensPerdidos = itensReais.filter(it=>!itensQueVoltam.includes(it));
 
   p.status = 'cancelado';
+  p.canceladoEm = p.canceladoEm || new Date();
   p.itensDevolvidos = itensQueVoltam.map(it=>it.label);
   p.itensPerdidos = itensPerdidos.map(it=>it.label);
   const dev = devolucao || { forma:'nao', valor:0 };
   p.devolucao = dev;
+  p.cancelamentoSolicitado = false;
+  if(opts.cancelamentoDecisao) p.cancelamentoDecisao = opts.cancelamentoDecisao;
   if(p.horario && p.horario.toDateString() === new Date().toDateString()) vendasHojeTotal -= p.total;
   try{
     // persiste o cancelamento no sidecar (sobrevive a restart — sem isso o pedido
     // volta a 'pago' no reboot e o portal "des-cancela" o registro)
-    natalApi.atualizarPedido(p._realId || p.id, { status: 'cancelado', devolucao: dev })
+    const persistir = {
+      status: 'cancelado',
+      devolucao: dev,
+      itensDevolvidos: p.itensDevolvidos,
+      itensPerdidos: p.itensPerdidos,
+      cancelamentoSolicitado: false,
+    };
+    if(opts.cancelamentoDecisao) persistir.cancelamentoDecisao = opts.cancelamentoDecisao;
+    natalApi.atualizarPedido(p._realId || p.id, persistir)
       .catch(e=> console.warn('[pdv] falha ao persistir cancelamento:', e))
       .then(()=> natalApi.limparFila({ pedidoId: p._realId || p.id }))
       .catch(()=>{});
@@ -10865,13 +10950,121 @@ function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perd
   renderRibbonChip();
   renderCombos();
   const perdidos = itensPerdidos.length;
-  toast(`Pedido ${p.id} cancelado — ${itensQueVoltam.length} devolvido${itensQueVoltam.length===1?'':'s'} ao estoque${perdidos>0?`, ${perdidos} perda${perdidos===1?'':'s'}`:''}`);
+  const resumo = `${itensQueVoltam.length} devolvido${itensQueVoltam.length===1?'':'s'} ao estoque${perdidos>0?`, ${perdidos} perda${perdidos===1?'':'s'}`:''}`;
+  toast(`Pedido ${p.id} cancelado${opts.silencioso ? ' pelo administrador' : ''} — ${resumo}`);
   renderPedidosScreen();
-  closeModal();
+  if(!opts.silencioso) closeModal();
 
-  if(itensPerdidos.length>0){
+  if(!opts.silencioso && itensPerdidos.length>0){
     mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, motivo, perdaInfo || new Map());
   }
+}
+
+/* ---------------- CANCELAMENTO VIA PORTAL ---------------- */
+/* Solicita o cancelamento ao administrador (sem motivo). O pedido segue como
+   pago no PDV até o ADM decidir; a solicitação é enviada no pedido.push. */
+function solicitarCancelamentoPortal(p){
+  const id = p._realId || p.id;
+  p.cancelamentoSolicitado = true;
+  p.cancelamentoSolicitadoEm = new Date();
+  p.cancelamentoSolicitadoPor = (currentUser && currentUser.nome) || '';
+  p.cancelamentoDecisao = null;
+  try{
+    natalApi.atualizarPedido(id, {
+      cancelamentoSolicitado: true,
+      cancelamentoSolicitadoEm: Date.now(),
+      cancelamentoSolicitadoPor: p.cancelamentoSolicitadoPor,
+      cancelamentoDecisao: null,
+    }).catch(e=> console.warn('[pdv] falha ao solicitar cancelamento:', e));
+  }catch(e){ console.warn('[pdv] falha ao solicitar cancelamento:', e); }
+  agendarPedidosPortal(300);
+  renderPedidosScreen();
+  toast(`Cancelamento do ${p.id} solicitado ao administrador`);
+}
+
+function desfazerCancelamentoPortal(p){
+  const id = p._realId || p.id;
+  p.cancelamentoSolicitado = false;
+  p.cancelamentoSolicitadoEm = null;
+  p.cancelamentoSolicitadoPor = '';
+  try{
+    natalApi.atualizarPedido(id, {
+      cancelamentoSolicitado: false,
+      cancelamentoSolicitadoEm: null,
+      cancelamentoSolicitadoPor: '',
+    }).catch(e=> console.warn('[pdv] falha ao desfazer solicitação:', e));
+  }catch(e){ console.warn('[pdv] falha ao desfazer solicitação:', e); }
+  agendarPedidosPortal(300);
+  closeModal();
+  renderPedidosScreen();
+  toast(`Solicitação de cancelamento do ${p.id} desfeita`);
+}
+
+let _cancelPollRodando = false;
+async function verificarCancelamentosPortal(){
+  if(_cancelPollRodando) return;
+  const ident = identidadeSync();
+  if(!ident) return;
+  _cancelPollRodando = true;
+  try{
+    const res = await portalApi.cancelamentoDecisoes({ lojaId: ident.lojaId, machineId: ident.machineId });
+    const decisoes = (res && res.ok && Array.isArray(res.decisoes)) ? res.decisoes : [];
+    for(const d of decisoes){
+      const p = pedidosRealizados.find(x => String(x._realId || x.id) === String(d.pedidoId));
+      if(!p) continue;
+      const atual = p.cancelamentoDecisao;
+      const _ts = v => { const n = Number(v); if(Number.isFinite(n) && n > 1000000000000) return n; const t = new Date(v).getTime(); return Number.isFinite(t) ? t : 0; };
+      const jaAplicada = !!(atual && String(atual.status || '') === String(d.decisao || '')
+        && Math.abs(_ts(atual.decididoEm) - _ts(d.decididoEm)) < 120000);
+      if(jaAplicada) continue;
+      if(d.decisao === 'aprovado'){
+        if(p.status === 'cancelado') continue;
+        aplicarCancelamentoRemoto(p, d);
+      } else if(d.decisao === 'recusado'){
+        p.cancelamentoSolicitado = false;
+        p.cancelamentoSolicitadoEm = null;
+        p.cancelamentoSolicitadoPor = '';
+        p.cancelamentoDecisao = { status:'recusado', decididoEm: d.decididoEm || '' };
+        try{
+          natalApi.atualizarPedido(p._realId || p.id, {
+            cancelamentoSolicitado: false,
+            cancelamentoDecisao: { status:'recusado', decididoEm: d.decididoEm || '' },
+          }).catch(()=>{});
+        }catch{}
+        agendarPedidosPortal(300);
+        renderPedidosScreen();
+        toast(`Cancelamento do ${p.id} recusado pelo administrador`);
+      }
+    }
+  }catch(e){
+    // portal offline → tenta de novo no próximo ciclo
+  } finally {
+    _cancelPollRodando = false;
+  }
+}
+
+/* Aplica a aprovação do ADM: estoque (tudo volta / tudo perda) e reembolso
+   escolhidos no portal. Sem motivo e sem abrir a tela de itens. */
+function aplicarCancelamentoRemoto(p, d){
+  const itensReais = (p.itens || []).filter(it =>
+    !['combo-desconto','ajuste','desconto-catalogo','desconto-senha-master','desconto-falha-operacional','desconto-comercial'].includes(it.tipo)
+    && it.preco >= 0);
+  const todosVoltam = String(d.estoque || 'voltar') !== 'perder';
+  const voltam = todosVoltam ? itensReais : [];
+  const perdaInfo = new Map();
+  if(!todosVoltam) itensReais.forEach(it => perdaInfo.set(it, 'portal'));
+  const forma = ['dinheiro','cartao'].includes(String(d.reembolso && d.reembolso.forma)) ? d.reembolso.forma : 'nao';
+  const valor = forma === 'nao' ? 0 : Math.min(Number(d.reembolso && d.reembolso.valor) || 0, Number(p.total) || 0);
+  const decisao = {
+    status: 'aprovado',
+    estoque: todosVoltam ? 'voltar' : 'perder',
+    reembolso: { forma, valor },
+    decididoEm: d.decididoEm || '',
+  };
+  efetivarCancelamento(p, itensReais, voltam, '', '', perdaInfo, { forma, valor }, {
+    silencioso: true,
+    cancelamentoDecisao: decisao,
+  });
 }
 
 /* relatório de perda — impresso pra anexar fisicamente ao material/fotos perdidas, com a senha usada pra auditoria */
@@ -10893,7 +11086,7 @@ function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, motivo, perdaIn
       <div class="rc-line"><span>Operador</span><span>${currentUser?currentUser.nome:'—'}</span></div>
       <div class="rc-line"><span>Devolução</span><span>${p.devolucao ? (p.devolucao.forma==='dinheiro' ? `dinheiro — ${fmt(p.devolucao.valor)}` : (p.devolucao.forma==='cartao' ? `estorno no cartão — ${fmt(p.devolucao.valor)}` : 'não devolvido ao cliente')) : '—'}</span></div>
       <div class="rc-line"><span>Data/hora</span><span>${new Date().toLocaleString('pt-BR')}</span></div>
-      <div class="rc-line"><span>Motivo</span><span style="text-align:right;max-width:200px;">${motivo}</span></div>
+      ${motivo ? `<div class="rc-line"><span>Motivo</span><span style="text-align:right;max-width:200px;">${motivo}</span></div>` : ''}
       <h4 style="margin-top:12px;">Itens perdidos (anexar a este relatório)</h4>
       ${linhasPerdidos}
       <div class="rc-total"><span>Valor perdido</span><span>${fmt(itensPerdidos.reduce((s,it)=>s+it.preco,0))}</span></div>
@@ -12624,6 +12817,8 @@ async function INIT(){
   }, 15000); // sessões importadas da pasta chegam sozinhas
   setInterval(carregarPrecosPortal, 60000); // preço muda no portal → PDV aberto atualiza sozinho
   setInterval(carregarOverlaysPortal, 60000); // overlay muda no portal → PDV aberto atualiza sozinho
+  setInterval(verificarCancelamentosPortal, 60000); // aprovação/recusa do ADM volta para o PDV
+  setTimeout(verificarCancelamentosPortal, 8000);
   // Internet voltou: não espera o ciclo de 60s para subir as fotos digitais.
   window.addEventListener('online', ()=>{
     carregarEquipe().catch(()=>{});

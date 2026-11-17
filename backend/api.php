@@ -1997,6 +1997,35 @@ try {
                     ];
                 }
             }
+            $todos = loadJson('pedidos.json', []);
+            if (!is_array($todos)) $todos = [];
+            $found = null;
+            $anterior = null;
+            foreach ($todos as $i => $r) {
+                if (($r['id'] ?? '') === $id) { $found = $i; $anterior = $r; break; }
+            }
+
+            // Cancelamento pelo portal: o PDV só SOLICITA (sem motivo) e o admin
+            // decide. A decisão fica no pedido e um push atrasado do PDV não
+            // "descancela" um pedido já aprovado.
+            $cancel = is_array($anterior['cancelamento'] ?? null) ? $anterior['cancelamento'] : null;
+            $temFlag = array_key_exists('cancelamentoSolicitado', $pd);
+            $solicitado = !empty($pd['cancelamentoSolicitado']);
+            $cancelStatus = is_array($cancel) ? (string) ($cancel['status'] ?? '') : '';
+            if ($solicitado && !in_array($cancelStatus, ['pendente', 'aprovado'], true)) {
+                $cancel = [
+                    'status' => 'pendente',
+                    'solicitadoEm' => gmdate('c'),
+                    'solicitadoPor' => trim((string) ($pd['cancelamentoSolicitadoPor'] ?? ($pd['operador'] ?? ''))),
+                    'pdvNome' => resolverPdvNome($pd['pdvNome'] ?? '', $loja),
+                ];
+            } elseif ($temFlag && !$solicitado && $cancelStatus === 'pendente') {
+                // O operador desfez a solicitação no PDV.
+                $cancel = null;
+            }
+            $statusPedido = trim((string) ($pd['status'] ?? 'pago'));
+            if (is_array($cancel) && ($cancel['status'] ?? '') === 'aprovado') $statusPedido = 'cancelado';
+
             $registro = [
                 'id' => $id,
                 'numero' => (string) ($pd['numero'] ?? $id),
@@ -2008,7 +2037,7 @@ try {
                 'criadoEm' => (string) ($pd['criadoEm'] ?? gmdate('c')),
                 'pagoEm' => (string) ($pd['pagoEm'] ?? ''),
                 'total' => round(max(0, (float) ($pd['total'] ?? 0)), 2),
-                'status' => trim((string) ($pd['status'] ?? 'pago')),
+                'status' => $statusPedido,
                 'operador' => trim((string) ($pd['operador'] ?? '—')),
                 'unidadesTotal' => $unidadesRibbon,
                 'fotos10x15' => $fotos10x15,
@@ -2023,19 +2052,47 @@ try {
                 'origemTerminal' => (string) ($pd['origemTerminal'] ?? ''),
                 'origemPedidoId' => (string) ($pd['origemPedidoId'] ?? ''),
                 'devolucao' => $devolucao,
+                'cancelamento' => $cancel,
                 'guiaImpressa' => !empty($pd['guiaImpressa']),
                 'enviadoEm' => gmdate('c'),
             ];
 
-            $todos = loadJson('pedidos.json', []);
-            if (!is_array($todos)) $todos = [];
-            $found = null;
-            foreach ($todos as $i => $r) {
-                if (($r['id'] ?? '') === $id) { $found = $i; break; }
-            }
             if ($found !== null) $todos[$found] = $registro; else $todos[] = $registro;
             saveJson('pedidos.json', $todos);
             respond(['ok' => true, 'pedido' => $registro]);
+        }
+
+        // Decisões de cancelamento (portal → PDV). A máquina pareada consulta
+        // este endpoint e aplica no pedido local o que o admin aprovou/recusou.
+        case 'cancelamento.decisoes': {
+            [$db, $loja] = validarLojaPareada($p);
+            $desde = trim((string) ($p['desde'] ?? ''));
+            $desdeTs = $desde !== '' ? (strtotime($desde) ?: 0) : 0;
+            $todos = loadJson('pedidos.json', []);
+            if (!is_array($todos)) $todos = [];
+            $out = [];
+            foreach ($todos as $r) {
+                if (!is_array($r) || ($r['lojaId'] ?? '') !== $loja['id']) continue;
+                $c = $r['cancelamento'] ?? null;
+                if (!is_array($c)) continue;
+                $st = (string) ($c['status'] ?? '');
+                if (!in_array($st, ['aprovado', 'recusado'], true)) continue;
+                $decididoEm = (string) ($c['decididoEm'] ?? '');
+                if ($desdeTs && $decididoEm !== '' && (strtotime($decididoEm) ?: 0) <= $desdeTs) continue;
+                $re = is_array($c['reembolso'] ?? null) ? $c['reembolso'] : ['forma' => 'nao', 'valor' => 0];
+                $out[] = [
+                    'pedidoId' => (string) ($r['id'] ?? ''),
+                    'numero' => (string) ($r['numero'] ?? ''),
+                    'decisao' => $st,
+                    'estoque' => (string) ($c['estoque'] ?? 'voltar'),
+                    'reembolso' => [
+                        'forma' => (string) ($re['forma'] ?? 'nao'),
+                        'valor' => round(max(0, (float) ($re['valor'] ?? 0)), 2),
+                    ],
+                    'decididoEm' => $decididoEm,
+                ];
+            }
+            respond(['ok' => true, 'decisoes' => $out, 'total' => count($out)]);
         }
 
         // Caixa (PDV → portal), idempotente pelo id CX-*. A abertura cria o
@@ -2863,6 +2920,79 @@ try {
                 if (!in_array($r['status'] ?? '', ['cancelado', 'CANCELADO'], true)) $totalLiquido += (float) ($r['total'] ?? 0);
             }
             respond(['ok' => true, 'pedidos' => array_values($out), 'total' => count($out), 'totalLiquido' => round($totalLiquido, 2)]);
+        }
+
+        // Cancelamentos aguardando decisão do admin (solicitados no PDV).
+        case 'cancelamento.pendentes': {
+            $todos = loadJson('pedidos.json', []);
+            if (!is_array($todos)) $todos = [];
+            $db = db();
+            $ids = lojaIdsExistentes($db);
+            $testIds = lojaIdsTeste($db);
+            $incluirTeste = incluirTeste($p);
+            $out = [];
+            foreach ($todos as $r) {
+                if (!is_array($r) || !registroDeLojaExistente($ids, $r)) continue;
+                // Mesmo filtro de pedido.list: a loja de teste fica fora, senão o
+                // badge contaria um pedido que o admin não consegue abrir.
+                if (!$incluirTeste && registroDeLojaDeTeste($testIds, $r)) continue;
+                $c = $r['cancelamento'] ?? null;
+                if (!is_array($c) || (string) ($c['status'] ?? '') !== 'pendente') continue;
+                $out[] = $r;
+            }
+            usort($out, function ($a, $b) {
+                return strcmp((string) ($b['cancelamento']['solicitadoEm'] ?? ''), (string) ($a['cancelamento']['solicitadoEm'] ?? ''));
+            });
+            respond(['ok' => true, 'pedidos' => array_slice($out, 0, 500), 'total' => count($out)]);
+        }
+
+        // Aprova ou recusa o cancelamento. Ao aprovar, o admin escolhe o que
+        // acontece com o estoque (volta/perda) e o reembolso (não/dinheiro/cartão).
+        // A decisão volta ao PDV em cancelamento.decisoes.
+        case 'cancelamento.decidir': {
+            $pedidoId = trim((string) ($p['pedidoId'] ?? ''));
+            $decisao = strtolower(trim((string) ($p['decisao'] ?? '')));
+            if ($pedidoId === '') fail('DADOS_INCOMPLETOS: pedidoId é obrigatório');
+            if (!in_array($decisao, ['aprovar', 'recusar'], true)) fail('DECISAO_INVALIDA: use aprovar ou recusar');
+            $estoque = strtolower(trim((string) ($p['estoque'] ?? 'voltar')));
+            if (!in_array($estoque, ['voltar', 'perder'], true)) $estoque = 'voltar';
+            $reIn = is_array($p['reembolso'] ?? null) ? $p['reembolso'] : [];
+            $reForma = strtolower(trim((string) ($reIn['forma'] ?? 'nao')));
+            if (!in_array($reForma, ['nao', 'dinheiro', 'cartao'], true)) $reForma = 'nao';
+            $reValor = round(max(0, (float) ($reIn['valor'] ?? 0)), 2);
+
+            $todos = loadJson('pedidos.json', []);
+            if (!is_array($todos)) $todos = [];
+            $idx = null;
+            foreach ($todos as $i => $r) {
+                if (is_array($r) && (string) ($r['id'] ?? '') === $pedidoId) { $idx = $i; break; }
+            }
+            if ($idx === null) fail('PEDIDO_NAO_ENCONTRADO', 404);
+            $r = $todos[$idx];
+            $c = is_array($r['cancelamento'] ?? null) ? $r['cancelamento'] : [];
+            if ((string) ($c['status'] ?? '') !== 'pendente') fail('CANCELAMENTO_NAO_PENDENTE', 409);
+
+            $c['decididoEm'] = gmdate('c');
+            $c['decididoPor'] = 'admin';
+            if ($decisao === 'aprovar') {
+                $total = round(max(0, (float) ($r['total'] ?? 0)), 2);
+                if ($reForma !== 'nao' && $reValor <= 0) $reValor = $total;
+                if ($reValor > $total) $reValor = $total;
+                $c['status'] = 'aprovado';
+                $c['estoque'] = $estoque;
+                $c['reembolso'] = ['forma' => $reForma, 'valor' => $reForma === 'nao' ? 0 : $reValor];
+                $r['status'] = 'cancelado';
+                $r['canceladoEm'] = gmdate('c');
+                $r['devolucao'] = $c['reembolso'];
+            } else {
+                $c['status'] = 'recusado';
+                $c['estoque'] = '';
+                $c['reembolso'] = null;
+            }
+            $r['cancelamento'] = $c;
+            $todos[$idx] = $r;
+            saveJson('pedidos.json', $todos);
+            respond(['ok' => true, 'pedido' => $r]);
         }
 
         // Caixas de todas as lojas (abertura + fechamento) — Fluxo de Caixa.

@@ -49,7 +49,7 @@ const BUILD_ID = (() => {
 // preservando machineId/kioskCode (o pareamento com a loja sobrevive). Pode ser
 // trocada por variável de ambiente no teste/Manutenção.
 const SENHA_LIMPEZA = String(process.env.NATAL_LIMPEZA_SENHA || 'HCss221087');
-const SENHA_LIMPEZA_ALT = '8694';
+const SENHA_LIMPEZA_ALT = '2512';
 function senhaConfere(enviada) {
   const a = crypto.createHash('sha256').update(String(enviada || '')).digest();
   const b = crypto.createHash('sha256').update(SENHA_LIMPEZA).digest();
@@ -4499,6 +4499,36 @@ const server = http.createServer(async (req, res) => {
           registradoEm: Date.now(),
         };
       }
+      // Cancelamento pelo portal: o PDV registra a solicitação (sem motivo) e,
+      // depois, a decisão tomada pelo admin (aprovado/recusado + estoque/reembolso).
+      if (body.cancelamentoSolicitado !== undefined) {
+        const ped = !!body.cancelamentoSolicitado;
+        pedido.cancelamentoSolicitado = ped;
+        if (ped) {
+          pedido.cancelamentoSolicitadoEm = Number(body.cancelamentoSolicitadoEm) || Date.now();
+          pedido.cancelamentoSolicitadoPor = String(body.cancelamentoSolicitadoPor || '').slice(0, 80);
+          if (!pedido.cancelamentoDecisao || pedido.cancelamentoDecisao.status === 'recusado') pedido.cancelamentoDecisao = null;
+        } else {
+          pedido.cancelamentoSolicitadoEm = null;
+          pedido.cancelamentoSolicitadoPor = '';
+        }
+      }
+      if (body.cancelamentoDecisao !== undefined) {
+        const d = body.cancelamentoDecisao;
+        if (d && typeof d === 'object') {
+          const re = d.reembolso && typeof d.reembolso === 'object' ? d.reembolso : null;
+          pedido.cancelamentoDecisao = {
+            status: String(d.status || ''),
+            estoque: String(d.estoque || ''),
+            reembolso: re ? { forma: String(re.forma || 'nao'), valor: Number(re.valor) || 0 } : null,
+            decididoEm: Number(d.decididoEm) || Date.now(),
+          };
+        } else {
+          pedido.cancelamentoDecisao = null;
+        }
+      }
+      if (Array.isArray(body.itensDevolvidos)) pedido.itensDevolvidos = body.itensDevolvidos.map(String).slice(0, 300);
+      if (Array.isArray(body.itensPerdidos)) pedido.itensPerdidos = body.itensPerdidos.map(String).slice(0, 300);
       if (typeof body.status === 'string') {
         const st = body.status.toUpperCase();
         if (['AGUARDANDO', 'PAGO', 'IMPRESSO', 'CANCELADO'].includes(st)) {
@@ -4513,7 +4543,10 @@ const server = http.createServer(async (req, res) => {
             pedido.canceladoEm = null;
           }
           pedido.status = st;
-          if (st === 'CANCELADO') pedido.canceladoEm = pedido.canceladoEm || Date.now();
+          if (st === 'CANCELADO') {
+            pedido.canceladoEm = pedido.canceladoEm || Date.now();
+            pedido.cancelamentoSolicitado = false;
+          }
         }
       }
       // Marca a última alteração (correção de pagamento, cancelamento etc.)

@@ -839,7 +839,7 @@ select.form-input{appearance:none;}
     <div class="sb-item active" data-screen="dashboard"><span class="ico">🏠</span> Dashboard</div>
     <div class="sb-item" data-screen="lojas"><span class="ico">🏪</span> Lojas <span class="badge" id="lojas-badge">0</span></div>
     <div class="sb-item" data-screen="financeiro"><span class="ico">💰</span> Financeiro</div>
-    <div class="sb-item" data-screen="auditoria"><span class="ico">🧾</span> Auditoria</div>
+    <div class="sb-item" data-screen="auditoria"><span class="ico">🧾</span> Auditoria <span class="badge" id="cancel-badge" style="display:none;">0</span></div>
     <div class="sb-item" data-screen="fluxo"><span class="ico">💧</span> Fluxo de Caixa</div>
     <div class="sb-item" data-screen="relatorios"><span class="ico">📊</span> Relatórios</div>
     <div class="sb-item" data-screen="estoque"><span class="ico">📦</span> Estoque</div>
@@ -1702,6 +1702,7 @@ async function tentarLogin(){
   $('#app').style.display = 'flex';
   notif('🔐', 'Sessão iniciada', nome+' entrou na gestão.');
   healthPing();
+  atualizarPendentesCancelamento();
   goScreen('dashboard');
   loadPromise.then(function(){
     if(state.currentUser && currentScreen==='dashboard') renderDashboard();
@@ -3835,7 +3836,8 @@ function pedidosTabelaHTML(rows, limit){
         '<td style="max-width:260px;color:var(--slate-400);font-size:11px;">'+esc(itens)+'</td>'+
         '<td style="font-size:11px;">'+pg+'</td>'+
         '<td>'+fmtBRL(toNum(p.total))+'</td>'+
-        '<td><span class="pill '+pedStatusPill(st)+'">'+esc(st)+'</span></td></tr>';
+        '<td><span class="pill '+pedStatusPill(st)+'">'+esc(st)+'</span>'+
+          (pedCancelPendente(p)?'<div style="margin-top:4px;"><span class="pill pill-amber">cancel. solicitado</span></div>':'')+'</td></tr>';
     }).join('');
 }
 function bindPedidoVer(container){
@@ -3846,6 +3848,78 @@ function bindPedidoVer(container){
     });
   });
 }
+
+// ——— CANCELAMENTO SOLICITADO PELO PDV ———
+function pedCancelPendente(p){
+  return !!(p && p.cancelamento && p.cancelamento.status === 'pendente');
+}
+var _cancelPendAnterior = -1;
+function atualizarPendentesCancelamento(){
+  if(!token) return Promise.resolve(0);
+  return call('cancelamento.pendentes', {}).then(function(res){
+    var n = (res && res.ok) ? toNum(res.total) : 0;
+    var b = $('#cancel-badge');
+    if(b){ b.textContent = n; b.style.display = n ? 'inline-block' : 'none'; }
+    if(n > 0 && n !== _cancelPendAnterior){
+      notif('⚠','Cancelamento solicitado', n+' pedido(s) aguardando aprovação','agora');
+    }
+    _cancelPendAnterior = n;
+    return n;
+  }).catch(function(){ return 0; });
+}
+function refreshPedidosTelas(){
+  atualizarPendentesCancelamento();
+  if(currentScreen === 'auditoria') renderAuditoria();
+  else if(currentScreen === 'fluxo') renderFluxo();
+  else if(currentScreen === 'relatorios') renderRelatorios();
+  else getPedidos();
+}
+function decidirCancelamento(p, opts){
+  opts = opts || {};
+  var payload = Object.assign({ pedidoId: pedId(p) }, opts);
+  call('cancelamento.decidir', payload).then(function(res){
+    if(res && res.ok){
+      toast(opts.decisao === 'aprovar' ? 'Cancelamento aprovado' : 'Cancelamento recusado');
+      nacCloseModal();
+      refreshPedidosTelas();
+    } else {
+      toast((res && res.error) || 'Falha ao decidir cancelamento', true);
+    }
+  }).catch(function(){ toast('Falha ao decidir cancelamento', true); });
+}
+function abrirAprovarCancelamento(p){
+  var total = toNum(p.total);
+  openPortalModal(
+    '<div class="modal-head"><h3>Aprovar cancelamento</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
+    '<p style="font-size:12px;color:var(--slate-400);margin-bottom:12px;">Pedido '+esc(p.numero||pedId(p))+' · '+fmtBRL(total)+' · '+esc(p.lojaNome||'')+'</p>'+
+    '<div class="mf-label">Estoque</div>'+
+    '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-est" value="voltar" checked> Tudo volta ao estoque</label>'+
+    '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-est" value="perder"> Tudo como perda (não volta ao estoque)</label>'+
+    '<div class="mf-label" style="margin-top:12px;">Reembolso ao cliente</div>'+
+    '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-re" value="nao" checked> Não devolvido</label>'+
+    '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-re" value="dinheiro"> Dinheiro</label>'+
+    '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-re" value="cartao"> Estorno no cartão</label>'+
+    '<input class="form-input" id="cx-re-valor" type="number" min="0" step="0.01" value="'+total.toFixed(2)+'" style="margin-top:8px;max-width:180px;" disabled>'+
+    '<div style="display:flex;gap:8px;margin-top:14px;">'+
+      '<button class="btn" id="cx-confirmar" style="background:var(--green-500);color:#fff;">Confirmar aprovação</button>'+
+      '<button class="btn btn-ghost" onclick="nacCloseModal()">Voltar</button>'+
+    '</div>'
+  );
+  document.querySelectorAll('input[name="cx-re"]').forEach(function(r){
+    r.addEventListener('change', function(){
+      var sel = document.querySelector('input[name="cx-re"]:checked');
+      $('#cx-re-valor').disabled = !sel || sel.value === 'nao';
+    });
+  });
+  $('#cx-confirmar').addEventListener('click', function(){
+    var est = (document.querySelector('input[name="cx-est"]:checked')||{}).value || 'voltar';
+    var forma = (document.querySelector('input[name="cx-re"]:checked')||{}).value || 'nao';
+    var valor = forma === 'nao' ? 0 : toNum($('#cx-re-valor').value);
+    decidirCancelamento(p, { decisao:'aprovar', estoque:est, reembolso:{ forma:forma, valor:valor } });
+  });
+}
+setInterval(atualizarPendentesCancelamento, 60000);
+
 function modalPedido(p){
   var pg = (p.pagamentos||[]).map(function(x){
     var m = x.meio || x.forma || '—';
@@ -3878,11 +3952,27 @@ function modalPedido(p){
     '<div class="mf-box"><div class="mf-key">Unidades de ribbon</div><div>'+fmtInt(toNum(p.unidadesRibbon != null ? p.unidadesRibbon : p.unidadesTotal))+'</div></div>'+
     (p.origemPedidoId?('<div class="mf-box"><div class="mf-key">Pedido de origem</div><div>'+esc(p.origemPedidoId)+'</div></div>'):'')+
     '</div>'+
+    (pedCancelPendente(p)?(
+      '<div class="mf-col" style="border:1px solid var(--gold-500);background:rgba(212,162,76,.08);">'+
+        '<div class="mf-label">Cancelamento solicitado</div>'+
+        '<div style="font-size:12px;color:var(--slate-400);margin-bottom:8px;">Solicitado por '+esc((p.cancelamento&&p.cancelamento.solicitadoPor)||'—')+' em '+fmtDt((p.cancelamento&&p.cancelamento.solicitadoEm)||'')+'.</div>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
+          '<button class="btn" id="cancel-aprovar" style="background:var(--green-500);color:#fff;">Aprovar cancelamento</button>'+
+          '<button class="btn btn-ghost" id="cancel-recusar">Recusar</button>'+
+        '</div>'+
+      '</div>'
+    ):(''))+
     '<div class="mf-col"><div class="mf-label">Itens</div>'+itens+'</div>'+
     (descItens?('<div class="mf-col"><div class="mf-label">Descontos aplicados</div>'+descItens+'</div>'):'')+
     '<div class="mf-col"><div class="mf-label">Pagamentos</div>'+pg+'</div>'+
     '<button class="btn btn-ghost" style="width:100%;" onclick="nacCloseModal()">Fechar</button>'
   );
+  if(pedCancelPendente(p)){
+    var bA = $('#cancel-aprovar');
+    if(bA) bA.addEventListener('click', function(){ abrirAprovarCancelamento(p); });
+    var bR = $('#cancel-recusar');
+    if(bR) bR.addEventListener('click', function(){ decidirCancelamento(p, { decisao:'recusar' }); });
+  }
 }
 
 // ——— RANKING (operações por vendedora/loja) ———
