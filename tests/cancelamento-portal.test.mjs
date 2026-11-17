@@ -44,6 +44,21 @@ test('portalApi expoe cancelamento.decisoes e o admin tem os endpoints', () => {
   assert.match(admin, /id="cancel-badge"/);
 });
 
+test('admin tem a aba Cancelamentos com pendentes e ultimas decisoes', () => {
+  const admin = ler('backend', 'admin.html');
+  assert.match(admin, /data-screen="cancelamentos"/);
+  assert.match(admin, /id="screen-cancelamentos"/);
+  assert.match(admin, /id="cx-pend-tabela"/);
+  assert.match(admin, /id="cx-hist-tabela"/);
+  assert.match(admin, /function renderCancelamentos/);
+  assert.match(admin, /function cxRenderPendentes/);
+  assert.match(admin, /function cxRenderHistorico/);
+  assert.match(admin, /if\(name==='cancelamentos'\) renderCancelamentos\(\);/);
+  assert.match(admin, /else if\(currentScreen === 'cancelamentos'\) renderCancelamentos\(\);/);
+  assert.match(admin, /data-cx-aprovar/);
+  assert.match(admin, /data-cx-recusar/);
+});
+
 async function subirSidecar(db, porta) {
   const tmp = path.dirname(path.dirname(db));
   let logs = '';

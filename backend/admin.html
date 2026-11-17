@@ -839,7 +839,8 @@ select.form-input{appearance:none;}
     <div class="sb-item active" data-screen="dashboard"><span class="ico">🏠</span> Dashboard</div>
     <div class="sb-item" data-screen="lojas"><span class="ico">🏪</span> Lojas <span class="badge" id="lojas-badge">0</span></div>
     <div class="sb-item" data-screen="financeiro"><span class="ico">💰</span> Financeiro</div>
-    <div class="sb-item" data-screen="auditoria"><span class="ico">🧾</span> Auditoria <span class="badge" id="cancel-badge" style="display:none;">0</span></div>
+    <div class="sb-item" data-screen="auditoria"><span class="ico">🧾</span> Auditoria</div>
+    <div class="sb-item" data-screen="cancelamentos"><span class="ico">↩</span> Cancelamentos <span class="badge" id="cancel-badge" style="display:none;">0</span></div>
     <div class="sb-item" data-screen="fluxo"><span class="ico">💧</span> Fluxo de Caixa</div>
     <div class="sb-item" data-screen="relatorios"><span class="ico">📊</span> Relatórios</div>
     <div class="sb-item" data-screen="estoque"><span class="ico">📦</span> Estoque</div>
@@ -1120,6 +1121,26 @@ select.form-input{appearance:none;}
       <div class="card">
         <h3>Pedidos do período <span class="h3-count" id="aud-count"></span></h3>
         <div style="overflow-x:auto;"><table id="aud-pedidos"></table></div>
+      </div>
+    </div>
+
+    <!-- ====== CANCELAMENTOS ====== -->
+    <div class="screen" id="screen-cancelamentos">
+      <div class="section-head">
+        <div>
+          <h2>Cancelamentos</h2>
+          <p>Solicitações feitas no PDV — aprove escolhendo o estoque e o reembolso, ou recuse</p>
+        </div>
+        <div class="fin2-head-actions"><button class="fin2-btn" id="cx-atualizar">Atualizar</button></div>
+      </div>
+      <div class="card">
+        <h3>Solicitações aguardando decisão <span class="h3-count" id="cx-pend-count"></span></h3>
+        <p class="screen-note">O PDV aplica a decisão sozinho em até 1 minuto. Até lá o pedido continua pago no caixa da loja.</p>
+        <div style="overflow-x:auto;"><table id="cx-pend-tabela"></table></div>
+      </div>
+      <div class="card">
+        <h3>Últimas decisões</h3>
+        <div style="overflow-x:auto;"><table id="cx-hist-tabela"></table></div>
       </div>
     </div>
 
@@ -1540,7 +1561,8 @@ var titles = {
   dashboard:'Dashboard', lojas:'Lojas', equipe:'Colaboradores', ranking:'Ranking',
   precos:'Catálogo de produtos', overlays:'Overlay das fotos',
   financeiro:'Financeiro', fluxo:'Fluxo de Caixa', relatorios:'Relatórios',
-    estoque:'Estoque', produtos:'Produtos Vendidos', auditoria:'Auditoria'
+    estoque:'Estoque', produtos:'Produtos Vendidos', auditoria:'Auditoria',
+    cancelamentos:'Cancelamentos'
   };
 $$('.sb-item[data-screen]').forEach(function(item){
   item.addEventListener('click', function(){
@@ -1580,6 +1602,7 @@ function goScreen(name){
   if(name==='overlays') ovCarregar();
   if(name==='financeiro') renderFinanc();
   if(name==='auditoria') renderAuditoria();
+  if(name==='cancelamentos') renderCancelamentos();
   if(name==='fluxo') renderFluxo();
   if(name==='relatorios') renderRelatorios();
   if(name==='estoque') renderEstoque();
@@ -3858,18 +3881,21 @@ function atualizarPendentesCancelamento(){
   if(!token) return Promise.resolve(0);
   return call('cancelamento.pendentes', {}).then(function(res){
     var n = (res && res.ok) ? toNum(res.total) : 0;
+    var antes = _cancelPendAnterior;
     var b = $('#cancel-badge');
     if(b){ b.textContent = n; b.style.display = n ? 'inline-block' : 'none'; }
     if(n > 0 && n !== _cancelPendAnterior){
       notif('⚠','Cancelamento solicitado', n+' pedido(s) aguardando aprovação','agora');
     }
     _cancelPendAnterior = n;
+    if(n !== antes && currentScreen === 'cancelamentos') renderCancelamentos();
     return n;
   }).catch(function(){ return 0; });
 }
 function refreshPedidosTelas(){
   atualizarPendentesCancelamento();
   if(currentScreen === 'auditoria') renderAuditoria();
+  else if(currentScreen === 'cancelamentos') renderCancelamentos();
   else if(currentScreen === 'fluxo') renderFluxo();
   else if(currentScreen === 'relatorios') renderRelatorios();
   else getPedidos();
@@ -3917,6 +3943,84 @@ function abrirAprovarCancelamento(p){
     var valor = forma === 'nao' ? 0 : toNum($('#cx-re-valor').value);
     decidirCancelamento(p, { decisao:'aprovar', estoque:est, reembolso:{ forma:forma, valor:valor } });
   });
+}
+// ——— ABA CANCELAMENTOS ———
+function renderCancelamentos(){
+  var btn = $('#cx-atualizar');
+  if(btn) btn.onclick = renderCancelamentos;
+  var tab = $('#cx-pend-tabela');
+  if(tab) tab.innerHTML = '<tr><td class="empty">Carregando…</td></tr>';
+  call('cancelamento.pendentes', {}).then(function(res){
+    state.cxPendentes = (res && res.ok && Array.isArray(res.pedidos)) ? res.pedidos : [];
+    cxRenderPendentes();
+  }).catch(function(){ state.cxPendentes = []; cxRenderPendentes(); });
+  state._pedDirty = true;
+  getPedidos().then(cxRenderHistorico);
+}
+function cxRenderPendentes(){
+  var lista = state.cxPendentes || [];
+  var cnt = $('#cx-pend-count');
+  if(cnt) cnt.textContent = lista.length ? fmtInt(lista.length) : '';
+  var tab = $('#cx-pend-tabela');
+  if(!tab) return;
+  if(!lista.length){
+    tab.innerHTML = '<tr><td class="empty" colspan="6">Nenhuma solicitação aguardando decisão.</td></tr>';
+    return;
+  }
+  tab.innerHTML = '<tr><th>Pedido</th><th>Solicitado</th><th>Loja / PDV</th><th>Por</th><th>Total</th><th></th></tr>'+
+    lista.map(function(p){
+      var c = p.cancelamento || {};
+      return '<tr data-cx-id="'+escAttr(pedId(p))+'">'+
+        '<td><b>'+esc(p.numero||pedId(p))+'</b></td>'+
+        '<td style="white-space:nowrap;">'+fmtDt(c.solicitadoEm||'')+'</td>'+
+        '<td>'+esc(p.lojaNome||p.lojaId||'—')+'<div style="font-size:11px;color:var(--slate-400);">'+esc(p.pdvNome||'')+'</div></td>'+
+        '<td>'+esc(c.solicitadoPor||'—')+'</td>'+
+        '<td>'+fmtBRL(toNum(p.total))+'</td>'+
+        '<td style="white-space:nowrap;text-align:right;">'+
+          '<button class="btn btn-ghost" style="padding:4px 8px;font-size:11px;margin-right:4px;" data-cx-ver>Ver</button>'+
+          '<button class="btn" style="padding:4px 10px;font-size:11px;background:var(--green-500);color:#fff;margin-right:4px;" data-cx-aprovar>Aprovar</button>'+
+          '<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px;" data-cx-recusar>Recusar</button>'+
+        '</td></tr>';
+    }).join('');
+  tab.querySelectorAll('tr[data-cx-id]').forEach(function(tr){
+    var p = lista.find(function(x){ return String(pedId(x)) === tr.getAttribute('data-cx-id'); });
+    if(!p) return;
+    tr.querySelector('[data-cx-ver]').addEventListener('click', function(){ modalPedido(p); });
+    tr.querySelector('[data-cx-aprovar]').addEventListener('click', function(){ abrirAprovarCancelamento(p); });
+    tr.querySelector('[data-cx-recusar]').addEventListener('click', function(){
+      if(confirm('Recusar o cancelamento do pedido '+(p.numero||pedId(p))+'?')) decidirCancelamento(p, { decisao:'recusar' });
+    });
+  });
+}
+function cxTextoReembolso(c){
+  var r = c && c.reembolso;
+  if(!r || !r.forma || r.forma === 'nao') return 'sem reembolso';
+  return (r.forma === 'dinheiro' ? 'dinheiro' : 'estorno no cartão') + ' ' + fmtBRL(toNum(r.valor));
+}
+function cxRenderHistorico(){
+  var tab = $('#cx-hist-tabela');
+  if(!tab) return;
+  var lista = (state.pedidos || []).filter(function(p){
+    return p.cancelamento && (p.cancelamento.status === 'aprovado' || p.cancelamento.status === 'recusado');
+  }).sort(function(a,b){
+    return String(b.cancelamento.decididoEm||'').localeCompare(String(a.cancelamento.decididoEm||''));
+  }).slice(0, 30);
+  if(!lista.length){
+    tab.innerHTML = '<tr><td class="empty" colspan="6">Nenhuma decisão registrada ainda.</td></tr>';
+    return;
+  }
+  tab.innerHTML = '<tr><th>Pedido</th><th>Decidido</th><th>Loja / PDV</th><th>Decisão</th><th>Estoque</th><th>Reembolso</th></tr>'+
+    lista.map(function(p){
+      var c = p.cancelamento || {};
+      var ok = c.status === 'aprovado';
+      return '<tr>'+
+        '<td><b>'+esc(p.numero||pedId(p))+'</b></td>'+
+        '<td style="white-space:nowrap;">'+fmtDt(c.decididoEm||'')+'</td>'+
+        '<td>'+esc(p.lojaNome||p.lojaId||'—')+'<div style="font-size:11px;color:var(--slate-400);">'+esc(p.pdvNome||'')+'</div></td>'+
+        '<td><span class="pill '+(ok?'pill-green':'pill-red')+'">'+(ok?'aprovado':'recusado')+'</span></td>'+
+        '<td style="font-size:11.5px;">'+(ok ? (c.estoque === 'perder' ? 'perda' : 'voltou ao estoque') : '—')+'</td>'+
+        '<td style="font-size:11.5px;">'+(ok ? esc(cxTextoReembolso(c)) : '—')+'</td></tr>';
+    }).join('');
 }
 setInterval(atualizarPendentesCancelamento, 60000);
 
