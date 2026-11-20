@@ -50,7 +50,12 @@ jobs:
         shell: pwsh
         run: |
           $setup = Join-Path $env:RUNNER_TEMP 'digiCamControlsetup_2.1.7.0.exe'
-          Invoke-WebRequest -Uri "https://master.dl.sourceforge.net/project/digicamcontrol/digiCamControlsetup_2.1.7.0.exe?viasf=1" -OutFile $setup -AllowInsecureRedirect
+          curl.exe -L --fail --retry 3 -o $setup "https://master.dl.sourceforge.net/project/digicamcontrol/digiCamControlsetup_2.1.7.0.exe?viasf=1"
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao baixar o digiCamControl (curl $LASTEXITCODE)" }
+          $bytes = [System.IO.File]::ReadAllBytes($setup)
+          if ($bytes.Length -lt 1000000 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+            throw "Download do digiCamControl invalido ($($bytes.Length) bytes)"
+          }
           Start-Process -FilePath $setup -ArgumentList '/S' -Wait
           $exe = Join-Path ${env:ProgramFiles(x86)} 'digiCamControl\CameraControl.exe'
           if (-not (Test-Path -LiteralPath $exe)) { Start-Sleep -Seconds 20 }
