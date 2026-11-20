@@ -10,7 +10,7 @@ const ler = (...partes) => readFileSync(path.join(root, ...partes), 'utf8');
 test('main procura e baixa atualizacao sozinho em qualquer tela', () => {
   const main = ler('electron-main.cjs');
   assert.match(main, /autoUpdater\.autoDownload = false/);
-  assert.match(main, /function baixarAtualizacao\(\)/);
+  assert.match(main, /function baixarAtualizacao\([^)]*\)/);
   assert.match(main, /autoUpdater\.downloadUpdate\(\)/);
   assert.match(main, /setInterval\(\(\) => performAutoUpdate\(true\), UPDATE_CHECK_MS\)/);
   assert.ok(!main.includes('if (isIdle && !isUpdating) performAutoUpdate()'));

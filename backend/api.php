@@ -60,7 +60,13 @@ require_once __DIR__ . '/config.php';
 function respond(array $data, int $code = 200): void
 {
     http_response_code($code);
-    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($json)) {
+        http_response_code(500);
+        echo '{"ok":false,"error":"RESPOSTA_INVALIDA"}';
+        exit;
+    }
+    echo $json;
     exit;
 }
 
@@ -112,6 +118,14 @@ function saveJson(string $name, array $data): bool
     $fp = @fopen($path . '.lock', 'c');
     if ($fp) flock($fp, LOCK_EX);
     $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    // json_encode devolve false em float não finito (INF/NAN) ou string UTF-8
+    // inválida. Sem esta guarda, file_put_contents($tmp, false) grava "" e o
+    // rename substituía o arquivo inteiro por vazio, reportando sucesso.
+    if (!is_string($json)) {
+        if ($fp) { flock($fp, LOCK_UN); fclose($fp); }
+        error_log('[natalcontroler] json_encode falhou em ' . $name . '; arquivo preservado');
+        return false;
+    }
     $tmp = $path . '.' . getmypid() . '.tmp';
     $ok = @file_put_contents($tmp, $json, LOCK_EX) !== false;
     if ($ok) $ok = @rename($tmp, $path); // mesmo diretório ⇒ atômico (substitui o existente)
@@ -1535,6 +1549,25 @@ $action = $_REQUEST['action'] ?? ($input['action'] ?? '');
 $p = array_merge($input, $_REQUEST);
 $token = $_SERVER['HTTP_X_TOKEN'] ?? ($p['token'] ?? null);
 
+/* Serializa as escritas: os pushes são read-modify-write de arquivos JSON; dois
+   PDVs enviando ao mesmo tempo (ou um admin salvando) podiam perder um registro.
+   O lock é liberado no fim do request (exit/shutdown), nunca numa exceção. */
+$__writeLock = null;
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
+    $__writeLock = @fopen(dataFile('.write.lock'), 'c');
+    if ($__writeLock) {
+        if (!flock($__writeLock, LOCK_EX)) {
+            fclose($__writeLock);
+            $__writeLock = null;
+        } else {
+            register_shutdown_function(static function () use ($__writeLock) {
+                @flock($__writeLock, LOCK_UN);
+                @fclose($__writeLock);
+            });
+        }
+    }
+}
+
 try {
     switch ($action) {
         // ── Públicas ────────────────────────────────────────
@@ -1912,7 +1945,7 @@ try {
             }
             if ($found === null && $legado !== null) $found = $legado; // adota snapshot antigo sem machineId
             if ($found !== null) $vendas[$found] = $snap; else $vendas[] = $snap;
-            saveJson('vendas.json', $vendas);
+            if (!saveJson('vendas.json', $vendas)) fail('GRAVACAO_FALHOU', 500);
             respond(['ok' => true, 'snapshot' => $snap]);
         }
 
@@ -2012,7 +2045,7 @@ try {
             $temFlag = array_key_exists('cancelamentoSolicitado', $pd);
             $solicitado = !empty($pd['cancelamentoSolicitado']);
             $cancelStatus = is_array($cancel) ? (string) ($cancel['status'] ?? '') : '';
-            if ($solicitado && !in_array($cancelStatus, ['pendente', 'aprovado'], true)) {
+            if ($solicitado && !in_array($cancelStatus, ['pendente', 'aprovado', 'recusado'], true)) {
                 $cancel = [
                     'status' => 'pendente',
                     'solicitadoEm' => gmdate('c'),
@@ -2029,7 +2062,9 @@ try {
             $registro = [
                 'id' => $id,
                 'numero' => (string) ($pd['numero'] ?? $id),
-                'lojaId' => $loja['id'],
+                // Preserva a loja do registro original: um kiosk pareado não pode
+                // "mover" pedido de outra loja só enviando o mesmo id.
+                'lojaId' => (is_array($anterior) && !empty($anterior['lojaId'])) ? $anterior['lojaId'] : $loja['id'],
                 'lojaNome' => lojaNomePush($p, $loja),
                 'pdvNome' => resolverPdvNome($pd['pdvNome'] ?? '', $loja),
                 'machineId' => trim((string) ($p['machineId'] ?? '')),
@@ -2058,7 +2093,7 @@ try {
             ];
 
             if ($found !== null) $todos[$found] = $registro; else $todos[] = $registro;
-            saveJson('pedidos.json', $todos);
+            if (!saveJson('pedidos.json', $todos)) fail('GRAVACAO_FALHOU', 500);
             respond(['ok' => true, 'pedido' => $registro]);
         }
 
@@ -2180,8 +2215,12 @@ try {
             foreach ($caixas as $i => $r) {
                 if (($r['id'] ?? '') === $id) { $found = $i; break; }
             }
-            if ($found !== null) $caixas[$found] = $registro; else $caixas[] = $registro;
-            saveJson('caixas.json', $caixas);
+            if ($found !== null) {
+                // Não permite "mover" caixa de outra loja reenviando o mesmo id.
+                if (!empty($caixas[$found]['lojaId'])) $registro['lojaId'] = $caixas[$found]['lojaId'];
+                $caixas[$found] = $registro;
+            } else $caixas[] = $registro;
+            if (!saveJson('caixas.json', $caixas)) fail('GRAVACAO_FALHOU', 500);
             respond(['ok' => true, 'caixa' => $registro]);
         }
 
@@ -2216,8 +2255,11 @@ try {
             foreach ($todos as $i => $r) {
                 if (($r['id'] ?? '') === $id) { $found = $i; break; }
             }
-            if ($found !== null) $todos[$found] = $registro; else $todos[] = $registro;
-            saveJson('auditoria.json', $todos);
+            if ($found !== null) {
+                if (!empty($todos[$found]['lojaId'])) $registro['lojaId'] = $todos[$found]['lojaId'];
+                $todos[$found] = $registro;
+            } else $todos[] = $registro;
+            if (!saveJson('auditoria.json', $todos)) fail('GRAVACAO_FALHOU', 500);
             respond(['ok' => true, 'uso' => $registro]);
         }
 
@@ -2991,7 +3033,7 @@ try {
             }
             $r['cancelamento'] = $c;
             $todos[$idx] = $r;
-            saveJson('pedidos.json', $todos);
+            if (!saveJson('pedidos.json', $todos)) fail('GRAVACAO_FALHOU', 500);
             respond(['ok' => true, 'pedido' => $r]);
         }
 

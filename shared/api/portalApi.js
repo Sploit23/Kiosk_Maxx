@@ -9,27 +9,28 @@ export const PORTAL_URL = config.portalApiUrl;
 export const LOJA_ID = config.lojaId;
 
 async function post(action, data = {}) {
-  let res;
   const ctrl = typeof window !== 'undefined' && window.AbortController ? new window.AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null; // portal fora do ar/slowhead → fallback offline rápido
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 10000) : null; // portal fora do ar/slowhead → fallback offline rápido
   try {
-    res = await fetch(`${PORTAL_URL}?action=${encodeURIComponent(action)}`, {
+    const res = await fetch(`${PORTAL_URL}?action=${encodeURIComponent(action)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...data, action }),
       signal: ctrl ? ctrl.signal : undefined,
     });
+    // O timeout continua valendo na leitura do corpo: antes ele era limpo nos
+    // headers e um servidor que travava no body pendurava a chamada.
+    const text = await res.text();
+    try {
+      const json = JSON.parse(text);
+      return json.ok === false && res.status >= 400 ? { ...json, offline: false } : json;
+    } catch {
+      return { ok: false, offline: false, error: `HTTP ${res.status}` };
+    }
   } catch {
     return { ok: false, offline: true };
   } finally {
     if (timer) clearTimeout(timer);
-  }
-  const text = await res.text();
-  try {
-    const json = JSON.parse(text);
-    return json.ok === false && res.status >= 400 ? { ...json, offline: false } : json;
-  } catch {
-    return { ok: false, offline: false, error: `HTTP ${res.status}` };
   }
 }
 

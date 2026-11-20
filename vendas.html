@@ -1791,6 +1791,7 @@
     </div>
     <button class="op-chip op-chip-btn" id="import-chip" style="display:none;" title="Cartão de memória e conexão com o outro PC"><span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6l2-4z"/><path d="M9 2v5h7V2"/><path d="M9 12h6M9 16h6"/></svg></span><span class="peer-alert-dot" aria-hidden="true"></span><span id="import-chip-txt">Cartão</span></button>
     <button class="op-chip op-chip-btn" id="camera-chip" style="display:none;" title="Pegar as fotos novas da câmera e criar uma sessão"><span>📷</span> <span id="camera-chip-txt">Sessão da câmera</span></button>
+    <button class="op-chip op-chip-btn" id="dslr-chip" style="display:none;" title="Abrir a câmera no cabo direto"><span>📷</span> <span id="dslr-chip-txt">Cabo direto</span></button>
     <div class="op-chip" id="ribbon-chip">🖨️ Ribbon: — un.</div>
     <button class="op-chip op-chip-btn" id="update-chip" style="display:none;" title="Nova versão pronta para instalar" onclick="window.abrirUpdatePronto()">⬇️ Atualizar</button>
     <button class="op-chip op-chip-btn" id="user-chip">👤 —</button>
@@ -2545,10 +2546,12 @@ let _dslrBusy = false;
 let _dslrFechando = false;
 let _dslrCountAnterior = 0;
 let _dslrTimer = null;
-let _dslrProcessoSincronizado = false;
+let _dslrAberto = false;
 
 function renderDslr(){
   const bar = document.getElementById('dslr-bar');
+  const chip = document.getElementById('dslr-chip');
+  const chipTxt = document.getElementById('dslr-chip-txt');
   const dot = document.getElementById('dslr-dot');
   const countEl = document.getElementById('dslr-count');
   const subEl = document.getElementById('dslr-sub');
@@ -2556,7 +2559,19 @@ function renderDslr(){
   const btnDesc = document.getElementById('dslr-descartar');
   if(!bar) return;
   const info = _dslrInfo;
-  if(!info || !info.enabled){
+  // Pode usar se o modo foi habilitado na máquina, se a pasta da câmera está
+  // configurada (primeiro clique = "Ativar") ou se ele já está aberto.
+  const podeUsar = !!(info && (info.enabled || info.online || info.configurado || String(info.folder || '').trim()));
+  const ativo = !!(info && (info.online || info.closing || _dslrAberto));
+  // O chip da topbar é o ÚNICO lugar de ligar/desligar a câmera: fica sempre
+  // visível e vira "Parar câmera" quando ela está aberta. Assim o controle não
+  // muda de posição (antes o "Parar" aparecia só dentro da barra da sessão).
+  if(chip){
+    chip.style.display = podeUsar ? 'inline-flex' : 'none';
+    if(chipTxt) chipTxt.textContent = ativo ? 'Parar câmera' : ((info && info.enabled) ? 'Cabo direto' : 'Ativar cabo direto');
+    chip.title = ativo ? 'Fecha o digiCamControl; as fotos continuam na pasta' : 'Abrir a câmera no cabo direto';
+  }
+  if(!ativo){
     bar.style.display = 'none';
     return;
   }
@@ -2568,7 +2583,7 @@ function renderDslr(){
   if(dot) dot.className = 'dslr-dot ' + (info.online ? (pending ? 'pending' : 'on') : 'off');
   if(subEl){
     if(pending) subEl.textContent = 'recebendo foto...';
-    else if(!info.online) subEl.textContent = 'digiCamControl fechado — abra a câmera';
+    else if(!info.online) subEl.textContent = 'câmera fechada — clique em Ativar cabo direto';
     else if(!info.exists) subEl.textContent = 'aguardando a primeira foto';
     else if(!total) subEl.textContent = 'câmera pronta para fotografar';
     else subEl.textContent = count + ' pronta(s) para fechar a sessão';
@@ -2585,21 +2600,16 @@ async function carregarDslr(){
   let info = null;
   try{ info = await natalApi.dslrStatus(); }catch{}
   _dslrInfo = (info && info.success) ? info : null;
-  // No PC da venda, garante o digiCamControl aberto quando o modo está ligado.
-  if(_dslrInfo && _dslrInfo.enabled && !_dslrProcessoSincronizado && window.natal?.dslrSync){
-    _dslrProcessoSincronizado = true;
-    try{ await window.natal.dslrSync(true); }catch{}
-  }
-  if(_dslrInfo && !_dslrInfo.enabled) _dslrProcessoSincronizado = false;
+  _dslrAberto = !!(_dslrInfo && _dslrInfo.online);
   renderDslr();
-  if(_dslrInfo && _dslrInfo.enabled){
+  const podeUsar = !!(_dslrInfo && (_dslrInfo.enabled || _dslrInfo.online || _dslrInfo.configurado || String(_dslrInfo.folder || '').trim()));
+  if(podeUsar){
     const total = Number(_dslrInfo.total) || 0;
     if(!_dslrBusy && total > _dslrCountAnterior && document.visibilityState === 'visible'){
       toast(total + ' foto(s) na câmera');
     }
     _dslrCountAnterior = total;
-    // Enquanto a câmera está ligada, mantém o contador fresco; desligado,
-    // basta uma checagem lenta (o modo pode ser ativado pela aba Sistema).
+    // Mantém o contador fresco; o modo NÃO abre sozinho (só pelo botão).
     if(!_dslrTimer){
       _dslrTimer = setInterval(()=>{ carregarDslr().catch(()=>{}); }, 2000);
     }
@@ -2610,11 +2620,62 @@ async function carregarDslr(){
   }
 }
 
+// "Fechar sessão"/"Descartar" exigem dslrEnabled=true no sidecar. O botão do
+// painel liga o modo sem pedir a senha do Sistema (o Config continua atrás dela).
+async function habilitarModoDslr(){
+  if(_dslrInfo && _dslrInfo.enabled) return;
+  try{ await natalApi.saveConfig({ dslrEnabled: true }); }catch{}
+  if(_dslrInfo) _dslrInfo.enabled = true;
+}
+
+async function iniciarCameraDslr(){
+  if(_dslrBusy) return;
+  if(!window.natal?.dslrSync){ toast('Abra a câmera no PC da venda'); return; }
+  _dslrBusy = true;
+  renderDslr();
+  try{
+    // Primeiro clique em "Ativar": grava o modo na máquina (sem senha do
+    // Sistema) para o "Fechar sessão"/"Descartar" funcionarem.
+    await habilitarModoDslr();
+    const r = await window.natal.dslrSync(true);
+    if(r && r.success === false){
+      toast('Não foi possível abrir a câmera' + (r.error ? ': ' + r.error : ''));
+    }else{
+      _dslrAberto = true;
+    }
+  }catch(e){
+    toast('Erro ao abrir a câmera: ' + (e && e.message ? e.message : e));
+  }finally{
+    _dslrBusy = false;
+    await carregarDslr().catch(()=>{});
+  }
+}
+
+async function pararCameraDslr(){
+  if(_dslrBusy) return;
+  if(!window.natal?.dslrStop && !window.natal?.dslrSync){ toast('Pare a câmera no PC da venda'); return; }
+  const n = _dslrInfo && _dslrInfo.total ? _dslrInfo.total : 0;
+  if(n && !window.confirm('Parar a câmera? ' + n + ' foto(s) continuam na pasta e podem ser fechadas depois.')) return;
+  _dslrBusy = true;
+  renderDslr();
+  try{
+    if(window.natal?.dslrStop) await window.natal.dslrStop();
+    else await window.natal.dslrSync(false);
+    _dslrAberto = false;
+  }catch(e){
+    toast('Erro ao parar a câmera: ' + (e && e.message ? e.message : e));
+  }finally{
+    _dslrBusy = false;
+    await carregarDslr().catch(()=>{});
+  }
+}
+
 async function fecharSessaoDslr(){
   if(_dslrBusy) return;
   _dslrBusy = true; _dslrFechando = true;
   renderDslr();
   try{
+    await habilitarModoDslr();
     const r = await natalApi.dslrFechar();
     if(r && r.success){
       toast('Sessão ' + (r.sessaoId || '') + ' criada com ' + (r.count || 0) + ' foto(s)'
@@ -2644,6 +2705,7 @@ async function descartarDslr(){
   if(!window.confirm('Descartar ' + n + ' foto(s) da câmera? Elas não viram sessão.')) return;
   _dslrBusy = true;
   try{
+    await habilitarModoDslr();
     const r = await natalApi.dslrDescartar();
     if(r && r.success){
       toast((r.descartadas || 0) + ' foto(s) descartada(s)');
@@ -8942,7 +9004,7 @@ async function showConfigModal(tabInicial){
       <label style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;font-size:12px;color:var(--slate-300);cursor:pointer;">
         <input id="cfg-dslr-enabled" type="checkbox" ${dslrEnabledCfg ? 'checked' : ''} style="margin-top:2px;" />
         <span>Usar esta máquina com a câmera no cabo (disparo pelo botão da câmera)<br>
-          <span style="font-size:11px;color:var(--slate-500);">O PDV abre o digiCamControl e mostra a barra "Fechar sessão" no painel. Nada de cartão de memória.</span>
+          <span style="font-size:11px;color:var(--slate-500);">Habilita o botão "Cabo direto" no painel. O digiCamControl só abre quando você clica nele (nada no boot, nada de cartão de memória).</span>
         </span>
       </label>
       <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
@@ -9609,10 +9671,11 @@ const r = await natalApi.limparFila({ pedidoId });
       }
       // Câmera direta: liga/desliga o digiCamControl no PC da venda e mantém a
       // pasta customizada no electron-config (o sidecar é a fonte da verdade).
-      if(window.natal?.dslrSync){
-        try{ await window.natal.dslrSync(dslrEnabledVal); }catch{}
+      // Câmera no cabo: desmarcar fecha o programa; marcar só habilita o
+      // botão do painel (o digiCamControl NÃO abre sozinho no boot/salvar).
+      if(window.natal?.dslrSync && !dslrEnabledVal){
+        try{ await window.natal.dslrSync(false); }catch{}
       }
-      _dslrProcessoSincronizado = false;
       carregarDslr().catch(()=>{});
       if(lojaIdEl && lojaIdVal) agendarSincronizacao(1000);
       toast('Configurações salvas');
@@ -13133,8 +13196,13 @@ async function INIT(){
   document.getElementById('login-peer').addEventListener('click', abrirRecebimento);
   document.getElementById('login-camera').addEventListener('click', abrirCamera);
   document.getElementById('camera-chip').addEventListener('click', abrirCamera);
-  document.getElementById('dslr-fechar').addEventListener('click', fecharSessaoDslr);
-  document.getElementById('dslr-descartar').addEventListener('click', descartarDslr);
+document.getElementById('dslr-fechar').addEventListener('click', fecharSessaoDslr);
+document.getElementById('dslr-descartar').addEventListener('click', descartarDslr);
+const _dslrChip = document.getElementById('dslr-chip');
+if(_dslrChip) _dslrChip.addEventListener('click', () => {
+  if(_dslrInfo && (_dslrInfo.online || _dslrInfo.closing || _dslrAberto)) pararCameraDslr();
+  else iniciarCameraDslr();
+});
   document.getElementById('camera-close').addEventListener('click', fecharCamera);
   document.getElementById('camera-scan').addEventListener('click', cameraScan);
   document.getElementById('camera-capture').addEventListener('click', cameraCapture);

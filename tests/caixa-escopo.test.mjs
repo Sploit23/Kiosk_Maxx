@@ -275,7 +275,7 @@ function subirSidecar(t, tmp, port) {
   return { base, logs: () => logs };
 }
 
-test('pedido novo de sessao de ontem nasce no caixa de ontem', async (t) => {
+test('pedido novo de sessao de ontem entra no caixa aberto hoje', async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'natal-caixa-sessao-'));
   const app = path.join(tmp, 'natal-app');
   const db = path.join(app, 'database');
@@ -307,7 +307,8 @@ test('pedido novo de sessao de ontem nasce no caixa de ontem', async (t) => {
     body: JSON.stringify({ sessaoId: 'S-ONTEM', sessoes: [{ id: 'S-ONTEM' }], total: 40 }),
   })).json();
   assert.equal(criado.success, true);
-  assert.equal(criado.pedido.caixaId, 'CX-ONTEM');
+  assert.equal(criado.pedido.caixaId, 'CX-HOJE');
+  assert.equal(criado.pedido.caixaPeriodoDivergente, true);
   assert.equal(dataLocal(criado.pedido.criadoEm), dataLocal(sessaoEm));
   assert.equal(dataLocal(criado.pedido.periodoEm), dataLocal(sessaoEm));
 
@@ -322,13 +323,14 @@ test('pedido novo de sessao de ontem nasce no caixa de ontem', async (t) => {
 
   const aberto = await (await fetch(s.base + '/api/pdv/caixa')).json();
   assert.equal(aberto.caixa.id, 'CX-HOJE');
-  assert.equal(aberto.caixa.pedidos.includes(criado.pedido.id), false);
+  assert.equal(aberto.caixa.pedidos.includes(criado.pedido.id), true);
 
   const historico = await (await fetch(s.base + '/api/pdv/caixas')).json();
   const antigo = historico.caixas.find((c) => c.id === 'CX-ONTEM');
-  assert.equal(antigo.pedidos.includes(criado.pedido.id), true);
+  assert.equal(antigo.pedidos.includes(criado.pedido.id), false);
 
-  // Edicao de um pedido antigo: o novo pedido herda o caixa do original.
+  // Edicao de um pedido antigo: herda o periodo do original, mas o dinheiro
+  // recebido agora entra no caixa que esta aberto agora.
   const editado = await (await fetch(s.base + '/api/pedidos', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -338,7 +340,8 @@ test('pedido novo de sessao de ontem nasce no caixa de ontem', async (t) => {
     }),
   })).json();
   assert.equal(editado.success, true);
-  assert.equal(editado.pedido.caixaId, 'CX-ONTEM');
+  assert.equal(editado.pedido.caixaId, 'CX-HOJE');
+  assert.equal(editado.pedido.caixaPeriodoDivergente, true);
   assert.equal(dataLocal(editado.pedido.criadoEm), dataLocal(sessaoEm));
 
   // Edicao da edicao: a cadeia inteira continua apontando para a venda original.
@@ -351,11 +354,12 @@ test('pedido novo de sessao de ontem nasce no caixa de ontem', async (t) => {
     }),
   })).json();
   assert.equal(editado2.success, true);
-  assert.equal(editado2.pedido.caixaId, 'CX-ONTEM');
+  assert.equal(editado2.pedido.caixaId, 'CX-HOJE');
+  assert.equal(editado2.pedido.caixaPeriodoDivergente, true);
   assert.equal(dataLocal(editado2.pedido.criadoEm), dataLocal(sessaoEm));
 });
 
-test('boot devolve ao caixa de ontem pedidos editados/criados com sessao de ontem', async (t) => {
+test('boot move para o caixa do registro pedidos antigos gravados no caixa do periodo', async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'natal-caixa-boot-'));
   const app = path.join(tmp, 'natal-app');
   const db = path.join(app, 'database');
@@ -369,13 +373,14 @@ test('boot devolve ao caixa de ontem pedidos editados/criados com sessao de onte
   escreverJson(path.join(db, 'caixas.json'), [{
     id: 'CX-ONTEM', numero: 1, operador: 'QA', valorInicial: 100,
     abertoEm: ontem - 3 * 3600000, fechadoEm: ontem + 3600000,
-    pedidos: ['PED-OLD'], totalVendido: 40, totalPorMeio: { dinheiro: 40 },
-    meiosDeclarados: { dinheiro: 140, debito: 0, credito: 0, pix: 0 },
+    pedidos: ['PED-OLD', 'PED-NOVO2', 'PED-NOVO', 'PED-SEM'],
+    totalVendido: 120, totalPorMeio: { dinheiro: 40, credito: 50, pix: 30 },
+    meiosDeclarados: { dinheiro: 140, debito: 0, credito: 50, pix: 30 },
   }]);
   escreverJson(path.join(db, 'caixa.json'), {
     id: 'CX-HOJE', operador: 'QA', valorInicial: 200,
     abertoEm: agora - 1800000, fechadoEm: null,
-    pedidos: ['PED-NOVO2', 'PED-NOVO', 'PED-SEM'], meios: {}, sangrias: [],
+    pedidos: [], meios: {}, sangrias: [],
   });
   escreverJson(path.join(db, 'pedidos.json'), [
     {
@@ -384,55 +389,43 @@ test('boot devolve ao caixa de ontem pedidos editados/criados com sessao de onte
       canceladoEm: agora - 600000,
     },
     {
-      // Edicao da edicao, antes do pedido intermediario no arquivo: a cadeia
-      // precisa subir ate o pedido raiz para achar o dia certo.
-      id: 'PED-NOVO2', numero: 4, caixaId: 'CX-HOJE', origemPedidoId: 'PED-NOVO',
+      // Legado da 1.3.32: a venda de sessao de ontem ficou gravada no caixa do
+      // periodo, mas o dinheiro foi recebido agora (registradoEm de hoje).
+      id: 'PED-NOVO2', numero: 4, caixaId: 'CX-ONTEM', origemPedidoId: 'PED-NOVO',
       total: 10, status: 'PAGO', pagamentos: [{ meio: 'credito', valor: 10 }],
-      criadoEm: agora - 120000, pagoEm: agora - 120000,
+      criadoEm: agora, pagoEm: agora, registradoEm: agora, periodoEm: sessaoEm,
     },
     {
-      id: 'PED-NOVO', numero: 2, caixaId: 'CX-HOJE', origemPedidoId: 'PED-OLD',
+      id: 'PED-NOVO', numero: 2, caixaId: 'CX-ONTEM', origemPedidoId: 'PED-OLD',
       total: 40, status: 'PAGO', pagamentos: [{ meio: 'credito', valor: 40 }],
-      criadoEm: agora - 900000, pagoEm: agora - 900000,
+      criadoEm: agora, pagoEm: agora, registradoEm: agora, periodoEm: sessaoEm,
     },
     {
-      id: 'PED-SEM', numero: 3, caixaId: 'CX-HOJE', sessaoId: 'S-ONTEM',
+      id: 'PED-SEM', numero: 3, caixaId: 'CX-ONTEM', sessaoId: 'S-ONTEM',
       total: 30, status: 'PAGO', pagamentos: [{ meio: 'pix', valor: 30 }],
-      criadoEm: agora - 300000, pagoEm: agora - 300000,
+      criadoEm: agora, pagoEm: agora, registradoEm: agora, periodoEm: sessaoEm,
     },
   ]);
 
   const s = subirSidecar(t, tmp, 22000 + Math.floor(Math.random() * 1000));
   await esperarHealth(s.base, s.logs);
 
-  const novo = await (await fetch(s.base + '/api/pedidos/PED-NOVO')).json();
-  assert.equal(novo.pedido.caixaId, 'CX-ONTEM');
-  assert.equal(dataLocal(novo.pedido.criadoEm), dataLocal(ontem));
-  assert.equal(dataLocal(novo.pedido.pagoEm), dataLocal(ontem));
-  assert.equal(novo.pedido.caixaReajuste.motivo, 'edicao de pedido de outro dia');
-
-  const encadeado = await (await fetch(s.base + '/api/pedidos/PED-NOVO2')).json();
-  assert.equal(encadeado.pedido.caixaId, 'CX-ONTEM');
-  assert.equal(dataLocal(encadeado.pedido.criadoEm), dataLocal(ontem));
-  assert.equal(encadeado.pedido.caixaReajuste.motivo, 'edicao de pedido de outro dia');
-
-  const semOrigem = await (await fetch(s.base + '/api/pedidos/PED-SEM')).json();
-  assert.equal(semOrigem.pedido.caixaId, 'CX-ONTEM');
-  assert.equal(dataLocal(semOrigem.pedido.criadoEm), dataLocal(sessaoEm));
-  assert.equal(dataLocal(semOrigem.pedido.pagoEm), dataLocal(sessaoEm));
-  assert.equal(semOrigem.pedido.caixaReajuste.motivo, 'sessao de outro dia');
+  for (const id of ['PED-NOVO', 'PED-NOVO2', 'PED-SEM']) {
+    const pedido = (await (await fetch(s.base + '/api/pedidos/' + id)).json()).pedido;
+    assert.equal(pedido.caixaId, 'CX-HOJE');
+    assert.equal(pedido.caixaPeriodoDivergente, true);
+    assert.equal(pedido.caixaReajuste.de, 'CX-ONTEM');
+    assert.equal(pedido.caixaReajuste.para, 'CX-HOJE');
+    assert.equal(pedido.caixaReajuste.motivo, 'dinheiro recebido em dia diferente do da sessão');
+    assert.equal(dataLocal(pedido.criadoEm), dataLocal(agora));
+  }
 
   const aberto = await (await fetch(s.base + '/api/pdv/caixa')).json();
   assert.equal(aberto.caixa.id, 'CX-HOJE');
-  assert.deepEqual(aberto.caixa.pedidos, []);
+  assert.deepEqual(aberto.caixa.pedidos.sort(), ['PED-NOVO', 'PED-NOVO2', 'PED-SEM']);
 
   const historico = await (await fetch(s.base + '/api/pdv/caixas')).json();
   const antigo = historico.caixas.find((c) => c.id === 'CX-ONTEM');
-  assert.equal(antigo.totalVendido, 80);
-  assert.equal(antigo.totalPorMeio.credito, 50);
-  assert.equal(antigo.totalPorMeio.pix, 30);
-  assert.equal(antigo.pedidos.includes('PED-NOVO2'), true);
-  assert.equal(antigo.pedidos.includes('PED-NOVO'), true);
-  assert.equal(antigo.pedidos.includes('PED-SEM'), true);
-  assert.equal(antigo.pedidos.includes('PED-OLD'), true);
+  assert.deepEqual(antigo.pedidos, ['PED-OLD']);
+  assert.equal(fs.existsSync(path.join(app, 'migracao-caixa-registro.json')), true);
 });

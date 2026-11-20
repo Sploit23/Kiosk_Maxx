@@ -46,14 +46,31 @@ const CONFIG_PATH = app.isPackaged
   : path.join(__dirname, 'electron-config.json');
 
 let config = {};
+// true quando o electron-config.json existe mas não abre (escrita interrompida/
+// queda de energia). Nesse caso não sobrescrevemos nada: o sidecar tem o
+// ponteiro `fotos-folder.txt` e o backup de identidade em ProgramData, que
+// recuperam pasta/loja. Sobrescrever com o template zerava photosFolder e fazia
+// o PDV abrir numa pasta vazia (sessões, pedidos e ribbon "desapareciam").
+let configInvalido = false;
+function writeConfigAtomico() {
+  const tmp = `${CONFIG_PATH}.tmp`;
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(tmp, JSON.stringify(config, null, 2), 'utf-8');
+  fs.renameSync(tmp, CONFIG_PATH);
+}
 function loadConfig() {
+  configInvalido = false;
   try {
     config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
   } catch {
+    configInvalido = fs.existsSync(CONFIG_PATH);
     try {
       config = JSON.parse(fs.readFileSync(path.join(__dirname, 'electron-config.template.json'), 'utf-8'));
     } catch {
       config = {};
+    }
+    if (configInvalido) {
+      console.error(`[Config] ${CONFIG_PATH} ilegivel; mantendo o arquivo e usando o ponteiro de pasta do sidecar`);
     }
   }
 }
@@ -64,6 +81,8 @@ loadConfig();
 // nada. Documentos\Natal_Recebidas funciona sem senha e pode ser trocada no
 // ⚙ Config > Sistema (a pasta escolhida continua tendo prioridade).
 function aplicarPastaDeFotosPadrao() {
+  // Config ilegível: não inventa pasta nova (o ponteiro do sidecar manda).
+  if (configInvalido) return;
   if (String(config.photosFolder || '').trim()) return;
   let docs = '';
   try { docs = app.getPath('documents'); } catch {}
@@ -77,8 +96,7 @@ function aplicarPastaDeFotosPadrao() {
   }
   config.photosFolder = pasta;
   try {
-    fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+    writeConfigAtomico();
   } catch (e) {
     // Sem permissao de escrita a pasta ainda vale para esta sessao (env abaixo).
     console.warn(`[Config] nao consegui gravar ${CONFIG_PATH}: ${(e && e.message) || e}`);
@@ -150,7 +168,9 @@ async function spawnSidecar(sidecarPath, expectedBuild) {
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
     NATAL_DATA_DIR: app.getPath('userData'),
-    NATAL_PHOTOS_FOLDER: (config.photosFolder || '').trim(),
+    // Config ilegível: sem env, o sidecar usa o ponteiro fotos-folder.txt
+    // (recuperação) em vez de uma pasta recém-criada e vazia.
+    NATAL_PHOTOS_FOLDER: configInvalido ? '' : (config.photosFolder || '').trim(),
     NATAL_WEB_DIR: app.isPackaged ? getResourcePath('web') : path.join(__dirname, 'dist'),
   };
   sidecarProcess = spawn(process.execPath, [sidecarPath], { env, windowsHide: true });
@@ -178,6 +198,9 @@ async function spawnSidecar(sidecarPath, expectedBuild) {
         const proc = sidecarProcess;
         try { proc.kill(); } catch {}
         setTimeout(() => startSidecar(), 1500);
+      } else {
+        // Subiu e respondeu com o build atual: backend saudável, zera a cota.
+        sidecarRestartCount = 0;
       }
     }, 4000);
   }
@@ -197,6 +220,10 @@ async function startSidecar() {
     const health = await fetchSidecarHealth(9877);
     const sameBuild = health && health.ok && expectedBuild && health.build === expectedBuild;
     if (sameBuild) {
+      // Instância saudável na porta: o backend está de pé. Zera o orçamento de
+      // restarts (antes ele era cumulativo e, após 5 falhas ao longo do dia, o
+      // sidecar nunca mais subia até reiniciar o app).
+      sidecarRestartCount = 0;
       console.warn('[Sidecar] Porta 9877 ja em uso (instancia identica). Usando a existente.');
       return;
     }
@@ -331,6 +358,14 @@ let importerStopping = false;
 let importerBusy = false;
 let importerLastError = '';
 let importerWatchdog = null;
+// Um único timer de retry para o importador. Antes cada falha agendava o seu
+// próprio setTimeout e o watchdog (30s) disparava mais uma corrente — com o
+// exe bloqueado/HD fora, as correntes se multiplicavam sem limite.
+let importerRetryTimer = null;
+function agendarRetryImporter(ms) {
+  if (importerRetryTimer) clearTimeout(importerRetryTimer);
+  importerRetryTimer = setTimeout(() => { importerRetryTimer = null; startImporter(); }, ms);
+}
 
 function mainLogFile() {
   return path.join(app.getPath('userData'), 'logs', 'main.log');
@@ -438,13 +473,16 @@ async function resolverImportFolder() {
 }
 
 async function startImporter() {
+  // Se estamos iniciando agora (watchdog/boot), o retry pendente não é mais
+  // necessário — cancelar evita correntes paralelas de tentativa.
+  if (importerRetryTimer) { clearTimeout(importerRetryTimer); importerRetryTimer = null; }
   if (importerBusy || importerStopping) return;
   importerBusy = true;
   try {
     await startImporterInner();
   } catch (e) {
     setImporterError(`Falha ao iniciar o importador: ${(e && e.message) || e}`);
-    setTimeout(startImporter, 15000);
+    agendarRetryImporter(15000);
   } finally {
     importerBusy = false;
   }
@@ -457,7 +495,7 @@ async function startImporterInner() {
     // Sidecar ainda subindo ou maquina sem pasta de fotos (wizard). Continua
     // tentando: a pasta pode ser configurada depois sem reiniciar o app.
     setImporterError('Pasta de fotos ainda nao configurada');
-    setTimeout(startImporter, 10000);
+    agendarRetryImporter(10000);
     return;
   }
 
@@ -466,7 +504,7 @@ async function startImporterInner() {
   const usarExe = fs.existsSync(exe);
   if (!usarExe && !fs.existsSync(script)) {
     setImporterError(`Importador nao encontrado: ${exe} (instalacao incompleta ou antivirus)`);
-    setTimeout(startImporter, 30000);
+    agendarRetryImporter(30000);
     return;
   }
 
@@ -510,7 +548,7 @@ async function startImporterInner() {
   }
   if (await isPortInUse(IMPORTER_PORT)) {
     setImporterError('Porta 8099 ocupada por outro programa');
-    setTimeout(startImporter, 15000);
+    agendarRetryImporter(15000);
     return;
   }
 
@@ -531,7 +569,7 @@ async function startImporterInner() {
     // Pasta de fotos em HD externo/rede desconectado: antes o start morria
     // calado e o importador ficava parado ate reiniciar o app.
     setImporterError(`Pasta indisponivel: ${info.folder} (${(e && (e.code || e.message)) || e})`);
-    setTimeout(startImporter, 30000);
+    agendarRetryImporter(30000);
     return;
   }
 
@@ -553,7 +591,7 @@ async function startImporterInner() {
     }
     if (importerProcess === proc) { importerProcess = null; importerPid = null; }
     importerRestartCount++;
-    setTimeout(startImporter, importerBackoff());
+    agendarRetryImporter(importerBackoff());
   });
   if (proc.stdout) proc.stdout.on('data', (d) => logMain(`[Importador] ${String(d).trim()}`));
   if (proc.stderr) proc.stderr.on('data', (d) => logMain(`[Importador][erro] ${String(d).trim()}`));
@@ -578,7 +616,7 @@ async function startImporterInner() {
       setImporterError(`Importador encerrou sozinho (codigo ${code})`);
     }
     importerRestartCount++;
-    setTimeout(startImporter, importerBackoff());
+    agendarRetryImporter(importerBackoff());
   });
 
   // O 1o start de um exe PyInstaller pode demorar enquanto o antivirus escaneia
@@ -589,7 +627,7 @@ async function startImporterInner() {
     setImporterError('Importador nao respondeu em 45s; relancando');
     killImporterPid(proc.pid);
     importerRestartCount++;
-    setTimeout(startImporter, importerBackoff());
+    agendarRetryImporter(importerBackoff());
   }
 }
 
@@ -683,13 +721,364 @@ ipcMain.handle('natal:exitFullscreen', () => {
     });
     mainWindow.setFullScreen(false);
   } else if (!mainWindow.isMaximized()) {
-    mainWindow.maximize();
+  mainWindow.maximize();
+  // Quiosque: a janela não pode sair do app. Uma página remota (link, redirect,
+  // window.open) herdaria o preload desta janela — ou seja, window.natal com
+  // acesso a IPC de config/impressora/updater. Nega popups e navegação externa.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const navegacaoPermitida = (url) => (isDev
+    ? /^http:\/\/localhost:5173\//.test(String(url))
+    : String(url).startsWith('file://'));
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!navegacaoPermitida(url)) {
+      console.warn(`[Janela] navegacao bloqueada: ${url}`);
+      event.preventDefault();
+    }
+  });
+  mainWindow.webContents.on('will-redirect', (event, url) => {
+    if (!navegacaoPermitida(url)) event.preventDefault();
+  });
   }
 });
 ipcMain.handle('natal:enterFullscreen', () => {
   if (mainWindow && !mainWindow.isFullScreen()) mainWindow.setFullScreen(true);
 });
 ipcMain.handle('natal:appVersion', () => app.getVersion());
+
+// ─── Camera DSLR direta (digiCamControl embutido) ───────────
+// Modalidade "cabo 100% direto": o app abre o digiCamControl junto do PDV, ele
+// salva os JPEGs na pasta da sessao e o sidecar cria a sessao no "Fechar sessao".
+// A foto fica SEMPRE no PC (CaptureInSdRam=false): nada de gravar no cartao.
+const DIGICAM_PORT = 5513;
+let digiCamProcess = null;
+let digiCamWatchdogTimer = null;
+let digiCamBusy = false;
+let digiCamDesejado = false;
+
+function getDigiCamPath() {
+  const candidatos = [];
+  if (app.isPackaged) candidatos.push(path.join(process.resourcesPath, 'digicam', 'CameraControl.exe'));
+  candidatos.push(path.join(__dirname, 'digicam', 'CameraControl.exe'));
+  candidatos.push(path.join('C:', 'Program Files (x86)', 'digiCamControl', 'CameraControl.exe'));
+  candidatos.push(path.join('C:', 'Program Files', 'digiCamControl', 'CameraControl.exe'));
+  for (const c of candidatos) {
+    try { if (fs.existsSync(c)) return c; } catch {}
+  }
+  return candidatos[0];
+}
+function digiCamBundled() {
+  if (app.isPackaged) return fs.existsSync(path.join(process.resourcesPath, 'digicam', 'CameraControl.exe'));
+  return fs.existsSync(path.join(__dirname, 'digicam', 'CameraControl.exe'));
+}
+function digiCamSettingsPath() {
+  return path.join(process.env.ProgramData || 'C:\\ProgramData', 'digiCamControl', 'settings.json');
+}
+function digiCamLogFile() {
+  return path.join(app.getPath('userData'), 'logs', 'digicam.log');
+}
+function digiCamLogar(msg) {
+  const linha = `[${new Date().toISOString()}] ${msg}\r\n`;
+  try {
+    const file = digiCamLogFile();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, linha, 'utf-8');
+  } catch {}
+}
+function digiCamProgramData() {
+  return process.env.ProgramData || 'C:\\ProgramData';
+}
+function digiCamSessionName() {
+  try {
+    const json = JSON.parse(fs.readFileSync(digiCamSettingsPath(), 'utf-8'));
+    const nome = json && String(json.DefaultSessionName || '').trim();
+    if (nome) return nome;
+  } catch {}
+  return 'Session1';
+}
+function digiCamSessionPath() {
+  return path.join(digiCamProgramData(), 'digiCamControl', 'Sessions', digiCamSessionName() + '.json');
+}
+function digiCamRemotePath() {
+  try { return path.join(path.dirname(getDigiCamPath()), 'CameraControlRemoteCmd.exe'); } catch { return ''; }
+}
+function lerSessaoDigiCam() {
+  try {
+    const file = digiCamSessionPath();
+    if (!fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch { return null; }
+}
+// Pasta que o kiosk quer usar: config do sidecar (fonte da verdade) > config do
+// electron > pasta padrao do digiCamControl (Pictures\digiCamControl\<sessao>).
+async function resolverPastaDigiCam() {
+  try {
+    const cfg = await fetchJson(9877, '/api/config', '127.0.0.1', 2500);
+    const resolved = cfg && String(cfg.dslrFolderResolved || '').trim();
+    if (resolved) return resolved;
+    const custom = cfg && String(cfg.dslrFolder || '').trim();
+    if (custom) return custom;
+  } catch {}
+  const custom = String(config.dslrFolder || '').trim();
+  if (custom) return custom;
+  const userProfile = String(process.env.USERPROFILE || app.getPath('home') || '').trim();
+  return path.join(userProfile, 'Pictures', 'digiCamControl', digiCamSessionName());
+}
+// O digiCamControl salva o "Folder" dentro da sessao; se ele ficou apontando
+// para outra pasta (outro projeto/teste), as fotos nunca aparecem no PDV.
+// Compara o que esta gravado com a pasta desejada para decidir se precisa
+// reiniciar o programa antes de reescrever.
+function digiCamPrecisaAjuste(pasta) {
+  let settingsAjuste = false;
+  try {
+    const json = JSON.parse(fs.readFileSync(digiCamSettingsPath(), 'utf-8'));
+    if (json && json.UseWebserver !== true) settingsAjuste = true;
+    if (json && json.AllowWebserverActions !== true) settingsAjuste = true;
+    if (json && json.NewSessionOnStartUp === true) settingsAjuste = true;
+    const itens = json && json.CameraProperties && Array.isArray(json.CameraProperties.Items)
+      ? json.CameraProperties.Items : [];
+    for (const item of itens) {
+      if (!item) continue;
+      if (item.CaptureInSdRam !== false || item.NoDownload === true) { settingsAjuste = true; break; }
+    }
+  } catch {}
+  const sessao = lerSessaoDigiCam();
+  let folderAjuste = false;
+  if (sessao && pasta) {
+    const atual = String(sessao.Folder || '').trim();
+    folderAjuste = !atual || path.resolve(atual) !== path.resolve(pasta);
+  }
+  return settingsAjuste || folderAjuste;
+}
+// Rede de seguranca: as fotos de teste podem ter ficado na pasta antiga da
+// sessao. Se a pasta nova estiver vazia, move os JPEGs para ela na primeira
+// abertura (nada e apagado; se o move falhar, copia).
+function migrarFotosSessaoAntiga(origem, destino) {
+  try {
+    if (!origem || !destino) return 0;
+    const o = path.resolve(origem);
+    const d = path.resolve(destino);
+    if (o === d || !fs.existsSync(o) || !fs.existsSync(d)) return 0;
+    const ehFoto = (n) => /\.(jpe?g|png)$/i.test(n) && !n.startsWith('.');
+    const fotos = fs.readdirSync(o).filter(ehFoto);
+    if (!fotos.length) return 0;
+    if (fs.readdirSync(d).some(ehFoto)) return 0;
+    let movidas = 0;
+    for (const nome of fotos) {
+      const src = path.join(o, nome);
+      const dst = path.join(d, nome);
+      try { fs.renameSync(src, dst); movidas += 1; }
+      catch { try { fs.copyFileSync(src, dst); fs.rmSync(src, { force: true }); movidas += 1; } catch {} }
+    }
+    if (movidas) digiCamLogar(`migradas ${movidas} foto(s) de ${o} para ${d}`);
+    return movidas;
+  } catch (e) {
+    digiCamLogar('falha ao migrar fotos da sessao: ' + ((e && e.message) || e));
+    return 0;
+  }
+}
+// Grava a pasta desejada na sessao ativa. Deve rodar com o CameraControl
+// fechado (senao ele regrava o arquivo ao sair).
+function ajustarSessaoDigiCam(pasta) {
+  try {
+    if (!pasta) return false;
+    fs.mkdirSync(pasta, { recursive: true });
+    const file = digiCamSessionPath();
+    if (!fs.existsSync(file)) return false;
+    const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    if (!json || typeof json !== 'object') return false;
+    const atual = String(json.Folder || '').trim();
+    if (atual && path.resolve(atual) !== path.resolve(pasta)) {
+      migrarFotosSessaoAntiga(atual, pasta);
+    }
+    if (atual === pasta) return false;
+    json.Folder = pasta;
+    fs.writeFileSync(file, JSON.stringify(json), 'utf-8');
+    digiCamLogar(`sessao ${json.Name || ''} apontada para ${pasta}`);
+    return true;
+  } catch (e) {
+    digiCamLogar('nao consegui ajustar a sessao do digiCamControl: ' + ((e && e.message) || e));
+    return false;
+  }
+}
+// Com o programa aberto, a sessao em memoria e alterada pelo utilitario
+// remoto (CameraControlRemoteCmd.exe /c set session.folder). Retenta enquanto
+// o webserver local (5513) sobe.
+function aplicarPastaDigiCam(pasta) {
+  return new Promise((resolve) => {
+    if (!pasta) return resolve(false);
+    const exe = digiCamRemotePath();
+    if (!exe || !fs.existsSync(exe)) {
+      digiCamLogar('CameraControlRemoteCmd.exe nao encontrado: ' + exe);
+      return resolve(false);
+    }
+    let tentativa = 0;
+    const tentar = () => {
+      tentativa += 1;
+      execFile(exe, ['/c', 'set', 'session.folder', pasta], { windowsHide: true, timeout: 6000 }, (err, stdout, stderr) => {
+        if (!err) {
+          digiCamLogar(`pasta da sessao aplicada (${tentativa}x): ${pasta}`);
+          return resolve(true);
+        }
+        if (tentativa < 8) return setTimeout(tentar, 1000);
+        const saida = (String(stdout || '') + String(stderr || '')).trim();
+        digiCamLogar('falha ao aplicar a pasta da sessao: ' + ((err && err.message) || err) + (saida ? ' | ' + saida : ''));
+        resolve(false);
+      });
+    };
+    tentar();
+  });
+}
+// Foto apenas no PC: se o perfil da camera mandar "CaptureInSdRam=true" a foto
+// nao aparece na pasta e a sessao fica vazia. Webserver local tambem e ligado
+// (porta 5513) porque e por ele que o status sabe que a camera respondeu.
+function ajustarDigiCamSettings() {
+  try {
+    const file = digiCamSettingsPath();
+    if (!fs.existsSync(file)) return false;
+    const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    let alterou = false;
+    const itens = json && json.CameraProperties && Array.isArray(json.CameraProperties.Items)
+      ? json.CameraProperties.Items : [];
+    for (const item of itens) {
+      if (!item) continue;
+      if (item.CaptureInSdRam !== false) { item.CaptureInSdRam = false; alterou = true; }
+      if (item.NoDownload === true) { item.NoDownload = false; alterou = true; }
+    }
+    if (json && json.UseWebserver !== true) { json.UseWebserver = true; alterou = true; }
+    if (json && json.AllowWebserverActions !== true) { json.AllowWebserverActions = true; alterou = true; }
+    if (json && json.NewSessionOnStartUp === true) { json.NewSessionOnStartUp = false; alterou = true; }
+    if (alterou) {
+      fs.writeFileSync(file, JSON.stringify(json, null, 2), 'utf-8');
+      digiCamLogar(`settings.json ajustado (CaptureInSdRam=false, UseWebserver=true) em ${itens.length} perfil(is)`);
+    }
+    return alterou;
+  } catch (e) {
+    digiCamLogar('nao consegui ajustar settings.json: ' + ((e && e.message) || e));
+    return false;
+  }
+}
+function digiCamJaAberto() {
+  return new Promise((resolve) => {
+    execFile('tasklist', ['/FI', 'IMAGENAME eq CameraControl.exe', '/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
+      resolve(!err && /CameraControl\.exe/i.test(String(stdout || '')));
+    });
+  });
+}
+function killDigiCamProcessos() {
+  try {
+    const killer = spawn('taskkill', ['/IM', 'CameraControl.exe', '/T', '/F'], { windowsHide: true });
+    killer.on('error', () => {});
+  } catch {}
+}
+async function startDigiCam() {
+  if (digiCamBusy) return { success: false, error: 'OCUPADO' };
+  digiCamBusy = true;
+  try {
+    const exe = getDigiCamPath();
+    if (!fs.existsSync(exe)) {
+      digiCamLogar('digiCamControl nao encontrado: ' + exe);
+      return { success: false, error: 'NAO_ENCONTRADO', exe };
+    }
+    const pasta = await resolverPastaDigiCam();
+    const aberto = await digiCamJaAberto();
+    if (aberto && digiCamPrecisaAjuste(pasta)) {
+      digiCamLogar('config/sessao diferente com o digiCamControl aberto; reiniciando para aplicar');
+      killDigiCamProcessos();
+      await new Promise((r) => setTimeout(r, 3500));
+    }
+    ajustarDigiCamSettings();
+    ajustarSessaoDigiCam(pasta);
+    const jaAberto = await digiCamJaAberto();
+    if (!jaAberto) {
+      digiCamLogar('iniciando ' + exe + ' (pasta: ' + pasta + ')');
+      const proc = spawn(exe, [], { windowsHide: true });
+      digiCamProcess = proc;
+      proc.on('error', (e) => digiCamLogar('falha ao iniciar: ' + ((e && e.message) || e)));
+      proc.on('close', (code) => {
+        if (digiCamProcess === proc) digiCamProcess = null;
+        digiCamLogar('finalizado (code=' + code + ')');
+      });
+    } else {
+      digiCamProcess = null;
+    }
+    // Garante a pasta também na instância que já estava aberta (ou que subiu
+    // agora), via utilitário remoto do próprio digiCamControl.
+    const remote = await aplicarPastaDigiCam(pasta);
+    return { success: true, exe, folder: pasta, remote, jaAberto };
+  } catch (e) {
+    digiCamLogar('falha ao iniciar: ' + ((e && e.message) || e));
+    return { success: false, error: (e && e.message) || String(e) };
+  } finally {
+    digiCamBusy = false;
+  }
+}
+async function pararDigiCam() {
+  digiCamDesejado = false;
+  if (!(await digiCamJaAberto())) return { success: true };
+  killDigiCamProcessos();
+  return { success: true };
+}
+// Liga/desliga o modo direto. O renderer chama no boot e ao salvar a config do
+// Sistema; a resposta alimenta o diagnostico da aba.
+async function sincronizarDigiCam(enabled) {
+  digiCamDesejado = !!enabled;
+  if (!digiCamDesejado) {
+    await pararDigiCam();
+    return { success: true, enabled: false, running: false };
+  }
+  const r = await startDigiCam();
+  return { success: !!r.success, enabled: true, running: await digiCamJaAberto(), ...r };
+}
+function startDigiCamWatchdog() {
+  if (digiCamWatchdogTimer) clearInterval(digiCamWatchdogTimer);
+  digiCamWatchdogTimer = setInterval(async () => {
+    if (!digiCamDesejado || digiCamBusy) return;
+    if (await digiCamJaAberto()) return;
+    digiCamLogar('watchdog: camera nao esta aberta, reabrindo');
+    await startDigiCam();
+  }, 30000);
+}
+async function digiCamInfo() {
+  const exe = getDigiCamPath();
+  let sidecarCfg = null;
+  try { sidecarCfg = await fetchJson(9877, '/api/config', '127.0.0.1', 2500); } catch {}
+  return {
+    success: true,
+    enabled: digiCamDesejado,
+    running: await digiCamJaAberto(),
+    exe,
+    exeExists: fs.existsSync(exe),
+    bundled: digiCamBundled(),
+    settingsFile: digiCamSettingsPath(),
+    logFile: digiCamLogFile(),
+    folder: sidecarCfg ? String(sidecarCfg.dslrFolderResolved || '') : '',
+    folderConfigured: sidecarCfg ? !!sidecarCfg.dslrEnabled : false,
+  };
+}
+ipcMain.handle('natal:dslrSync', (_event, enabled) => sincronizarDigiCam(enabled));
+ipcMain.handle('natal:dslrInfo', () => digiCamInfo());
+ipcMain.handle('natal:dslrRestart', async () => {
+  killDigiCamProcessos();
+  await new Promise((r) => setTimeout(r, 1500));
+  return sincronizarDigiCam(true);
+});
+ipcMain.handle('natal:dslrStop', async () => {
+  const r = await pararDigiCam();
+  return { ...r, enabled: false, running: false };
+});
+ipcMain.handle('natal:openDslrLog', async () => {
+  const file = digiCamLogFile();
+  try {
+    if (fs.existsSync(file)) {
+      const err = await shell.openPath(file);
+      return err ? { success: false, error: err } : { success: true };
+    }
+    shell.showItemInFolder(path.join(app.getPath('userData'), 'logs'));
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: (e && e.message) || String(e) };
+  }
+});
 
 // ─── IPC: config + folder picker ──────────────────────────────
 ipcMain.handle('natal:getConfig', () => ({ ...config }));
@@ -709,18 +1098,25 @@ ipcMain.handle('natal:listPrinters', async (event) => {
     return { success: false, error: e.message, printers: [] };
   }
 });
-ipcMain.handle('natal:selectFolder', async () => {
+ipcMain.handle('natal:selectFolder', async (_event, opts = {}) => {
+  const { title, defaultPath } = opts || {};
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory', 'createDirectory'],
-    title: 'Selecionar pasta de fotos',
-    defaultPath: config.photosFolder || undefined,
+    title: title || 'Selecionar pasta de fotos',
+    defaultPath: defaultPath || config.photosFolder || undefined,
   });
   return result.canceled ? null : result.filePaths[0];
 });
 ipcMain.handle('natal:saveConfig', async (_event, partial) => {
   config = { ...config, ...partial };
-  try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8'); } catch {}
-  return { success: true };
+  configInvalido = false;
+  try {
+    writeConfigAtomico();
+    return { success: true };
+  } catch (e) {
+    console.error(`[Config] falha ao gravar ${CONFIG_PATH}: ${(e && e.message) || e}`);
+    return { success: false, error: (e && e.message) || String(e) };
+  }
 });
 // Reinicia o importador depois de salvar pasta/config (a raiz pode ter mudado).
 ipcMain.handle('natal:restartImporter', async () => {
@@ -782,10 +1178,32 @@ ipcMain.handle('natal:openImporterLog', async () => {
   }
 });
 // Abre uma pasta/arquivo no Explorer (botoes da aba "Cartao").
+// Só pasta do app: o renderer nunca pode pedir para abrir um .exe/.lnk/.bat
+// (um HTML injetado chegaria em `shell.openPath` e executaria código).
+function caminhoDePastaPermitido(alvo) {
+  try {
+    const absoluto = path.resolve(String(alvo));
+    const raizes = [config.photosFolder, config.importFolder, config.dslrFolder,
+      app.getPath('userData'), app.getPath('logs')]
+      .filter(Boolean).map((r) => path.resolve(String(r)));
+    for (const raiz of raizes) {
+      const rel = path.relative(raiz, absoluto);
+      if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) return absoluto;
+    }
+  } catch {}
+  return null;
+}
 ipcMain.handle('natal:openPath', async (_event, target) => {
   const p = String(target || '').trim();
   if (!p) return { success: false, error: 'caminho vazio' };
-  const err = await shell.openPath(p);
+  const permitido = caminhoDePastaPermitido(p);
+  if (!permitido) return { success: false, error: 'caminho nao permitido' };
+  try {
+    if (!fs.statSync(permitido).isDirectory()) return { success: false, error: 'nao e uma pasta' };
+  } catch {
+    return { success: false, error: 'pasta nao encontrada' };
+  }
+  const err = await shell.openPath(permitido);
   return err ? { success: false, error: err } : { success: true };
 });
 
@@ -804,15 +1222,27 @@ ipcMain.handle('natal:printGuia', async (event, { html, printerName } = {}) => {
     await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
     const printOpts = { silent: true, printBackground: true, margins: { marginType: 'none' } };
     if (deviceName) printOpts.deviceName = deviceName;
+    // Sem timeout, um driver/spooler travado nunca chamava o callback: o await
+    // do checkout ficava pendurado e a janela oculta vazava a cada cupom.
     const result = await new Promise((resolve) => {
-      win.webContents.print(printOpts, (success, failureReason) => resolve({ success, failureReason }));
+      let terminou = false;
+      const finalizar = (r) => { if (!terminou) { terminou = true; clearTimeout(timer); resolve(r); } };
+      const timer = setTimeout(() => finalizar({
+        success: false,
+        failureReason: 'Tempo esgotado na impressora térmica (driver sem resposta)',
+      }), 20000);
+      try {
+        win.webContents.print(printOpts, (success, failureReason) => finalizar({ success, failureReason }));
+      } catch (e) {
+        finalizar({ success: false, failureReason: (e && e.message) || String(e) });
+      }
     });
-    win.destroy();
     if (result.success) return { success: true };
     return { success: false, error: result.failureReason || 'print_failed' };
   } catch (e) {
-    win.destroy();
     return { success: false, error: e.message };
+  } finally {
+    try { if (!win.isDestroyed()) win.destroy(); } catch {}
   }
 });
 
@@ -825,6 +1255,8 @@ let isUpdating = false;
 let updateReady = false;
 let updateVersion = '';
 let updateDownload = null;      // Promise do download em andamento
+let updatePendenteDownload = false; // download adiado enquanto imprime/vende
+let isBusy = false;
 let ultimaVerificacao = 0;
 const UPDATE_CHECK_MS = 5 * 60 * 1000; // procura sozinho a cada 5 min (qualquer tela)
 const UPDATE_CHECK_MIN_MS = 60 * 1000; // nao repete antes de 1 min (foco/reabertura)
@@ -833,8 +1265,15 @@ function enviarUpdate(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
 
-function baixarAtualizacao() {
+function baixarAtualizacao(imediato = false) {
   if (!updateDownload) {
+    // Baixar ~400 MB durante uma venda/impressão trava o PC do balcão: adia até
+    // o renderer avisar que terminou (natal:setBusy false).
+    if (isBusy && !imediato) {
+      updatePendenteDownload = true;
+      return Promise.resolve(false);
+    }
+    updatePendenteDownload = false;
     updateDownload = autoUpdater.downloadUpdate()
       .then(() => { updateReady = true; return true; })
       .catch((e) => { updateDownload = null; throw e; });
@@ -842,6 +1281,14 @@ function baixarAtualizacao() {
   return updateDownload;
 }
 
+ipcMain.on('natal:setBusy', (_event, busy) => {
+  isBusy = !!busy;
+  if (isBusy || !updatePendenteDownload || updateDownload || updateReady) return;
+  baixarAtualizacao().catch((e) => {
+    updateDownload = null;
+    enviarUpdate('natal:updateError', { error: e.message || 'Falha ao baixar atualizacao' });
+  });
+});
 
 ipcMain.handle('natal:updateStatus', () => ({
   ready: updateReady,
@@ -970,6 +1417,65 @@ function nomeInstalador(versao) {
   return `Maxx-Foto-Vendas-Setup-${String(versao).replace(/^v/i, '')}.exe`;
 }
 
+function hashArquivoSha256(arquivo) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(arquivo);
+    stream.on('error', reject);
+    stream.on('data', (bloco) => hash.update(bloco));
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+function hashesRollback() {
+  const estado = lerEstadoRollback();
+  return estado && estado.hashes && typeof estado.hashes === 'object' ? estado.hashes : {};
+}
+
+function registrarHashRollback(versao, sha256) {
+  const hashes = { ...hashesRollback(), [String(versao)]: String(sha256 || '').toLowerCase() };
+  salvarEstadoRollback({ hashes });
+}
+
+// Digest publicado no release (GitHub preenche `digest: sha256:...`).
+async function digestInstaladorRemoto(versao) {
+  const v = String(versao).replace(/^v/i, '');
+  try {
+    const bruto = await httpGetTexto(`https://api.github.com/repos/Sploit23/Kiosk_Maxx/releases/tags/v${encodeURIComponent(v)}`);
+    const rel = JSON.parse(bruto);
+    const asset = (Array.isArray(rel && rel.assets) ? rel.assets : [])
+      .find((a) => a && a.name === nomeInstalador(v));
+    if (!asset) return null;
+    const digest = String(asset.digest || '').toLowerCase();
+    return {
+      sha256: digest.startsWith('sha256:') ? digest.slice(7) : '',
+      size: Number(asset.size) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Confere o instalador salvo antes de executar: hash conhecido localmente, senão
+// o digest do release; se não houver internet, guarda o hash do arquivo atual.
+async function verificarInstaladorRollback(versao, arquivo) {
+  const v = String(versao).replace(/^v/i, '');
+  const st = fs.statSync(arquivo);
+  if (!st.isFile() || st.size < 1024 * 1024) throw new Error('instalador inválido');
+  const sha = await hashArquivoSha256(arquivo);
+  const conhecido = String(hashesRollback()[v] || '').toLowerCase();
+  if (conhecido) {
+    if (conhecido !== sha) throw new Error('instalador corrompido (hash local não confere)');
+    return sha;
+  }
+  const remoto = await digestInstaladorRemoto(v);
+  if (remoto && remoto.sha256 && remoto.sha256 !== sha) {
+    throw new Error('instalador corrompido (hash do release não confere)');
+  }
+  registrarHashRollback(v, sha);
+  return sha;
+}
+
 function arquivoEstadoRollback() {
   return path.join(rollbackDirSeguro(), 'state.json');
 }
@@ -1069,15 +1575,7 @@ async function versaoAnteriorRemota() {
   return candidatas.length ? candidatas[0].version : '';
 }
 
-function baixarInstalador(versao) {
-  const v = String(versao).replace(/^v/i, '');
-  const dir = rollbackDirSeguro();
-  const destino = path.join(dir, nomeInstalador(v));
-  if (fs.existsSync(destino)) {
-    try { if (fs.statSync(destino).size > 1024 * 1024) return destino; } catch {}
-  }
-  const url = `${GH_DOWNLOAD_BASE}/v${v}/${nomeInstalador(v)}`;
-  const parcial = destino + '.part';
+function baixarArquivoInstalador(url, parcial) {
   return new Promise((resolve, reject) => {
     const requisitar = (alvo, redirects = 0) => {
       if (redirects > 5) return reject(new Error('redirecionamentos demais'));
@@ -1096,23 +1594,7 @@ function baixarInstalador(versao) {
         res.on('error', (e) => { erro = e; });
         res.pipe(out);
         out.on('finish', () => {
-          out.close(() => {
-            if (erro) { try { fs.unlinkSync(parcial); } catch {} return reject(erro); }
-            try {
-              const st = fs.statSync(parcial);
-              if (st.size < 1024 * 1024) throw new Error('arquivo baixado invalido');
-              const fd = fs.openSync(parcial, 'r');
-              const buf = Buffer.alloc(2);
-              fs.readSync(fd, buf, 0, 2, 0);
-              fs.closeSync(fd);
-              if (buf[0] !== 0x4d || buf[1] !== 0x5a) throw new Error('download nao e um instalador Windows');
-              fs.renameSync(parcial, destino);
-              resolve(destino);
-            } catch (e) {
-              try { fs.unlinkSync(parcial); } catch {}
-              reject(e);
-            }
-          });
+          out.close(() => (erro ? reject(erro) : resolve()));
         });
       });
       req.on('error', reject);
@@ -1122,8 +1604,56 @@ function baixarInstalador(versao) {
   });
 }
 
-async function garantirRollbackCache() {
+async function baixarInstalador(versao) {
+  const v = String(versao).replace(/^v/i, '');
+  const dir = rollbackDirSeguro();
+  const destino = path.join(dir, nomeInstalador(v));
+  const esperado = await digestInstaladorRemoto(v).catch(() => null);
+  const conferir = async (arquivo) => {
+    const st = fs.statSync(arquivo);
+    if (st.size < 1024 * 1024) throw new Error('arquivo baixado invalido');
+    if (esperado && esperado.size && st.size !== esperado.size) {
+      throw new Error('tamanho do instalador nao confere');
+    }
+    const fd = fs.openSync(arquivo, 'r');
+    const buf = Buffer.alloc(2);
+    fs.readSync(fd, buf, 0, 2, 0);
+    fs.closeSync(fd);
+    if (buf[0] !== 0x4d || buf[1] !== 0x5a) throw new Error('download nao e um instalador Windows');
+    const sha = await hashArquivoSha256(arquivo);
+    if (esperado && esperado.sha256 && esperado.sha256 !== sha) {
+      throw new Error('hash do instalador nao confere');
+    }
+    registrarHashRollback(v, sha);
+  };
+  if (fs.existsSync(destino)) {
+    try {
+      await conferir(destino);
+      return destino;
+    } catch (e) {
+      console.warn('[Rollback] instalador salvo invalido (v' + v + '), baixando de novo: ' + ((e && e.message) || e));
+      try { fs.unlinkSync(destino); } catch {}
+    }
+  }
+  const url = `${GH_DOWNLOAD_BASE}/v${v}/${nomeInstalador(v)}`;
+  const parcial = destino + '.part';
+  try {
+    await baixarArquivoInstalador(url, parcial);
+    await conferir(parcial);
+    fs.renameSync(parcial, destino);
+    return destino;
+  } catch (e) {
+    try { fs.unlinkSync(parcial); } catch {}
+    throw e;
+  }
+}
+
+async function garantirRollbackCache(opts = {}) {
   if (!app.isPackaged || _rollbackBaixando) return listarRollback();
+  /* No boot baixamos so a versao ANTERIOR (o rollback imediato) e bem depois de
+     abrir: o instalador da versao atual pode esperar, para nao consumir rede
+     disputando com as vendas/impressao da loja. */
+  const somenteAnterior = opts.somenteAnterior === true;
   _rollbackBaixando = true;
   try {
     const atual = app.getVersion();
@@ -1144,7 +1674,7 @@ async function garantirRollbackCache() {
     }
     /* guarda tambem o instalador da versao atual, para que a proxima
        atualizacao ja tenha de onde voltar. */
-    if (!fs.existsSync(path.join(rollbackDirSeguro(), nomeInstalador(atual)))) {
+    if (!somenteAnterior && !fs.existsSync(path.join(rollbackDirSeguro(), nomeInstalador(atual)))) {
       try { await baixarInstalador(atual); }
       catch (e) { console.warn('[Rollback] falha ao baixar a versao atual: ' + ((e && e.message) || e)); }
     }
@@ -1187,6 +1717,12 @@ ipcMain.handle('natal:rollbackInstall', async (_event, version) => {
     if (cmpVersao(v, app.getVersion()) >= 0) {
       return { success: false, error: 'So da para voltar para uma versao anterior a atual' };
     }
+    // Instalador adulterado/corrompido não roda. Confere o hash antes.
+    try {
+      await verificarInstaladorRollback(v, alvo.path);
+    } catch (e) {
+      return { success: false, error: 'Instalador invalido: ' + ((e && e.message) || e) };
+    }
     salvarEstadoRollback({
       blockedVersion: app.getVersion(),
       rolledBackTo: v,
@@ -1194,7 +1730,10 @@ ipcMain.handle('natal:rollbackInstall', async (_event, version) => {
     });
     const child = spawn(alvo.path, ['/S', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true });
     child.unref();
-    setTimeout(() => { try { app.exit(0); } catch { app.quit(); } }, 1500);
+    // app.exit() pula o will-quit e deixa sidecar/Java/importador vivos (o
+    // sidecar continuaria escrevendo os JSONs enquanto o NSIS troca arquivos).
+    // quit() fecha tudo e o will-quit mata a árvore de processos.
+    setTimeout(() => { try { app.quit(); } catch { app.exit(0); } }, 1500);
     return { success: true, installing: true, version: v };
   } catch (e) {
     return { success: false, error: (e && e.message) || 'Falha ao reinstalar versao anterior' };
@@ -1228,6 +1767,11 @@ app.whenReady().then(() => {
   setTimeout(startImporter, 4000);
   startImporterWatchdog();
 
+  /* Camera no cabo "100% direto": NAO abre sozinha no boot. O operador liga
+     pelo botao do painel (ou pela aba Sistema). O watchdog abaixo so age
+     enquanto o modo estiver desejado (`digiCamDesejado`). */
+  startDigiCamWatchdog();
+
   /* Verifica no boot e continua procurando sozinho em qualquer tela (intervalo
      curto; performAutoUpdate aplica o throttle de 1 min). */
   setTimeout(() => performAutoUpdate(true), 10000);
@@ -1235,7 +1779,7 @@ app.whenReady().then(() => {
 
   /* Guarda o instalador da versao atual/anterior para o rollback em segundos.
      Roda em segundo plano, so no app empacotado, e nao bloqueia o boot. */
-  setTimeout(() => { garantirRollbackCache().catch(() => {}); }, 30000);
+  setTimeout(() => { garantirRollbackCache({ somenteAnterior: true }).catch(() => {}); }, 300000);
 
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
@@ -1266,7 +1810,15 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 
 app.on('will-quit', () => {
   stopImporter();
+  if (digiCamWatchdogTimer) clearInterval(digiCamWatchdogTimer);
   for (const [name, proc] of [['Sidecar', sidecarProcess], ['Java', javaProcess]]) {
-    if (proc) { console.log(`[${name}] Finalizando...`); proc.kill(); }
+    if (!proc || !proc.pid) continue;
+    console.log(`[${name}] Finalizando...`);
+    // proc.kill() no Windows nem sempre mata o node/java filho (que continuaria
+    // com a porta e escrevendo os JSONs durante a troca de arquivos do update).
+    try {
+      if (process.platform === 'win32') spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true });
+      else proc.kill();
+    } catch { try { proc.kill(); } catch {} }
   }
 });

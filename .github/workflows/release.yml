@@ -46,6 +46,16 @@ jobs:
           Copy-Item (Join-Path $root.FullName '*') $target -Recurse -Force
           Remove-Item jre8/jre8.zip, $root.FullName -Recurse -Force
 
+      - name: Baixar digiCamControl 2.1.7.0 (embutido no instalador)
+        shell: pwsh
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP 'digiCamControlsetup_2.1.7.0.exe'
+          Invoke-WebRequest -Uri "https://master.dl.sourceforge.net/project/digicamcontrol/digiCamControlsetup_2.1.7.0.exe?viasf=1" -OutFile $setup
+          Start-Process -FilePath $setup -ArgumentList '/S' -Wait
+          $exe = Join-Path ${env:ProgramFiles(x86)} 'digiCamControl\CameraControl.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { Start-Sleep -Seconds 20 }
+          if (-not (Test-Path -LiteralPath $exe)) { throw "digiCamControl nao instalado no runner (esperado em $exe)" }
+
       - name: Build instalador (NSIS)
         run: npm run build:win
 

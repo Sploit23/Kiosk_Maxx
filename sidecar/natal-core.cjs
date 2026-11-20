@@ -205,7 +205,7 @@ function sanitizeSegment(s) {
 // ─── Config da máquina ───────────────────────────────────────
 // machineId: gerado pelo PDV no primeiro boot e persistido aqui — identifica
 // a máquina física p/ emparelhamento no portal (kiosk.pair) e carimbos futuros.
-const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', lojaNome: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM', importFolder: '', importSessoes: true, tabletToken: '' };
+const MACHINE_DEFAULTS = { pdvNome: '', photosFolder: '', thermalPrinterName: '', machineId: '', lojaId: '', lojaNome: '', pairingCode: '', logoTexto: 'SHOPPING PALLADIUM', importFolder: '', importSessoes: true, tabletToken: '', dslrEnabled: false, dslrFolder: '' };
 let machineConfig = { ...MACHINE_DEFAULTS, ...readJson(CONFIG_FILE, {}) };
 // Se o config.json sumiu (pasta de fotos apagada/movida) mas o ponteiro de
 // bootstrap ainda sabe a pasta, devolve a pasta em vez de zerar a config —
@@ -452,10 +452,12 @@ function isTabletAllowed(method, p) {
     if (p === '/api/pedidos' || /^\/api\/pedidos\/[^/]+$/.test(p)) return true;
     if (p === '/api/auditoria' || p === '/api/testes/status') return true;
     if (p === '/api/portal/fila' || p === '/api/cache/portal' || p === '/api/galeria/fila') return true;
+    if (p === '/api/dslr/status') return true;
     return false;
   }
   if (method === 'POST') {
     if (p === '/api/pedidos' || p === '/api/auditoria') return true;
+    if (p === '/api/dslr/fechar' || p === '/api/dslr/descartar') return true;
     if (p === '/api/printer/thermal') return true;
     if (/^\/api\/pedidos\/[^/]+\/pagamento$/.test(p)) return true;
     if (/^\/api\/pedidos\/[^/]+\/impressao\/[^/]+$/.test(p)) return true;
@@ -484,6 +486,10 @@ function configPublica() {
     localIp: ipLocal(),
     importFolder: getImportFolder(),
     importFolderCustom: String(machineConfig.importFolder || ''),
+    dslrFolder: String(machineConfig.dslrFolder || ''),
+    dslrFolderResolved: pastaDslr(),
+    dslrEnabled: dslrHabilitado(),
+    dslrDetectado: pastaDigiCamControl(),
     ribbon: getRibbon(),
     tabletPareado: !!String(machineConfig.tabletToken || '').trim(),
   };
@@ -510,6 +516,19 @@ function pastasReservadas(folder) {
       if (alvo.startsWith(base + path.sep)) {
         // ignora o primeiro nivel que leva ate a pasta dos lotes (evita varrer
         // o cartao inteiro a cada poll e criar sessao da pasta-mae dos lotes)
+        const first = path.relative(base, alvo).split(path.sep)[0];
+        if (first) reservadas.add(first);
+      }
+    }
+  } catch {}
+  // Pasta da câmera DSLR (cabo direto): as fotos dela só viram sessão no
+  // "Fechar sessão" — o watcher da drop zone nunca pode capturá-la.
+  try {
+    const dslr = pastaDslr();
+    if (dslr) {
+      const base = path.resolve(folder);
+      const alvo = path.resolve(dslr);
+      if (alvo !== base && alvo.startsWith(base + path.sep)) {
         const first = path.relative(base, alvo).split(path.sep)[0];
         if (first) reservadas.add(first);
       }
@@ -865,8 +884,8 @@ async function copiarFotoParaSessao(id, subPath, file, destino) {
   const origPath = path.join(dir, 'originais', destino);
   const prevPath = path.join(dir, 'previews', destino);
   linkOrCopy(path.join(subPath, file), origPath);
-  await criarPreviewLeve(origPath, prevPath, ext);
-  await criarThumbLeve(prevPath, path.join(dir, 'thumbs', destino), ext);
+  await criarPreviewLeve(origPath, prevPath, ext, 1);
+  await criarThumbLeve(prevPath, path.join(dir, 'thumbs', destino), ext, 1);
 }
 
 // Copia só o que ainda não está na sessão. O mapa reg.fotos (origem -> nome
@@ -1008,9 +1027,14 @@ async function finalizarSessaoParcial(reg, subPath) {
 async function scanImportFolder(folder) {
   if (importingLock) return;
   const now = Date.now();
+  let dslrPasta = '';
+  try { dslrPasta = path.resolve(pastaDslr()); } catch {}
   for (const sub of safeReadDir(folder)) {
     if (sub.startsWith('.') || sub.startsWith('_')) continue;
     const subPath = path.join(folder, sub);
+    // A pasta da câmera direta pode estar dentro da pasta de lotes: nunca
+    // deixa o watcher do cartão transformá-la em sessão.
+    if (dslrPasta && path.resolve(subPath) === dslrPasta) continue;
     let st;
     try { st = fs.statSync(subPath); } catch { continue; }
     if (!st.isDirectory()) continue;
@@ -1129,33 +1153,53 @@ const THUMB_QUALITY = Math.min(90, Math.max(40, parseInt(process.env.NATAL_THUMB
 // o import e a migração compartilham o mesmo semáforo.
 let previewAtivos = 0;
 const previewFila = [];
-function previewAdquirir(peso) {
+// `prioridade` 1 = sessão ao vivo (fechar da câmera/import do cartão);
+// 0 = migração de fundo. A fila atende primeiro quem tem prioridade maior e,
+// dentro da mesma prioridade, mantém a ordem de chegada. Sem isso a migração
+// de previews antigos que roda no boot segurava o semáforo por minutos e o
+// "Fechar sessão" da câmera ficava esperando na fila.
+function previewPeso(peso) {
+  const n = Number(peso) || 1;
+  return Math.max(1, Math.min(PREVIEW_CONCURRENCY, n));
+}
+function previewCabe(peso) {
+  return previewAtivos + peso <= PREVIEW_CONCURRENCY;
+}
+function previewDrenar() {
+  while (previewFila.length) {
+    // Prioridade estrita: enquanto houver sessão ao vivo na fila, a migração
+    // de fundo não ocupa vaga (nem a última que a foto grande precisa).
+    let melhor = -Infinity;
+    for (const item of previewFila) {
+      if (item.prioridade > melhor) melhor = item.prioridade;
+    }
+    let escolhido = -1;
+    for (let i = 0; i < previewFila.length; i++) {
+      const item = previewFila[i];
+      if (item.prioridade !== melhor || !previewCabe(item.peso)) continue;
+      escolhido = i;
+      break;
+    }
+    if (escolhido === -1) return;
+    const [item] = previewFila.splice(escolhido, 1);
+    previewAtivos += item.peso;
+    item.resolve();
+  }
+}
+function previewAdquirir(peso, prioridade = 0) {
+  const p = previewPeso(peso);
   return new Promise((resolve) => {
-    const tentar = () => {
-      if (peso >= PREVIEW_CONCURRENCY) {
-        if (previewAtivos !== 0) return false;
-        previewAtivos = PREVIEW_CONCURRENCY;
-      } else {
-        if (previewAtivos + peso > PREVIEW_CONCURRENCY) return false;
-        previewAtivos += peso;
-      }
-      resolve();
-      return true;
-    };
-    if (!tentar()) previewFila.push({ peso, tentar });
+    previewFila.push({ peso: p, prioridade: Number(prioridade) || 0, resolve });
+    previewDrenar();
   });
 }
 function previewLiberar(peso) {
-  previewAtivos = Math.max(0, previewAtivos - peso);
-  while (previewFila.length) {
-    const proximo = previewFila[0];
-    if (!proximo.tentar()) break;
-    previewFila.shift();
-  }
+  previewAtivos = Math.max(0, previewAtivos - previewPeso(peso));
+  previewDrenar();
 }
-async function comPreviewSlot(srcSize, fn) {
+async function comPreviewSlot(srcSize, fn, prioridade = 0) {
   const peso = srcSize >= PREVIEW_BIG_BYTES ? PREVIEW_CONCURRENCY : 1;
-  await previewAdquirir(peso);
+  await previewAdquirir(peso, prioridade);
   try {
     return await fn();
   } finally {
@@ -1170,6 +1214,9 @@ function gerarDerivado(src, dst, ext, maxDim, quality) {
   const psStr = (s) => "'" + String(s).replace(/'/g, "''") + "'";
   const linhas = [
     'Add-Type -AssemblyName System.Drawing',
+    // Previews rodam em prioridade Idle: se o PDV estiver compondo/enviando a
+    // foto da impressao ao mesmo tempo, o Windows da CPU a venda primeiro.
+    'try { [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::Idle } catch {}',
     '$ErrorActionPreference = "Stop"',
     `$src = ${psStr(src)}`,
     `$dst = ${psStr(dst)}`,
@@ -1227,14 +1274,14 @@ function gerarPreviewLeve(src, dst, ext) {
 
 // Gera o preview leve a partir do original; em caso de falha, copia o original
 // (comportamento antigo) para a sessão não ficar sem preview.
-async function criarPreviewLeve(srcPath, prevPath, ext) {
+async function criarPreviewLeve(srcPath, prevPath, ext, prioridade = 0) {
   const tmp = path.join(path.dirname(prevPath), `.tmp-${process.pid}-${Date.now()}-${path.basename(prevPath)}`);
   let srcSize = 0;
   try { srcSize = fs.statSync(srcPath).size; } catch {}
   let ultimoErro = null;
   for (let tentativa = 1; tentativa <= 2; tentativa++) {
     try {
-      await comPreviewSlot(srcSize, () => gerarPreviewLeve(srcPath, tmp, ext));
+      await comPreviewSlot(srcSize, () => gerarPreviewLeve(srcPath, tmp, ext), prioridade);
       for (let i = 0; ; i++) {
         try { fs.renameSync(tmp, prevPath); return; } catch (e) {
           if (i >= 3) throw e;
@@ -1254,7 +1301,7 @@ async function criarPreviewLeve(srcPath, prevPath, ext) {
 
 // Miniatura leve (grade/vitrine). Diferente do preview, não tem fallback de
 // cópia: se falhar, a rota serve o preview e a próxima migração retenta.
-async function criarThumbLeve(srcPath, thumbPath, ext) {
+async function criarThumbLeve(srcPath, thumbPath, ext, prioridade = 0) {
   try {
     const srcStat = fs.statSync(srcPath);
     try {
@@ -1266,7 +1313,7 @@ async function criarThumbLeve(srcPath, thumbPath, ext) {
     let ultimoErro = null;
     for (let tentativa = 1; tentativa <= 2; tentativa++) {
       try {
-        await comPreviewSlot(1, () => gerarDerivado(srcPath, tmp, ext, THUMB_MAX_DIM, THUMB_QUALITY));
+        await comPreviewSlot(1, () => gerarDerivado(srcPath, tmp, ext, THUMB_MAX_DIM, THUMB_QUALITY), prioridade);
         fs.renameSync(tmp, thumbPath);
         return;
       } catch (e) {
@@ -1314,6 +1361,7 @@ function executarLotePreview(items) {
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+try { [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::Idle } catch {}
 Add-Type -AssemblyName System.Drawing
 $items = Get-Content -LiteralPath $Manifest -Raw -Encoding UTF8 | ConvertFrom-Json
 $jpegCodec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
@@ -1396,7 +1444,8 @@ $json = (@($out) | ConvertTo-Json -Compress)
   });
 }
 
-async function gerarDerivadosSessao(id, nomes) {
+async function gerarDerivadosSessao(id, nomes, opcoes = {}) {
+  const prioridade = Number(opcoes.prioridade) || 0;
   const dir = sessaoDir(id);
   const itens = [];
   let temGrande = false;
@@ -1431,7 +1480,7 @@ async function gerarDerivadosSessao(id, nomes) {
   itens.sort((a, b) => b.size - a.size);
   itens.forEach((item, i) => lotes[i % workers].push(item));
 
-  for (let i = 0; i < workers; i++) await previewAdquirir(peso);
+  for (let i = 0; i < workers; i++) await previewAdquirir(peso, prioridade);
   let resultados = [];
   try {
     resultados = await Promise.all(lotes.map((lote) => executarLotePreview(lote)));
@@ -1449,8 +1498,8 @@ async function gerarDerivadosSessao(id, nomes) {
     if (ok.has(path.resolve(item.src))) continue;
     // Falha isolada no lote: repete só esse arquivo pelo caminho antigo.
     try {
-      await criarPreviewLeve(item.src, item.preview, item.ext);
-      await criarThumbLeve(item.preview, item.thumb, item.ext);
+      await criarPreviewLeve(item.src, item.preview, item.ext, prioridade);
+      await criarThumbLeve(item.preview, item.thumb, item.ext, prioridade);
     } catch (e) {
       console.error(`[natal-core] Preview em lote falhou (${path.basename(item.src)}): ${e.message}`);
     }
@@ -1463,7 +1512,7 @@ async function gerarDerivadosSessao(id, nomes) {
   }
 }
 
-async function prepararSessaoEmSegundoPlano(id, subPath, sub) {
+async function prepararSessaoEmSegundoPlano(id, subPath, sub, opcoes = {}) {
   if (!id || preparandoSessoes.has(id)) return;
   preparandoSessoes.add(id);
   const chave = path.resolve(subPath);
@@ -1471,7 +1520,12 @@ async function prepararSessaoEmSegundoPlano(id, subPath, sub) {
     const dir = sessaoDir(id);
     const nomes = safeReadDir(path.join(dir, 'originais'))
       .filter((nome) => IMAGE_EXTS.has(path.extname(nome).toLowerCase()));
-    await gerarDerivadosSessao(id, nomes);
+    // Sessão ao vivo tem prioridade sobre a migração de fundo.
+    await gerarDerivadosSessao(id, nomes, { prioridade: 1 });
+    if (opcoes.apenasDerivados) {
+      console.log(`[natal-core] Sessao ${id}: previews leves prontos (${nomes.length} fotos): ${sub}`);
+      return;
+    }
 
     const meta = readJson(sessaoMetaPath(id), null);
     if (!meta) return;
@@ -1501,6 +1555,7 @@ async function prepararSessaoEmSegundoPlano(id, subPath, sub) {
     console.log(`[natal-core] Sessao ${id} pronta (${nomes.length} fotos): ${sub}`);
   } catch (e) {
     console.error(`[natal-core] Preparo da sessao ${id} falhou: ${e.message}`);
+    if (opcoes.apenasDerivados) return; // sessão já está PRONTA (preview = original)
     // Mesmo com falha, tira a sessão de RECEBENDO para não travar a tela.
     try {
       const meta = readJson(sessaoMetaPath(id), null);
@@ -1616,6 +1671,267 @@ async function importarSubpastaSessao(subPath, sub, photos, reimportando) {
   return id;
 }
 
+// ─── Câmera DSLR direta (digiCamControl no PC da venda) ──────
+// Modalidade "cabo 100% direto": o fotógrafo dispara pelo botão da câmera e o
+// digiCamControl grava o JPEG numa pasta local. Nada de cartão/importador. A
+// sessão NATAL só nasce quando o operador clica em "Fechar sessão": aí as fotos
+// da pasta são COPIADAS para a sessão (a pasta do digiCam é arquivada em
+// backup e limpa para a próxima sessão) e os previews são gerados em background.
+const DSLR_EXTS = new Set(['.jpg', '.jpeg', '.png']);
+const DSLR_SETTLE_MS = 1000; // arquivo parado por 1s = gravação concluída
+const DSLR_CLOSE_TIMEOUT_MS = 8000; // espera máx. no "Fechar sessão"
+let dslrSeen = new Map(); // nome -> { size, mtimeMs, stableAt }
+let dslrFolderCache = '';
+let dslrDetectCache = { at: 0, folder: '' };
+let dslrClosing = false;
+let dslrWebCache = { at: 0, online: false };
+
+// Pasta onde o digiCamControl salva (settings.json em ProgramData). Lê a
+// sessão ativa (DefaultSessionName) e cai no padrão Pictures\digiCamControl.
+function pastaDigiCamControl() {
+  const programData = String(process.env.ProgramData || process.env.PROGRAMDATA || '').trim();
+  const userProfile = String(process.env.USERPROFILE || os.homedir() || '').trim();
+  let nomeSessao = '';
+  if (programData) {
+    const cfg = readJson(path.join(programData, 'digiCamControl', 'settings.json'), null);
+    if (cfg && cfg.DefaultSessionName) nomeSessao = String(cfg.DefaultSessionName).trim();
+  }
+  const raiz = userProfile ? path.join(userProfile, 'Pictures', 'digiCamControl') : '';
+  if (!raiz) return '';
+  return path.join(raiz, nomeSessao || 'Session1');
+}
+function dslrConfigurado() {
+  return !!String(machineConfig.dslrFolder || '').trim() || !!String(process.env.NATAL_DSLR_FOLDER || '').trim();
+}
+function dslrHabilitado() {
+  // Modo "cabo direto" só vale quando o PDV marcou a opção (o botão do painel
+  // também grava dslrEnabled=true). Ter pasta configurada NÃO liga o modo: era
+  // isso que abria o CameraControl no boot sem o operador pedir.
+  return machineConfig.dslrEnabled === true;
+}
+// Pasta efetiva das fotos da câmera: env > config da máquina > digiCamControl.
+// NUNCA cria a pasta do digiCamControl se ela não existir (ele a recria no
+// próximo disparo); só a versão customizada é criada para não falhar o scan.
+function pastaDslr() {
+  const env = String(process.env.NATAL_DSLR_FOLDER || '').trim();
+  if (env) return env;
+  const custom = String(machineConfig.dslrFolder || '').trim();
+  if (custom) return custom;
+  const agora = Date.now();
+  if (dslrDetectCache.folder && agora - dslrDetectCache.at < 10000) return dslrDetectCache.folder;
+  const detectada = pastaDigiCamControl();
+  dslrDetectCache = { at: agora, folder: detectada };
+  return detectada;
+}
+function scanDslr() {
+  const pasta = pastaDslr();
+  if (!pasta) return { folder: '', exists: false, photos: [], pending: 0 };
+  let existe = false;
+  try { existe = fs.statSync(pasta).isDirectory(); } catch { existe = false; }
+  if (!existe) return { folder: pasta, exists: false, photos: [], pending: 0 };
+  const agora = Date.now();
+  const fotos = [];
+  let pendentes = 0;
+  const vistos = new Set();
+  for (const nome of safeReadDir(pasta)) {
+    const low = nome.toLowerCase();
+    if (low.startsWith('.') || low.startsWith('~')) continue;
+    if (SKIP_TAILS.some((t) => low.endsWith(t))) continue;
+    if (!DSLR_EXTS.has(path.extname(low))) continue;
+    let st;
+    try { st = fs.statSync(path.join(pasta, nome)); } catch { continue; }
+    if (!st.isFile() || st.size <= 1024) continue;
+    vistos.add(nome);
+    const ant = dslrSeen.get(nome);
+    if (!ant || ant.size !== st.size || ant.mtimeMs !== st.mtimeMs) {
+      dslrSeen.set(nome, { size: st.size, mtimeMs: st.mtimeMs, stableAt: agora });
+      pendentes += 1;
+      continue;
+    }
+    if (agora - ant.stableAt < DSLR_SETTLE_MS) { pendentes += 1; continue; }
+    fotos.push({ name: nome, size: st.size, mtimeMs: st.mtimeMs });
+  }
+  for (const chave of Array.from(dslrSeen.keys())) if (!vistos.has(chave)) dslrSeen.delete(chave);
+  fotos.sort((a, b) => (a.mtimeMs - b.mtimeMs) || a.name.localeCompare(b.name));
+  return { folder: pasta, exists: true, photos: fotos, pending: pendentes };
+}
+function processoDigiCam() {
+  return new Promise((resolve) => {
+    execFile('tasklist', ['/FI', 'IMAGENAME eq CameraControl.exe', '/NH'], { windowsHide: true, timeout: 4000 }, (err, stdout) => {
+      if (err) return resolve(false);
+      resolve(/CameraControl\.exe/i.test(String(stdout || '')));
+    });
+  });
+}
+function digiCamOnline() {
+  const agora = Date.now();
+  if (agora - dslrWebCache.at < 6000) return Promise.resolve(dslrWebCache.online);
+  return new Promise((resolve) => {
+    const terminar = (online) => {
+      dslrWebCache = { at: Date.now(), online: !!online };
+      if (online) return resolve(true);
+      // Sem webserver pode ser que ele esteja aberto com a porta desligada.
+      processoDigiCam().then((aberto) => {
+        if (aberto) dslrWebCache = { at: Date.now(), online: true };
+        resolve(aberto);
+      });
+    };
+    try {
+      const req = http.get({ host: '127.0.0.1', port: 5513, path: '/', timeout: 1200 }, (res) => {
+        res.resume();
+        terminar(true);
+      });
+      req.on('timeout', () => { try { req.destroy(); } catch {} terminar(false); });
+      req.on('error', () => terminar(false));
+    } catch { terminar(false); }
+  });
+}
+function statusDslr() {
+  const scan = scanDslr();
+  const fotos = scan.photos.map((f) => ({ name: f.name, size: f.size, mtime: f.mtimeMs }));
+  return Promise.resolve(digiCamOnline()).then((online) => ({
+    success: true,
+    enabled: dslrHabilitado(),
+    configurado: dslrConfigurado() || scan.exists,
+    folder: scan.folder,
+    exists: scan.exists,
+    online,
+    closing: dslrClosing,
+    count: fotos.length,
+    pending: scan.pending,
+    total: fotos.length + scan.pending,
+    photos: fotos.slice(-60),
+  }));
+}
+// Cria a sessão a partir da pasta da câmera. A ORDEM do disparo é a ordem dos
+// mtime, então as fotos entram prefixadas (f0001_...), diferente do importador
+// de cartão (que usa o nome original do arquivo).
+async function criarSessaoDslr(fotos, pasta) {
+  const id = nextSessionId();
+  const dir = sessaoDir(id);
+  fs.mkdirSync(path.join(dir, 'previews'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'thumbs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'originais'), { recursive: true });
+  const importadas = [];
+  fotos.forEach((foto, idx) => {
+    const ext = path.extname(foto.name).toLowerCase() === '.png' ? '.png' : '.jpg';
+    const base = sanitizeSegment(path.basename(foto.name, path.extname(foto.name))) || 'foto';
+    const destino = `f${String(idx + 1).padStart(4, '0')}_${base}${ext}`;
+    try {
+      linkOrCopy(path.join(pasta, foto.name), path.join(dir, 'originais', destino));
+      importadas.push({ origem: foto.name, destino, mtimeMs: foto.mtimeMs });
+    } catch (e) {
+      console.error(`[natal-core] DSLR: falha ao copiar ${foto.name}: ${e.message}`);
+    }
+  });
+  if (!importadas.length) return null;
+  // Deixa a sessão utilizável na hora: o preview começa como cópia do original
+  // (JPEG válido, já com orientação EXIF) e a versão leve + miniatura são
+  // geradas em background. Antes o "Fechar sessão" esperava o PowerShell
+  // reduzir todas as fotos (e podia esperar a migração de fundo por minutos).
+  // Cópia (não hardlink) para o lote conseguir substituir o preview sem
+  // disputar o handle aberto do original.
+  for (const imp of importadas) {
+    try {
+      fs.copyFileSync(path.join(dir, 'originais', imp.destino), path.join(dir, 'previews', imp.destino));
+    } catch (e) {
+      console.error(`[natal-core] DSLR: preview inicial de ${imp.destino}: ${e.message}`);
+    }
+  }
+  const criadaEm = importadas.reduce((min, f) => Math.min(min, f.mtimeMs || Date.now()), Date.now());
+  const meta = {
+    id,
+    estado: ESTADOS.PRONTA,
+    criadaEm,
+    prontaEm: Date.now(),
+    fotosEsperadas: importadas.length,
+    operadorFotografo: 'DSLR',
+    importadaDe: 'dslr',
+    origem: 'dslr',
+  };
+  writeJson(sessaoMetaPath(id), meta);
+  emit('sessao:criada', { id });
+  emit('sessao:concluida', { id });
+  emit('sessao:status', { id, estado: ESTADOS.PRONTA, fotosQtd: importadas.length });
+  console.log(`[natal-core] Sessao ${id} criada pela camera (${importadas.length} fotos), previews leves em background: ${pasta}`);
+  void prepararSessaoEmSegundoPlano(id, pasta, 'DSLR', { apenasDerivados: true });
+  return { id, importadas };
+}
+function moverArquivoParaArquivo(src, dest) {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  try { fs.renameSync(src, dest); return true; } catch {}
+  try { fs.copyFileSync(src, dest); fs.rmSync(src, { force: true }); return true; } catch {}
+  return false;
+}
+async function fecharSessaoDslr() {
+  if (!dslrHabilitado()) return { success: false, error: 'DESATIVADO' };
+  if (dslrClosing) return { success: false, error: 'FECHANDO' };
+  const pasta = pastaDslr();
+  if (!pasta) return { success: false, error: 'SEM_PASTA' };
+  dslrClosing = true;
+  try {
+    let scan = scanDslr();
+    const limite = Date.now() + DSLR_CLOSE_TIMEOUT_MS;
+    while (scan.pending > 0 && Date.now() < limite) {
+      await sleep(500);
+      scan = scanDslr();
+    }
+    if (!scan.photos.length) return { success: false, error: 'SEM_FOTOS', folder: pasta };
+    const sessao = await criarSessaoDslr(scan.photos, pasta);
+    if (!sessao) return { success: false, error: 'SEM_FOTOS', folder: pasta };
+
+    // Backup durável da pasta original (rede de segurança) e limpeza para a
+    // próxima sessão. Se o arquivamento falhar, o arquivo de origem NÃO é
+    // apagado — só ganha sufixo .enviado para não entrar na sessão seguinte.
+    const carimbo = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupDir = path.join(DATA_DIR, 'dslr', `${carimbo}-${sessao.id}`);
+    let arquivadas = 0;
+    let falhas = 0;
+    for (const foto of scan.photos) {
+      const src = path.join(pasta, foto.name);
+      try {
+        if (!moverArquivoParaArquivo(src, path.join(backupDir, foto.name))) throw new Error('rename/copy');
+        arquivadas += 1;
+      } catch (e) {
+        falhas += 1;
+        try { fs.renameSync(src, src + '.enviado'); } catch {}
+        console.warn(`[natal-core] DSLR: nao consegui arquivar ${foto.name}: ${e.message}`);
+      }
+    }
+    dslrSeen.clear();
+    return {
+      success: true,
+      sessaoId: sessao.id,
+      count: sessao.importadas.length,
+      fotos: sessao.importadas,
+      folder: pasta,
+      backup: backupDir,
+      arquivadas,
+      falhas,
+    };
+  } finally {
+    dslrClosing = false;
+  }
+}
+async function descartarDslr() {
+  if (!dslrHabilitado()) return { success: false, error: 'DESATIVADO' };
+  const pasta = pastaDslr();
+  if (!pasta) return { success: false, error: 'SEM_PASTA' };
+  const scan = scanDslr();
+  if (!scan.photos.length) return { success: true, descartadas: 0, folder: pasta };
+  const carimbo = new Date().toISOString().replace(/[:.]/g, '-');
+  const destino = path.join(DATA_DIR, 'dslr-descartadas', carimbo);
+  let descartadas = 0;
+  for (const foto of scan.photos) {
+    const src = path.join(pasta, foto.name);
+    if (moverArquivoParaArquivo(src, path.join(destino, foto.name))) descartadas += 1;
+    else { try { fs.renameSync(src, src + '.enviado'); } catch {} }
+  }
+  dslrSeen.clear();
+  console.log(`[natal-core] DSLR: ${descartadas} foto(s) descartada(s) -> ${destino}`);
+  return { success: true, descartadas, folder: pasta, destino };
+}
+
 // Migração idempotente dos previews antigos (que eram cópia do original).
 // Reduz só os arquivos ainda pesados, usando o ORIGINAL como fonte (melhor
 // qualidade) e preservando `originais/` intactos. Roda em background após o
@@ -1659,6 +1975,8 @@ async function migrarPreviewsPesados() {
     const limite = Math.max(1, Math.min(3, os.cpus().length || 1));
     const trabalhar = async () => {
       while (idx < tarefas.length) {
+        // Sessão ao vivo (fechar da câmera/import do cartão) manda primeiro.
+        while (preparandoSessoes.size > 0) await sleep(500);
         const t = tarefas[idx++];
         try {
           await criarPreviewLeve(t.srcPath, t.prevPath, t.ext);
@@ -1748,6 +2066,7 @@ async function migrarThumbs() {
     let idx = 0;
     const trabalhar = async () => {
       while (idx < tarefas.length) {
+        while (preparandoSessoes.size > 0) await sleep(500);
         const t = tarefas[idx++];
         await criarThumbLeve(t.prevPath, t.thumbPath, t.ext);
         let ok = false;
@@ -1797,7 +2116,9 @@ function testesDoDia(lojaId) {
   const alvo = String(lojaId || '');
   return testes.filter((t) => t && t.data === hoje
     && String(t.lojaId || '') === alvo
-    && t.status !== 'CANCELADO');
+    && t.status !== 'CANCELADO'
+    // FALHOU = nada saiu na impressora; não deve queimar a cota do dia.
+    && t.status !== 'FALHOU');
 }
 function statusTestes() {
   const itens = testesDoDia(machineConfig.lojaId);
@@ -1934,6 +2255,8 @@ function registrarImpressao(pedido, fotos, opts = {}) {
       qty: Math.max(1, Number(f && f.qty) || 1),
       filename: String(f && f.filename || ''),
     })),
+    // Impressão interrompida no meio: o registro cobre só as fotos que saíram.
+    parcial: opts.parcial === true,
   };
   impressoes.push(evento);
   saveImpressoes();
@@ -2294,46 +2617,47 @@ function recalcularCaixaFechado(c) {
   return true;
 }
 
-// Corrige no boot pedidos pagos de hoje que na verdade sao de um dia anterior
-// (edicao de venda antiga / sessao antiga): devolve ao caixa do periodo.
+// Migração (uma vez): até a 1.3.32, venda de sessão de outro dia era gravada no
+// caixa do PERÍODO (já fechado), então o dinheiro recebido hoje não entrava no
+// fechamento de hoje e o caixa fechava sempre com sobra. Agora o caixa é o que
+// estava aberto no instante do registro (`registradoEm`). Esta rotina acerta o
+// histórico uma única vez e marca o arquivo para não rodar de novo.
 function reconciliarPedidosForaDoPeriodo() {
-  const hoje = dataLocal();
+  const marcadorFile = path.join(DATA_DIR, 'migracao-caixa-registro.json');
+  if (readJson(marcadorFile, null)) return;
   let mudou = false;
   const afetados = new Set();
   for (const p of pedidos) {
     if (!p) continue;
     if (String(p.status || '').toUpperCase() === 'CANCELADO') continue;
-    const periodo = periodoDoPedido(p);
-    if (!periodo.ts || dataLocal(periodo.ts) >= hoje) continue;
-    // So mexe em pedido criado hoje ou que veio de edicao explicita.
-    if (dataLocal(p.criadoEm) !== hoje && !periodo.origem) continue;
-    const destino = (periodo.caixaId ? caixaObjeto(periodo.caixaId) : null) || caixaDoInstante(periodo.ts);
-    if (!destino || !destino.id || String(destino.id) === String(p.caixaId)) continue;
-    const anterior = String(p.caixaId || '');
+    if (p.caixaPeriodoDivergente === true) continue; // já está no caixa do dia do registro
+    const registradoEm = Number(p.registradoEm) || 0;
+    if (!registradoEm) continue;
+    const destino = caixaDoInstante(registradoEm);
+    if (!destino || !destino.id || String(destino.id) === String(p.caixaId || '')) continue;
+    afetados.add(String(p.caixaId || ''));
+    afetados.add(String(destino.id));
+    const de = String(p.caixaId || '');
     p.caixaId = String(destino.id);
-    p.criadoEm = periodo.ts;
-    if (Number(p.pagoEm) > 0 || statusPedidoVenda(p)) {
-      p.pagoEm = (periodo.origem && Number(periodo.origem.pagoEm) > 0) ? Number(periodo.origem.pagoEm) : periodo.ts;
-    }
-    p.periodoEm = periodo.ts;
+    p.caixaPeriodoDivergente = Number(p.periodoEm) > 0
+      && dataLocal(Number(destino.abertoEm) || registradoEm) !== dataLocal(Number(p.periodoEm));
     p.caixaReajuste = {
-      de: anterior,
+      de,
       para: String(destino.id),
-      motivo: periodo.origem ? 'edicao de pedido de outro dia' : 'sessao de outro dia',
+      motivo: 'dinheiro recebido em dia diferente do da sessão',
       em: new Date().toISOString(),
     };
     p.atualizadoEm = Date.now();
-    afetados.add(anterior);
-    afetados.add(String(destino.id));
-    removerPedidoDosCaixas(p.id, String(destino.id));
     adicionarPedidoNoCaixa(String(destino.id), p.id);
+    removerPedidoDosCaixas(p.id, String(destino.id));
     mudou = true;
   }
+  writeJson(marcadorFile, { versao: 1, em: new Date().toISOString() });
   if (!mudou) return;
   savePedidos();
   for (const id of afetados) {
     const c = caixaObjeto(id);
-    if (c && recalcularCaixaFechado(c)) writeJson(CAIXAS_FILE, caixas);
+    if (c && c.fechadoEm && recalcularCaixaFechado(c)) writeJson(CAIXAS_FILE, caixas);
   }
 }
 
@@ -2572,10 +2896,9 @@ function recarregarEstadoLocal() {
   reconciliarCaixasHistorico();
   reconciliarPedidosForaDoPeriodo();
   pastaImportadas = readJson(PASTA_IMPORTADAS_FILE, {});
-  filaImpressao = (() => {
-    const arr = readJson(FILA_IMPRESSAO_FILE, []);
-    return Array.isArray(arr) ? arr.filter((j) => j && j.pedidoId) : [];
-  })();
+  const filaRecarregada = normalizarFilaImpressao(readJson(FILA_IMPRESSAO_FILE, []));
+  filaImpressao = filaRecarregada.lista;
+  if (filaRecarregada.mudou) saveFila();
   filaPortal = (() => {
     const arr = readJson(FILA_PORTAL_FILE, []);
     return Array.isArray(arr) ? arr.filter((i) => i && i.tipo && i.chave) : [];
@@ -3278,14 +3601,31 @@ const FILA_SCAN_MS = 15000;
 function mediaForPaper(paper) {
   return paper === '15x20' ? '6x8' : '6x4';
 }
-let filaImpressao = (() => {
-  const arr = readJson(FILA_IMPRESSAO_FILE, []);
-  return Array.isArray(arr) ? arr.filter((j) => j && j.pedidoId) : [];
-})();
+// Normaliza a fila lida do disco. Um job só fica IMPRIMINDO enquanto ESTE
+// processo está imprimindo; se veio assim do arquivo, o processo anterior morreu
+// no meio (queda de energia/crash) e ninguém mais retomaria o job — ele ficaria
+// preso para sempre e ainda bloquearia a reimpressão (409 "já está na fila").
+// Devolver para PENDENTE é seguro: no boot não há impressão em andamento.
+function normalizarFilaImpressao(arr) {
+  const lista = Array.isArray(arr) ? arr.filter((j) => j && j.pedidoId) : [];
+  let mudou = false;
+  for (const j of lista) {
+    if (j.estado === 'IMPRIMINDO') {
+      j.estado = 'PENDENTE';
+      j.tentadoEm = null;
+      j.interrompidoEm = Date.now();
+      mudou = true;
+    }
+  }
+  return { lista, mudou };
+}
+const _filaInicial = normalizarFilaImpressao(readJson(FILA_IMPRESSAO_FILE, []));
+let filaImpressao = _filaInicial.lista;
 let _workerRodando = false;
 function saveFila() {
   try { writeJson(FILA_IMPRESSAO_FILE, filaImpressao); } catch (e) { console.warn('[natal-core] falha ao salvar fila:', e.message); }
 }
+if (_filaInicial.mudou) saveFila();
 function lerLeituraPapel(v) {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -3297,18 +3637,59 @@ function infoImpressoraTemLeitura(info) {
   return lerLeituraPapel(info.paperRemainHalfSize) !== null
     || lerLeituraPapel(info.paperRemain) !== null;
 }
+// Impressora "disponivel" para imprimir: o criterio do .28. A leitura de papel
+// serve para exibir o estoque (e pode vir nula enquanto a ASK-400 termina uma
+// foto), mas NAO pode segurar a fila de impressao.
+function infoImpressoraDisponivel(info) {
+  if (!info) return false;
+  return !/impressora\s+n[ãa]o\s+encontrada/i.test(String(info.lastError || ''));
+}
+// Cache curto do checkPrinter: o PDV consulta /api/printer/status a cada 15s e
+// o worker reaproveita essa leitura em vez de disparar outro checkPrinter
+// (o Java sidecar atende em serie, entao cada chamada atrasa o print2).
+const IMPRESSORA_CACHE_MS = 10000;
+let _impressoraCache = { em: 0, online: false };
+function invalidarCacheImpressora() {
+  _impressoraCache = { em: 0, online: false };
+}
 // Impressora REAL respondendo (Java sidecar porta 8080 → checkPrinter).
-async function impressoraOnline() {
+async function impressoraOnline(forcar = false) {
+  if (!forcar && Date.now() - _impressoraCache.em < IMPRESSORA_CACHE_MS) {
+    return _impressoraCache.online;
+  }
+  const inicio = Date.now();
+  let online = false;
   try {
     const resp = await fetch(JAVA_CHECK_URL, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(4000) });
-    if (!resp.ok) return false;
-    const json = await resp.json();
-    return !!(json && json.status === 'OK' && Array.isArray(json.retorno)
-      && json.retorno.some(infoImpressoraTemLeitura));
-  } catch { return false; }
+    if (resp.ok) {
+      const json = await resp.json();
+      online = !!(json && json.status === 'OK' && Array.isArray(json.retorno)
+        && json.retorno.some(infoImpressoraDisponivel));
+    }
+  } catch { online = false; }
+  _impressoraCache = { em: Date.now(), online };
+  const decorrido = Date.now() - inicio;
+  if (decorrido > 1200) {
+    console.log(`[natal-core] checkPrinter ${decorrido}ms -> ${online ? 'online' : 'offline'}`);
+  }
+  return online;
 }
-async function consultarImpressora() {
+// Ultimo status lido do checkPrinter. O PDV consulta /api/printer/status a
+// cada 15s, o resumo de papel e o fechamento tambem; repetir a chamada a cada
+// poucos segundos so enfileira trabalho no Java (que atende em serie e fica
+// atras do print2). Reaproveita a leitura recente e, durante uma impressao,
+// nunca dispara outra.
+let _ultimoStatusImpressora = { em: 0, status: null };
+async function consultarImpressora(opts = {}) {
+  const imprimindo = pedidosImprimindo.size > 0;
+  const cacheado = _ultimoStatusImpressora.status;
+  if (cacheado) {
+    const idade = Date.now() - _ultimoStatusImpressora.em;
+    if (imprimindo) return cacheado;
+    if (idade < (Number.isFinite(opts.ttlMs) ? opts.ttlMs : 8000)) return cacheado;
+  }
   let status = { connected: false, paper10x15: null, paper15x20: null, lastError: null };
+  let disponivel = false;
   try {
     const resp = await fetch('http://localhost:8080/kws/v1/kiosk/checkPrinter', {
       headers: { Accept: 'application/json' },
@@ -3317,6 +3698,7 @@ async function consultarImpressora() {
     if (resp.ok) {
       const json = await resp.json();
       if (json.status === 'OK' && Array.isArray(json.retorno) && json.retorno.length) {
+        disponivel = json.retorno.some(infoImpressoraDisponivel);
         const info = json.retorno[0];
         const leitura10x15 = lerLeituraPapel(info.paperRemainHalfSize);
         const leitura15x20 = lerLeituraPapel(info.paperRemain);
@@ -3339,16 +3721,50 @@ async function consultarImpressora() {
   } catch (e) {
     status.lastError = e.message || String(e);
   }
-  if (status.connected && filaImpressao.some((j) => j.estado === 'PENDENTE')) kickFila();
+  _impressoraCache = { em: Date.now(), online: disponivel };
+  _ultimoStatusImpressora = { em: Date.now(), status };
+  if (disponivel && filaImpressao.some((j) => j.estado === 'PENDENTE')) kickFila();
   return status;
 }
 async function callPrinter(url) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 120000);
+  let estourou = false;
+  const timer = setTimeout(() => { estourou = true; ctrl.abort(); }, 120000);
   try {
     const res = await fetch(url, { signal: ctrl.signal });
-    await res.text();
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const texto = await res.text().catch(() => '');
+    if (!res.ok) throw new Error(`HTTP ${res.status}${texto ? ` — ${texto.slice(0, 160)}` : ''}`);
+    // O Java responde HTTP 200 mesmo quando a ASK-400 recusa a foto (papel
+    // acabou, jam, driver). O corpo diz o que realmente saiu
+    // ({"status":"OK","retorno":{"totalFiles":N,"printed":N,"errors":N}});
+    // ignorar isso marcava o pedido IMPRESSO e descontava ribbon de uma
+    // impressão que não aconteceu.
+    let json = null;
+    try { json = texto ? JSON.parse(texto) : null; } catch { json = null; }
+    if (json && String(json.status || '').toUpperCase() === 'ERROR') {
+      throw new Error(json.descricao || json.error || 'Falha na impressora');
+    }
+    const ret = json && json.retorno && typeof json.retorno === 'object' && !Array.isArray(json.retorno)
+      ? json.retorno : null;
+    if (ret && (ret.totalFiles !== undefined || ret.printed !== undefined)) {
+      const totalFiles = Number(ret.totalFiles) || 0;
+      const printed = Number(ret.printed) || 0;
+      const errors = Number(ret.errors) || 0;
+      if (errors > 0 || printed < totalFiles) {
+        throw new Error(`Impressora não imprimiu (${printed}/${totalFiles}${errors ? `, ${errors} erro(s)` : ''})`);
+      }
+    }
+    return json;
+  } catch (e) {
+    // Timeout do print2 significa "não sei se saiu": re-tentar sozinho poderia
+    // imprimir a mesma foto duas vezes. Marca para o worker não re-tentar e
+    // pede conferência ao operador.
+    if (estourou) {
+      const err = new Error('A impressora não respondeu em 2 minutos — confira se a foto saiu antes de reimprimir.');
+      err.timeout = true;
+      throw err;
+    }
+    throw e;
   } finally {
     clearTimeout(timer);
   }
@@ -3370,6 +3786,7 @@ function buildPrintList(items, pedidoId) {
         destName: q === 0 ? filename : `${baseName}_${q}${ext}`,
         media,
         units,
+        key: item.key,
       });
     }
   }
@@ -3386,8 +3803,10 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
   const listaFotos = Array.isArray(fotos) ? fotos : (pedido.fotos || []);
   const tmpRoot = path.join(os.tmpdir(), 'natal-print', sanitizeSegment(pedidoId));
   const queueDir = path.join(PRINT_QUEUE_DIR, sanitizeSegment(pedidoId));
+  const inicioPipeline = Date.now();
   let printedUnits = 0;
   let ribbonConsumed = false;
+  const fotosImpressas = []; // {key, qty} do que realmente saiu (ledger de papel)
   const consumirRibbonImpresso = () => {
     if (ribbonConsumed || printedUnits <= 0) return;
     consumeRibbon(printedUnits);
@@ -3398,28 +3817,36 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
     consumirRibbonImpresso();
     console.log(`[natal-core] Impressao do pedido ${pedido.numero} interrompida: pedido cancelado`);
     emit('print-complete', { pedidoId, success: false, canceled: true, reimpressao });
-    return false;
+    return { ok: false, printedUnits, canceled: true };
   };
   try {
     const allPrints = buildPrintList(listaFotos, pedidoId);
     const total = allPrints.length;
+    // Foto faltando no disco não pode ser "pulada": antes o pedido terminava
+    // IMPRESSO, a sessão FINALIZADA e o ribbon era descontado sem a foto sair.
+    const faltando = [...new Set(allPrints.filter((p) => !fs.existsSync(p.src)).map((p) => path.basename(p.src)))];
+    if (faltando.length) {
+      throw new Error(`Foto(s) não encontrada(s) na fila: ${faltando.slice(0, 3).join(', ')}${faltando.length > 3 ? ` (+${faltando.length - 3})` : ''}. Reenvie a impressão.`);
+    }
     emit('print-start', { pedidoId, total, reimpressao, teste: !!opts.teste });
 
     for (let i = 0; i < total; i++) {
       if (cancelado()) return pararPorCancelamento();
       const { src, destName, media, units } = allPrints[i];
       if (!fs.existsSync(src)) {
-        console.warn(`[natal-core] Foto nao encontrada, pulando: ${src}`);
-        continue;
+        throw new Error(`Foto desapareceu durante a impressão: ${path.basename(src)}`);
       }
       const dir = path.join(tmpRoot, `${media}_${i}`);
       fs.mkdirSync(dir, { recursive: true });
       fs.copyFileSync(src, path.join(dir, destName));
 
       console.log(`[natal-core] Imprimindo ${i + 1}/${total}: ${destName} (${media})`);
+      const inicioFoto = Date.now();
       await callPrinter(`${JAVA_PRINTER_URL}?code=${encodeURIComponent(dir)}&media=${media}&printerName=`);
+      console.log(`[natal-core] print2 ${i + 1}/${total} ok em ${Date.now() - inicioFoto}ms`);
 
       printedUnits += units || 1;
+      fotosImpressas.push({ key: allPrints[i].key, qty: 1 });
       emit('printer:progress', { current: i + 1, total });
       fs.rmSync(dir, { recursive: true, force: true });
       if (i < total - 1) await sleep(i === 0 ? 2000 : 1000);
@@ -3441,8 +3868,8 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
       emit('print-complete', { pedidoId, testeId: pedido.id, success: true, teste: true });
       fs.rmSync(queueDir, { recursive: true, force: true });
       fs.rmSync(tmpRoot, { recursive: true, force: true });
-      console.log(`[natal-core] Teste ${pedido.id} impresso (ribbon: ${ribbon})`);
-      return true;
+      console.log(`[natal-core] Teste ${pedido.id} impresso em ${Date.now() - inicioPipeline}ms (ribbon: ${ribbon})`);
+      return { ok: true, printedUnits };
     }
 
     pedidos = pedidos.map((p) => (p.id === pedido.id
@@ -3461,13 +3888,26 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
 
     fs.rmSync(queueDir, { recursive: true, force: true });
     fs.rmSync(tmpRoot, { recursive: true, force: true });
-    console.log(`[natal-core] Pedido ${pedido.numero} ${reimpressao ? 'reimpresso' : 'impresso'} (ribbon: ${ribbon})`);
-    return true;
+    console.log(`[natal-core] Pedido ${pedido.numero} ${reimpressao ? 'reimpresso' : 'impresso'} em ${Date.now() - inicioPipeline}ms (ribbon: ${ribbon})`);
+    return { ok: true, printedUnits };
   } catch (e) {
     consumirRibbonImpresso();
+    // Em falha parcial, o ledger de papel registra só o que saiu — antes ele
+    // ficava sem registro nenhum e o relatório de papel acusava divergência.
+    if (fotosImpressas.length) {
+      const agregadas = [];
+      const porKey = new Map();
+      for (const f of fotosImpressas) {
+        const k = String(f.key || '');
+        const atual = porKey.get(k);
+        if (atual) atual.qty += f.qty;
+        else { const item = { key: k, qty: f.qty }; porKey.set(k, item); agregadas.push(item); }
+      }
+      try { registrarImpressao(pedido, agregadas, { ...opts, reimpressao, parcial: true }); } catch {}
+    }
     console.error(`[natal-core] Falha na impressao do pedido ${pedidoId}: ${e.message}`);
     emit('print-complete', { pedidoId, success: false, reimpressao, teste: !!opts.teste, error: `Falha Java sidecar: ${e.message}` });
-    return false;
+    return { ok: false, printedUnits, error: e.message, timeout: e.timeout === true };
   }
 }
 
@@ -3506,6 +3946,9 @@ function enfileirarImpressao(pedido, fotos, opts = {}) {
     });
   }
   saveFila();
+  // Job novo: o worker faz UM checkPrinter fresquinho e imprime. Sem isso ele
+  // poderia reaproveitar um cache "offline" e só tentar de novo no scan de 15s.
+  invalidarCacheImpressora();
 }
 
 // Worker da fila: pega o PENDENTE mais antigo. Impressora offline → mantém na
@@ -3519,8 +3962,23 @@ async function processarFila() {
     if (!job) return;
     if (pedidosImprimindo.has(job.pedidoId)) return;
     const pendentes = filaImpressao.filter((j) => j.estado === 'PENDENTE').length;
+    const inicioCheck = Date.now();
     if (!(await impressoraOnline())) {
       emit('print-waiting', { qtd: pendentes });
+      return;
+    }
+    console.log(`[natal-core] Fila: impressora online em ${Date.now() - inicioCheck}ms (job ${job.pedidoId}, ${pendentes} pendente(s))`);
+    // Papel zerado para o formato do job: espera o operador repor em vez de
+    // tentar imprimir (falharia e iria para FALHOU, que não volta sozinho).
+    // Só bloqueia quando a leitura existe de verdade — sem leitura, mantém o
+    // critério do .28 (não trava a fila por falta de telemetria).
+    const statusImpressora = await consultarImpressora({ ttlMs: IMPRESSORA_CACHE_MS }).catch(() => null);
+    const precisa15x20 = (job.fotos || []).some((f) => f && f.key === '15x20');
+    const papelDoJob = statusImpressora
+      ? (precisa15x20 ? statusImpressora.paper15x20 : statusImpressora.paper10x15)
+      : null;
+    if (papelDoJob === 0) {
+      emit('print-waiting', { qtd: pendentes, motivo: precisa15x20 ? 'sem_papel_15x20' : 'sem_papel_10x15' });
       return;
     }
     const teste = job.teste === true
@@ -3549,12 +4007,13 @@ async function processarFila() {
     saveFila();
     pedidosImprimindo.add(job.pedidoId);
     try {
-      const ok = await runPrintPipeline(pedido, job.fotos, {
+      const resultado = await runPrintPipeline(pedido, job.fotos, {
         reimpressao,
         teste: !!teste,
         motivo: job.motivo || '',
         operador: job.operador || pedido.operador || '',
       });
+      const ok = !!(resultado && resultado.ok === true);
       if (ok) {
         filaImpressao = filaImpressao.filter((j) => j !== job);
         saveFila();
@@ -3563,8 +4022,18 @@ async function processarFila() {
         saveFila();
         try { fs.rmSync(path.join(PRINT_QUEUE_DIR, sanitizeSegment(job.pedidoId)), { recursive: true, force: true }); } catch {}
         emit('print-fila:atualizada', { qtd: filaImpressao.filter((j) => j.estado === 'PENDENTE').length, removidos: 1 });
+      } else if ((resultado && resultado.printedUnits || 0) === 0 && !(resultado && resultado.timeout) && (job.tries || 0) < 3) {
+        // Nada saiu nesta tentativa: re-tentar é seguro (não duplica foto).
+        // Deixa PENDENTE para o próximo scan; se o problema for papel/energia,
+        // o gate acima segura até normalizar.
+        job.estado = 'PENDENTE';
+        job.tentadoEm = null;
+        job.ultimoErro = resultado && resultado.error ? resultado.error : '';
+        saveFila();
+        emit('print-waiting', { qtd: pendentes, motivo: 'falha_temporaria', erro: job.ultimoErro });
       } else {
         job.estado = 'FALHOU';
+        job.ultimoErro = resultado && resultado.error ? resultado.error : '';
         saveFila();
         if (teste) {
           const idx = testes.findIndex((t) => t.id === teste.id);
@@ -3601,7 +4070,9 @@ function limparFila(opts = {}) {
   const todos = opts.todos === true;
   const removidos = [];
   filaImpressao = filaImpressao.filter((j) => {
-    if (j.estado === 'IMPRIMINDO') return true; // nunca remove o que está saindo
+    // Só preserva o que ESTE processo está imprimindo agora. Um IMPRIMINDO
+    // órfão (crash anterior) precisa poder ser removido.
+    if (j.estado === 'IMPRIMINDO' && pedidosImprimindo.has(j.pedidoId)) return true;
     if (todos) { removidos.push(j); return false; }
     if (alvo && (j.pedidoId === alvo || String(j.numero) === alvo)) { removidos.push(j); return false; }
     return true;
@@ -3623,6 +4094,16 @@ function limparFila(opts = {}) {
 // memória — o app aberto continua funcionando e já nasce sem caixa aberto.
 // database\config.json é preservado: machineId/kioskCode (pareamento) sobrevivem.
 function limparDadosLocais(opts = {}) {
+  // Nunca apagar dados com uma impressão em andamento: o pipeline perderia as
+  // fotos da print-queue no meio, o lock seria limpo e um novo POST poderia
+  // disparar uma segunda impressão do mesmo pedido.
+  if (pedidosImprimindo.size > 0 && opts.forcar !== true) {
+    return {
+      success: false,
+      error: 'IMPRIMINDO',
+      message: 'Há uma impressão em andamento. Aguarde terminar antes de limpar os dados.',
+    };
+  }
   const aberto = requireCaixaAberto();
   if (aberto && opts.forcar !== true) {
     return {
@@ -3807,6 +4288,19 @@ const server = http.createServer(async (req, res) => {
     }
     if (method === 'GET' && p === '/api/config') {
       return sendJson(res, 200, configPublica());
+    }
+    // ── Câmera DSLR direta (digiCamControl) ──
+    if (method === 'GET' && p === '/api/dslr/status') {
+      const status = await statusDslr();
+      return sendJson(res, 200, status);
+    }
+    if (method === 'POST' && p === '/api/dslr/fechar') {
+      const resultado = await fecharSessaoDslr();
+      return sendJson(res, resultado.success ? 200 : 409, resultado);
+    }
+    if (method === 'POST' && p === '/api/dslr/descartar') {
+      const resultado = await descartarDslr();
+      return sendJson(res, 200, resultado);
     }
     // Status real da impressora ASK-400 (proxy do Java sidecar na porta 8080)
     if (method === 'GET' && p === '/api/printer/status') {
@@ -4153,7 +4647,7 @@ const server = http.createServer(async (req, res) => {
         const thumbDir = path.join(sessaoDir(id), 'thumbs');
         fs.mkdirSync(thumbDir, { recursive: true });
         const extThumb = path.extname(filename).toLowerCase() === '.png' ? '.png' : '.jpg';
-        criarThumbLeve(path.join(dir, filename), path.join(thumbDir, filename), extThumb);
+        criarThumbLeve(path.join(dir, filename), path.join(thumbDir, filename), extThumb, 1);
       }
 
       if (sessao.estado === ESTADOS.CRIADA || sessao.estado === ESTADOS.FOTOGRAFANDO) {
@@ -4305,18 +4799,23 @@ const server = http.createServer(async (req, res) => {
         if (!pagamentos.length) pagamentos = null;
       }
 
-      // A venda pertence ao dia da SESSAO (ou ao caixa do pedido de origem,
-      // quando veio de edicao), nao ao caixa aberto no momento do clique.
+      // Duas datas diferentes, de propósito:
+      //  - periodoEm (e criadoEm/pagoEm quando fora do dia) = dia da SESSÃO, que
+      //    é como a venda aparece nos relatórios/DRE;
+      //  - caixa = caixa ABERTO agora, porque é nele que o dinheiro entra
+      //    fisicamente. Antes a venda de sessão de outro dia era gravada num
+      //    caixa já fechado: o dinheiro recebido hoje não aparecia no fechamento
+      //    de hoje (fechava sempre com sobra) e alterava um caixa já conciliado.
       const periodo = periodoDoPedido({
         origemPedidoId: body.origemPedidoId || null,
         sessaoId: sessao.id,
         sessoes: sessoesPedido,
       });
       const periodoEm = periodo.ts > 0 ? periodo.ts : Date.now();
-      let caixaDestino = periodo.caixaId ? caixaObjeto(periodo.caixaId) : null;
-      if (!caixaDestino && dataLocal(periodoEm) !== dataLocal()) caixaDestino = caixaDoInstante(periodoEm);
-      if (!caixaDestino) caixaDestino = caixaAtual;
+      const caixaDestino = caixaAtual;
       const foraDoDia = dataLocal(periodoEm) !== dataLocal();
+      const caixaDeOutroDia = caixaDestino && Number(caixaDestino.abertoEm) > 0
+        && dataLocal(caixaDestino.abertoEm) !== dataLocal(periodoEm);
       const numero = nextPedidoNumero();
       const meio = pagamentos && pagamentos.length
         ? (pagamentos.length === 1 ? pagamentos[0].meio : 'MULTI')
@@ -4340,6 +4839,7 @@ const server = http.createServer(async (req, res) => {
         // dia certo (lista, snapshot e DRE do portal), nao no dia do clique.
         criadoEm: foraDoDia ? periodoEm : Date.now(),
         periodoEm,
+        caixaPeriodoDivergente: !!caixaDeOutroDia,
         registradoEm: Date.now(),
         meio,
         pagamentos,
@@ -4349,6 +4849,9 @@ const server = http.createServer(async (req, res) => {
         pagoEm: null,
         guiaImpressa: false,
         impressoEm: null,
+        // Marca de "mudou depois do último envio": o snapshot do DIA da sessão
+        // (que pode ser anterior a hoje) precisa ser reenviado ao portal.
+        atualizadoEm: Date.now(),
       };
       pedidos.push(pedido);
       if (!Array.isArray(caixaDestino.pedidos)) caixaDestino.pedidos = [];
