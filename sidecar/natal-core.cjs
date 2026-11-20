@@ -3422,7 +3422,7 @@ async function runPrintPipeline(pedido, fotos, opts = {}) {
       printedUnits += units || 1;
       emit('printer:progress', { current: i + 1, total });
       fs.rmSync(dir, { recursive: true, force: true });
-      if (i < total - 1) await sleep(i === 0 ? 18000 : 12000);
+      if (i < total - 1) await sleep(i === 0 ? 2000 : 1000);
     }
 
     if (cancelado()) return pararPorCancelamento();

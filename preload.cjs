@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('natal', {
     'natal:printBematech',
     typeof payload === 'string' ? { texto: payload } : (payload || {})
   ),
+  setBusy: (busy) => ipcRenderer.send('natal:setBusy', !!busy),
   restartImporter: () => ipcRenderer.invoke('natal:restartImporter'),
   importerInfo: () => ipcRenderer.invoke('natal:importerInfo'),
   openImporterLog: () => ipcRenderer.invoke('natal:openImporterLog'),

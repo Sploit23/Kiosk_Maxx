@@ -243,6 +243,8 @@ test('filtro do dia usa a data local do pedido', () => {
   const html = ler('vendas.html');
   const fonte = [
     extrairFuncao(html, 'chaveDia'),
+    extrairFuncao(html, 'dataExibicaoPedido'),
+    extrairFuncao(html, 'pedidoSessaoOutroDia'),
     extrairFuncao(html, 'pedidoDoDia'),
     extrairFuncao(html, 'filtrarPedidosDoDia'),
   ].join('\n');
@@ -283,7 +285,7 @@ test('cupom recebe o numero sequencial e a lista usa o filtro diario', () => {
   assert.match(html, /const pedidoNumero = novoPedido\.numero \?\? novoPedido\.id/);
   assert.match(html, /pedidoId: numeroCupom/);
   assert.match(html, /const pedidosHoje = filtrarPedidosDoDia\(pedidosRealizados, pedidosDiaSelecionado\)/);
-  assert.match(html, /\[\.\.\.pedidosHoje\]\.reverse\(\)/);
+  assert.match(html, /\[\.\.\.pedidosHoje\]\.sort\(/);
 });
 
 test('tela de pedidos permite escolher o dia e mantem hoje como padrao', () => {
@@ -349,6 +351,8 @@ test('seletor de dias lista os dias com venda e ignora data invalida', () => {
   const html = ler('vendas.html');
   const fonte = [
     extrairFuncao(html, 'chaveDia'),
+    extrairFuncao(html, 'dataExibicaoPedido'),
+    extrairFuncao(html, 'pedidoSessaoOutroDia'),
     extrairFuncao(html, 'diasComVendas'),
   ].join('\n');
   const diasComVendas = new Function(

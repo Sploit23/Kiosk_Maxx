@@ -821,7 +821,6 @@ const { autoUpdater } = require('electron-updater');
 autoUpdater.autoDownload = false;   // baixamos aqui para controlar o estado/UI
 autoUpdater.autoInstallOnAppQuit = false;
 
-let isIdle = false;
 let isUpdating = false;
 let updateReady = false;
 let updateVersion = '';
@@ -843,7 +842,6 @@ function baixarAtualizacao() {
   return updateDownload;
 }
 
-ipcMain.on('natal:setIdle', (_, idle) => { isIdle = idle; });
 
 ipcMain.handle('natal:updateStatus', () => ({
   ready: updateReady,
