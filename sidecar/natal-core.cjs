@@ -2821,14 +2821,31 @@ function confirmarPortal({ id, tipo, chave } = {}) {
 
 // Falha no envio: o item CONTINUA na fila (não se perde nada) e a
 // tentativa fica registrada para o operador ver no ⚙.
-function erroPortal({ id, erro } = {}) {
+function erroPortal({ id, erro, offline = false } = {}) {
   const item = filaPortal.find((i) => i.id === id);
   if (!item) return { success: false, error: 'ITEM_NAO_ENCONTRADO' };
-  item.tentativas = (item.tentativas || 0) + 1;
-  item.ultimoErro = String(erro || '').slice(0, 300);
+  if (offline) {
+    item.tentativas = 0;
+    item.ultimoErro = 'sem conexão: ' + String(erro || '').slice(0, 280);
+  } else {
+    item.tentativas = (item.tentativas || 0) + 1;
+    item.ultimoErro = String(erro || '').slice(0, 300);
+  }
   item.ultimoEnvioEm = Date.now();
   saveFilaPortal();
   return { success: true, tentativas: item.tentativas };
+}
+function reativarFilaPortal() {
+  let reativados = 0;
+  for (const item of filaPortal) {
+    if ((item.tentativas || 0) >= 5) {
+      item.tentativas = 0;
+      item.ultimoErro = '';
+      reativados++;
+    }
+  }
+  if (reativados) saveFilaPortal();
+  return { success: true, reativados, total: filaPortal.length };
 }
 
 function filaPortalParaUI() {
@@ -2877,10 +2894,15 @@ function mesclarCachePortal(partial = {}) {
 
 function conferirCredencialCache(usuario, senha) {
   const u = String(usuario || '').trim();
-  const entry = (cachePortal.credenciais || {})[u];
-  if (!entry || !entry.hash) return false;
   const h = crypto.createHash('sha256').update(String(senha || '')).digest('hex');
-  return h === entry.hash;
+  const entry = (cachePortal.credenciais || {})[u];
+  if (entry && entry.hash && h === entry.hash) return true;
+  const alvo = u.toLowerCase();
+  return (Array.isArray(cachePortal.equipe) ? cachePortal.equipe : []).some((x) => {
+    if (!x || !x.senhaHash || x.senhaHash !== h) return false;
+    const nome = String(x.usuario || x.login || x.nome || '').trim().toLowerCase();
+    return nome === alvo;
+  });
 }
 
 // Re-carrega o estado em memória após relocar o diretório de dados (troca de
@@ -2953,29 +2975,52 @@ function emit(event, data) {
 function sessaoDir(id) { return path.join(SESSOES_DIR, sanitizeSegment(id)); }
 function sessaoMetaPath(id) { return path.join(sessaoDir(id), 'meta.json'); }
 
-function getSessao(id) {
-  const meta = readJson(sessaoMetaPath(id), null);
-  if (!meta) return null;
+function sessaoComFotos(id, meta) {
   const dir = sessaoDir(id);
   const previews = safeReadDir(path.join(dir, 'previews'));
   const originais = safeReadDir(path.join(dir, 'originais'));
+  const originalSet = new Set(originais);
   return {
     ...meta,
-    fotos: previews.map((f) => ({ name: f, preview: true, original: originais.includes(f) })),
+    fotos: previews.map((f) => ({ name: f, preview: true, original: originalSet.has(f) })),
     fotosQtd: previews.length,
   };
+}
+
+function getSessao(id) {
+  const meta = readJson(sessaoMetaPath(id), null);
+  if (!meta) return null;
+  return sessaoComFotos(id, meta);
 }
 
 function safeReadDir(dir) {
   try { return fs.readdirSync(dir).filter((f) => !f.startsWith('.')); } catch { return []; }
 }
 
-function listarSessoes() {
+function sessaoDataIso(sessao) {
+  const t = Number(sessao && sessao.criadaEm);
+  if (!t) return '';
+  const d = new Date(t);
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+function listarSessoes({ data = '', limite = 0, resumo = false } = {}) {
   const ids = safeReadDir(SESSOES_DIR);
-  return ids
-    .map((id) => getSessao(id))
-    .filter(Boolean)
-    .sort((a, b) => (b.criadaEm || 0) - (a.criadaEm || 0));
+  const out = [];
+  for (const id of ids) {
+    const meta = readJson(sessaoMetaPath(id), null);
+    if (!meta) continue;
+    if (data && sessaoDataIso(meta) !== data) continue;
+    if (resumo) {
+      out.push({ ...meta, fotos: [], fotosQtd: Number(meta.fotosQtd) || 0, resumo: true });
+    } else {
+      const sessao = sessaoComFotos(id, meta);
+      if (sessao) out.push(sessao);
+    }
+  }
+  out.sort((a, b) => (b.criadaEm || 0) - (a.criadaEm || 0));
+  return limite > 0 ? out.slice(0, limite) : out;
 }
 
 function atualizarSessao(id, patch) {
@@ -4487,6 +4532,9 @@ const server = http.createServer(async (req, res) => {
       const r = erroPortal(body);
       return sendJson(res, r.success ? 200 : 404, r);
     }
+    if (method === 'POST' && p === '/api/portal/fila/reativar') {
+      return sendJson(res, 200, reativarFilaPortal());
+    }
     if (method === 'POST' && p === '/api/portal/fila/limpar') {
       const body = JSON.parse((await readBody(req, 1024 * 1024)).toString() || '{}');
       if (!senhaConfere(body.senha)) {
@@ -4620,7 +4668,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (method === 'GET' && p === '/api/sessoes') {
-      return sendJson(res, 200, { success: true, sessoes: listarSessoes() });
+      const dataRaw = String(url.searchParams.get('data') || '').trim();
+      const data = /^\d{4}-\d{2}-\d{2}$/.test(dataRaw) ? dataRaw : '';
+      const limiteRaw = Number(url.searchParams.get('limite'));
+      const limite = Number.isFinite(limiteRaw) ? Math.max(0, Math.min(500, Math.floor(limiteRaw))) : 0;
+      const resumoRaw = String(url.searchParams.get('resumo') || '').toLowerCase();
+      const resumo = resumoRaw === '1' || resumoRaw === 'true' || resumoRaw === 'sim';
+      return sendJson(res, 200, { success: true, sessoes: listarSessoes({ data, limite, resumo }) });
     }
 
     const sessaoMatch = p.match(/^\/api\/sessoes\/([^/]+)$/);
@@ -4989,7 +5043,7 @@ const server = http.createServer(async (req, res) => {
       if (body.devolucao !== undefined) {
         const d = body.devolucao || {};
         const forma = String(d.forma || '').trim().toLowerCase();
-        if (!['dinheiro', 'cartao', 'nao'].includes(forma)) {
+        if (!['dinheiro', 'cartao', 'pix', 'nao'].includes(forma)) {
           return falhar(400, 'Forma de devolucao invalida');
         }
         const valor = Number(d.valor || 0);
@@ -5024,6 +5078,9 @@ const server = http.createServer(async (req, res) => {
             status: String(d.status || ''),
             estoque: String(d.estoque || ''),
             reembolso: re ? { forma: String(re.forma || 'nao'), valor: Number(re.valor) || 0 } : null,
+            itens: Array.isArray(d.itens)
+              ? d.itens.map(x => ({ chave: String((x && (x.chave || x.key)) || ''), volta: !!(x && x.volta) })).slice(0, 300)
+              : undefined,
             decididoEm: Number(d.decididoEm) || Date.now(),
           };
         } else {

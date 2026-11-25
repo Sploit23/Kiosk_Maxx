@@ -332,3 +332,14 @@ test('historico de caixa expoe o botao Corrigir e a API de correcao', () => {
   assert.match(ler('shared', 'api', 'natalApi.js'), /caixaCorrigir/);
   assert.match(ler('sidecar', 'natal-core.cjs'), /caixaCorrigirGet/);
 });
+
+test('correcao de caixa fechado tambem abre pelo login', () => {
+  const html = ler('vendas.html');
+  assert.match(html, /id="login-corrigir"/);
+  assert.match(html, /function abrirCorrecaoPeloLogin/);
+  assert.match(html, /mostrarListaConciliacoes\(true\)/);
+  assert.match(html, /preAutorizado \? abrirPedidosCorrecaoCaixa/);
+  assert.match(html, /Arrumar caixa fechado/);
+  assert.doesNotMatch(html, /id="login-corrigir"[^>]*display:none/);
+  assert.doesNotMatch(html, /btnCorrigir\.style\.display/);
+});

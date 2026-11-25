@@ -618,7 +618,7 @@ function conexaoPorLoja(): array
     return $out;
 }
 
-function userVisible(array $u, bool $withSenha = false): array
+function userVisible(array $u, bool $withSenha = false, bool $withHash = false): array
 {
     $lojas = is_array($u['lojas'] ?? null) ? array_values(array_unique(array_map('strval', $u['lojas']))) : [];
     if (!$lojas && isset($u['lojaId']) && $u['lojaId'] !== '') {
@@ -634,6 +634,7 @@ function userVisible(array $u, bool $withSenha = false): array
         'ativo' => !empty($u['ativo']),
     ];
     if ($withSenha) $out['senha'] = $u['senha'] ?? '';
+    if ($withHash) $out['senhaHash'] = hash('sha256', (string) ($u['senha'] ?? ''));
     return $out;
 }
 
@@ -1626,7 +1627,7 @@ try {
                 'ok' => true,
                 'loja' => ['id' => $loja['id'], 'nome' => $loja['nome'], 'pdv' => $loja['pdv']],
                 'usuarios' => array_map(function ($u) {
-                    return userVisible($u);
+                    return userVisible($u, false, true);
                 }, $users),
             ]);
         }
@@ -1977,6 +1978,7 @@ try {
                     $unidadesRibbon += $unidades;
                 }
                 $itens[] = [
+                    'chave' => trim((string) ($it['chave'] ?? '')),
                     'tipo' => $tipo,
                     'produtoId' => $produtoId,
                     'label' => trim((string) ($it['label'] ?? '')),
@@ -2021,9 +2023,10 @@ try {
                 ];
             }
             $devolucao = null;
-            if (is_array($pd['devolucao'] ?? null)) {
+            $temDevolucao = array_key_exists('devolucao', $pd);
+            if ($temDevolucao && is_array($pd['devolucao'])) {
                 $formaDev = strtolower(trim((string) ($pd['devolucao']['forma'] ?? '')));
-                if (in_array($formaDev, ['dinheiro', 'cartao', 'nao'], true)) {
+                if (in_array($formaDev, ['dinheiro', 'cartao', 'pix', 'nao'], true)) {
                     $devolucao = [
                         'forma' => $formaDev,
                         'valor' => round(max(0, (float) ($pd['devolucao']['valor'] ?? 0)), 2),
@@ -2036,6 +2039,9 @@ try {
             $anterior = null;
             foreach ($todos as $i => $r) {
                 if (($r['id'] ?? '') === $id) { $found = $i; $anterior = $r; break; }
+            }
+            if (!$temDevolucao && is_array($anterior['devolucao'] ?? null)) {
+                $devolucao = $anterior['devolucao'];
             }
 
             // Cancelamento pelo portal: o PDV só SOLICITA (sem motivo) e o admin
@@ -2088,6 +2094,15 @@ try {
                 'origemPedidoId' => (string) ($pd['origemPedidoId'] ?? ''),
                 'devolucao' => $devolucao,
                 'cancelamento' => $cancel,
+                'cancelamentoDecisao' => is_array($pd['cancelamentoDecisao'] ?? null)
+                    ? $pd['cancelamentoDecisao']
+                    : (is_array($anterior['cancelamentoDecisao'] ?? null) ? $anterior['cancelamentoDecisao'] : null),
+                'itensDevolvidos' => is_array($pd['itensDevolvidos'] ?? null)
+                    ? array_values(array_map('strval', $pd['itensDevolvidos']))
+                    : (is_array($anterior['itensDevolvidos'] ?? null) ? $anterior['itensDevolvidos'] : []),
+                'itensPerdidos' => is_array($pd['itensPerdidos'] ?? null)
+                    ? array_values(array_map('strval', $pd['itensPerdidos']))
+                    : (is_array($anterior['itensPerdidos'] ?? null) ? $anterior['itensPerdidos'] : []),
                 'guiaImpressa' => !empty($pd['guiaImpressa']),
                 'enviadoEm' => gmdate('c'),
             ];
@@ -2124,6 +2139,8 @@ try {
                         'forma' => (string) ($re['forma'] ?? 'nao'),
                         'valor' => round(max(0, (float) ($re['valor'] ?? 0)), 2),
                     ],
+                    'itens' => is_array($c['itens'] ?? null) ? $c['itens'] : [],
+                    'pagamentoOriginal' => is_array($c['pagamentoOriginal'] ?? null) ? $c['pagamentoOriginal'] : [],
                     'decididoEm' => $decididoEm,
                 ];
             }
@@ -2989,7 +3006,7 @@ try {
         }
 
         // Aprova ou recusa o cancelamento. Ao aprovar, o admin escolhe o que
-        // acontece com o estoque (volta/perda) e o reembolso (não/dinheiro/cartão).
+        // acontece com o estoque (por item) e o reembolso (não/dinheiro/cartão/PIX).
         // A decisão volta ao PDV em cancelamento.decisoes.
         case 'cancelamento.decidir': {
             $pedidoId = trim((string) ($p['pedidoId'] ?? ''));
@@ -3000,8 +3017,15 @@ try {
             if (!in_array($estoque, ['voltar', 'perder'], true)) $estoque = 'voltar';
             $reIn = is_array($p['reembolso'] ?? null) ? $p['reembolso'] : [];
             $reForma = strtolower(trim((string) ($reIn['forma'] ?? 'nao')));
-            if (!in_array($reForma, ['nao', 'dinheiro', 'cartao'], true)) $reForma = 'nao';
+            if (!in_array($reForma, ['nao', 'dinheiro', 'cartao', 'pix'], true)) $reForma = 'nao';
             $reValor = round(max(0, (float) ($reIn['valor'] ?? 0)), 2);
+            $itensDecisao = [];
+            foreach ((array) ($p['itens'] ?? []) as $itemDec) {
+                if (!is_array($itemDec)) continue;
+                $chave = trim((string) ($itemDec['chave'] ?? ''));
+                if ($chave === '') continue;
+                $itensDecisao[] = ['chave' => $chave, 'volta' => !empty($itemDec['volta'])];
+            }
 
             $todos = loadJson('pedidos.json', []);
             if (!is_array($todos)) $todos = [];
@@ -3020,15 +3044,47 @@ try {
                 $total = round(max(0, (float) ($r['total'] ?? 0)), 2);
                 if ($reForma !== 'nao' && $reValor <= 0) $reValor = $total;
                 if ($reValor > $total) $reValor = $total;
+                $pagamentoOriginal = [];
+                foreach ((is_array($r['pagamentos'] ?? null) ? $r['pagamentos'] : []) as $pg) {
+                    if (!is_array($pg)) continue;
+                    $pagamentoOriginal[] = [
+                        'meio' => (string) ($pg['meio'] ?? ''),
+                        'forma' => (string) ($pg['forma'] ?? ''),
+                        'valor' => round((float) ($pg['valor'] ?? 0), 2),
+                    ];
+                }
                 $c['status'] = 'aprovado';
-                $c['estoque'] = $estoque;
+                $c['estoque'] = $itensDecisao ? 'itens' : $estoque;
+                $c['itens'] = $itensDecisao ?: null;
+                $c['pagamentoOriginal'] = $pagamentoOriginal;
                 $c['reembolso'] = ['forma' => $reForma, 'valor' => $reForma === 'nao' ? 0 : $reValor];
                 $r['status'] = 'cancelado';
                 $r['canceladoEm'] = gmdate('c');
                 $r['devolucao'] = $c['reembolso'];
+                $r['cancelamentoDecisao'] = $c;
+                $r['itensDevolvidos'] = array_values(array_filter(array_map(function ($item) use ($itensDecisao) {
+                    if (!$itensDecisao) return null;
+                    foreach ($itensDecisao as $dec) {
+                        if (($dec['chave'] ?? '') === (string) ($item['chave'] ?? '')) {
+                            return !empty($dec['volta']) ? (string) ($item['label'] ?? $item['produtoId'] ?? '') : null;
+                        }
+                    }
+                    return null;
+                }, is_array($r['itens'] ?? null) ? $r['itens'] : [])));
+                $r['itensPerdidos'] = array_values(array_filter(array_map(function ($item) use ($itensDecisao) {
+                    if (!$itensDecisao) return null;
+                    foreach ($itensDecisao as $dec) {
+                        if (($dec['chave'] ?? '') === (string) ($item['chave'] ?? '')) {
+                            return empty($dec['volta']) ? (string) ($item['label'] ?? $item['produtoId'] ?? '') : null;
+                        }
+                    }
+                    return null;
+                }, is_array($r['itens'] ?? null) ? $r['itens'] : [])));
             } else {
                 $c['status'] = 'recusado';
                 $c['estoque'] = '';
+                $c['itens'] = null;
+                $c['pagamentoOriginal'] = null;
                 $c['reembolso'] = null;
             }
             $r['cancelamento'] = $c;

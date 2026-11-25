@@ -1691,6 +1691,7 @@
       <button class="btn-primary" id="login-entrar">Entrar</button>
     </div>
     <p class="login-error" id="login-error"></p>
+    <button type="button" class="login-peer" id="login-corrigir"><span class="dot"></span><span>Arrumar caixa fechado</span><span class="hint">senha master ›</span></button>
     <button type="button" class="login-peer" id="login-peer" style="display:none;"><span class="dot"></span><span id="login-peer-txt"></span><span class="hint">ver fotos ›</span></button>
     <button type="button" class="login-peer" id="login-camera" style="display:none;"><span class="dot"></span><span id="login-camera-txt"></span><span class="hint">criar sessão ›</span></button>
     <div class="login-peer" id="login-card" style="display:none;cursor:default;"><span class="dot"></span><span id="login-card-txt"></span></div>
@@ -2681,7 +2682,8 @@ async function fecharSessaoDslr(){
       toast('Sessão ' + (r.sessaoId || '') + ' criada com ' + (r.count || 0) + ' foto(s)'
         + (r.falhas ? ' — ' + r.falhas + ' original(is) não arquivado(s)' : ''));
       _dslrCountAnterior = 0;
-      if(typeof carregarSessoes === 'function') await carregarSessoes().catch(()=>{});
+      if(typeof carregarSessoes === 'function') await carregarSessoes({ data: selectedDate }).catch(()=>{});
+      if(typeof carregarDatasSessoes === 'function') await carregarDatasSessoes().catch(()=>{});
       if(typeof renderPainel === 'function') renderPainel();
       try{ atualizarStatusImport?.(); }catch{}
     }else{
@@ -2732,44 +2734,118 @@ function marcarSessaoConcluida(id){
   sessoesConcluidasLocal.add(id);
   try{ localStorage.setItem(CONCLUIDAS_KEY, JSON.stringify([...sessoesConcluidasLocal])); }catch{}
 }
-async function carregarSessoes(){
+const _detalhesSessoes = new Map();
+let datasSessoes = new Set();
+let totalSessoesConhecidas = 0;
+
+function mapSessao(s){
+  const d = new Date(s.criadaEm);
+  const data = isoDataLocal(d);
+  const hora = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  const fotos = (s.fotos || []).map(f => {
+    const filename = f.filename || f.name;
+    const seed = filename ? (s.id + '/' + filename) : ('f' + Math.random().toString(36).slice(2, 6));
+    if(filename){
+      URL_POR_FOTO[seed] = natalApi.fotoUrl(s.id, 'previews', filename);
+      URL_POR_THUMB[seed] = natalApi.fotoUrl(s.id, 'thumbs', filename);
+    }
+    return { id: filename || 'f', filename, seed };
+  });
+  const E = s.estado;
+  let status = 'aguardando_abertura', temVenda = false;
+  if(E === 'FINALIZADA') status = 'finalizada';
+  else if(E === 'CANCELADA') status = 'abandonada';
+  else if(E === 'VENDIDA'){ status = 'vendida'; temVenda = true; }
+  else if(E === 'RECEBENDO') status = 'recebendo';
+  if(status === 'aguardando_abertura' && sessoesConcluidasLocal.has(s.id)) status = 'finalizada';
+  return {
+    id: s.id, senha: numeroSessao(s.id), data, hora, status, temVenda,
+    fotosQtd: s.fotosQtd ?? fotos.length, fotos, estado: E,
+    fotosEsperadas: Number(s.fotosEsperadas) || 0,
+    recebendoDesde: s.recebendoDesde || null,
+    ultimoProgressoEm: s.ultimoProgressoEm || null,
+    importadaDe: s.importadaDe || null,
+    importacaoParcial: !!s.importacaoParcial,
+    operadorFotografo: s.operadorFotografo || null,
+  };
+}
+
+function ordenarSessoes(lista){
+  return lista.sort((a, b) => (b.data + b.hora).localeCompare(a.data + a.hora));
+}
+
+async function carregarSessoes(opts = {}){
   try{
-    const res = await natalApi.listarSessoes();
-    if(!res || !res.success) return;
-    sessions = (res.sessoes || []).map(s => {
-      const d = new Date(s.criadaEm);
-      const data = isoDataLocal(d);
-      const hora = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-      const fotos = (s.fotos || []).map(f => {
-        const filename = f.filename || f.name;
-        // seed único por sessão: mesmo nome de arquivo em sessões diferentes NÃO colide
-        const seed = filename ? (s.id + '/' + filename) : ('f' + Math.random().toString(36).slice(2, 6));
-        if(filename){
-          URL_POR_FOTO[seed] = natalApi.fotoUrl(s.id, 'previews', filename);
-          URL_POR_THUMB[seed] = natalApi.fotoUrl(s.id, 'thumbs', filename);
-        }
-        return { id: filename || 'f', filename, seed };
-      });
-      const E = s.estado;
-      let status = 'aguardando_abertura', temVenda = false;
-      if(E === 'FINALIZADA') status = 'finalizada';
-      else if(E === 'CANCELADA') status = 'abandonada';
-      else if(E === 'VENDIDA'){ status = 'vendida'; temVenda = true; }
-      else if(E === 'RECEBENDO') status = 'recebendo';
-      if(status === 'aguardando_abertura' && sessoesConcluidasLocal.has(s.id)) status = 'finalizada';
-      return {
-        id: s.id, senha: numeroSessao(s.id), data, hora, status, temVenda,
-        fotosQtd: s.fotosQtd ?? fotos.length, fotos, estado: E,
-        fotosEsperadas: Number(s.fotosEsperadas) || 0,
-        recebendoDesde: s.recebendoDesde || null,
-        ultimoProgressoEm: s.ultimoProgressoEm || null,
-        importadaDe: s.importadaDe || null,
-        importacaoParcial: !!s.importacaoParcial,
-        operadorFotografo: s.operadorFotografo || null,
-      };
-    }).sort((a, b) => (b.data + b.hora).localeCompare(a.data + a.hora));
+    const q = { resumo: opts.resumo !== false, data: opts.data || selectedDate || TODAY_ISO };
+    if(opts.limite) q.limite = opts.limite;
+    const res = await natalApi.listarSessoes(q);
+    if(!res || !res.success) return false;
+    sessions = ordenarSessoes((res.sessoes || []).map(mapSessao));
     _sessionsLoaded = true;
-  }catch{ /* sidecar iniciando — painel fica vazio até a próxima carga */ }
+    return true;
+  }catch{ return false; }
+}
+
+async function carregarDatasSessoes(){
+  try{
+    const res = await natalApi.listarSessoes({ resumo: true });
+    if(!res || !res.success) return;
+    datasSessoes = new Set([TODAY_ISO]);
+    totalSessoesConhecidas = 0;
+    (res.sessoes || []).forEach(s => {
+      const data = isoDataLocal(new Date(s.criadaEm));
+      if(data) datasSessoes.add(data);
+      totalSessoesConhecidas++;
+    });
+  }catch{ /* sidecar iniciando */ }
+}
+
+async function carregarDetalheSessao(id){
+  if(!id) return null;
+  if(_detalhesSessoes.has(id)) return _detalhesSessoes.get(id);
+  try{
+    const res = await natalApi.getSessao(id);
+    if(!res || !res.success) return null;
+    const det = mapSessao(res.sessao);
+    if(_detalhesSessoes.size > 80) _detalhesSessoes.clear();
+    _detalhesSessoes.set(id, det);
+    const i = sessions.findIndex(x => x.id === id);
+    if(i >= 0) sessions[i] = Object.assign({}, sessions[i], det, { fotos: det.fotos });
+    return det;
+  }catch{ return null; }
+}
+
+async function buscarSessoesNoServidor(){
+  const term = buscaSessao.trim().toLowerCase();
+  if(!term){
+    await carregarSessoes({ data: selectedDate });
+    renderPainel();
+    return;
+  }
+  try{
+    const res = await natalApi.listarSessoes({ resumo: true });
+    if(!res || !res.success) return;
+    sessions = ordenarSessoes((res.sessoes || []).map(mapSessao)
+      .filter(s => ('#' + String(s.senha)).toLowerCase().includes(term)));
+    _sessionsLoaded = true;
+    renderPainel();
+  }catch{ /* mantém o painel atual se o sidecar não responder */ }
+}
+
+async function contarSessoesDia(dataIso){
+  try{
+    const res = await natalApi.listarSessoes({ data: dataIso, resumo: true });
+    if(res && res.success) return (res.sessoes || []).map(s => ({ estado: s.estado, data: dataIso }));
+  }catch{ }
+  return sessions.filter(s => s.data === dataIso).map(s => ({ estado: s.estado }));
+}
+
+async function recarregarPainelSessoes(){
+  if(buscaSessao.trim()) await buscarSessoesNoServidor();
+  else await carregarSessoes({ data: selectedDate });
+  renderDateSelect();
+  renderPainel();
+  renderIdleMarquee();
 }
 
 function labelProduto(produtoId, tipo){
@@ -3028,6 +3104,7 @@ function usuariosDeEquipe(lista){
         nome,
         funcao: ex.funcao,
         usuario: String(u.usuario || u.login || u.nome || nome).trim(),
+        senhaHash: String(u.senhaHash || '').trim(),
         isAdmin: !!ex.isAdmin,
       };
     })
@@ -3076,6 +3153,13 @@ async function carregarEquipePortal(){
   return false;
 }
 
+async function atualizarEquipeSilenciosa(){
+  const assinatura = () => USERS.map(u => [u.id, u.usuario, u.senhaHash].join('|')).join(';');
+  const antes = assinatura();
+  const ok = await carregarEquipePortal();
+  if(ok && assinatura() !== antes) renderLoginUsers();
+}
+
 let _equipeProm = null;
 function carregarEquipe(){
   if(_equipeProm) return _equipeProm;
@@ -3113,7 +3197,7 @@ async function recarregarLojaLocal(lojaId){
 }
 
 async function recarregarDados(){
-  await Promise.all([carregarSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon()]);
+  await Promise.all([carregarSessoes({ data: selectedDate }), carregarDatasSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon()]);
   renderCaixaChip();
   renderRibbonChip();
   const ativo = document.querySelector('.screen.active');
@@ -3301,6 +3385,7 @@ async function emparelharKiosk(){
         carregarOverlaysPortal();
       }
       if(_wz.ativo && _wz.etapa === 2) wzIr(3); // wizard: pareou → próxima etapa
+      natalApi.filaPortalReativar().catch(()=>{});
       agendarSincronizacao(1500); // manda o que estiver pendente assim que liberar
     } else if(res && !res.offline && res.error && res.error !== 'KIOSK_NAO_EMPARELELHADO'){
       console.warn('[pair] falha:', res.error);
@@ -4040,7 +4125,7 @@ async function renderRecebimento(){
   const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   let r = null, ss = null;
   try{
-    const [a, b] = await Promise.all([natalApi.importStatus(), natalApi.listarSessoes()]);
+    const [a, b] = await Promise.all([natalApi.importStatus(), natalApi.listarSessoes({ limite: 8, resumo: true })]);
     r = a; ss = b;
   }catch{}
   _importStatus = r;
@@ -4238,7 +4323,7 @@ async function enfileirarCaixaPortal(cx){
    O dia de um pedido é o dia da CRIAÇÃO (mesmo critério do pedido.push),
    para o portal conseguir reconciliar snapshot × pedidos. Ribbon/papel são
    o valor ATUAL (o portal não guarda histórico de estoque). */
-function montarSnapshotDia(dataIso, papelRelatorio = null){
+function montarSnapshotDia(dataIso, papelRelatorio = null, contagemSessoes = null){
   const pagos = pedidosRealizados.filter(p =>
     p.status === 'pago' && p.horario instanceof Date && !isNaN(p.horario) && isoDataLocal(p.horario) === dataIso);
   const meios = { dinheiro: 0, debito: 0, credito: 0, pix: 0 };
@@ -4246,7 +4331,7 @@ function montarSnapshotDia(dataIso, papelRelatorio = null){
     const m = String(pg.meio || meioInfoDeForma(pg.forma).meio || '').toLowerCase();
     if(meios[m] != null) meios[m] += (+pg.valor || 0);
   }));
-  const sessoesDia = sessions.filter(s => s.data === dataIso);
+  const sessoesDia = contagemSessoes || sessions.filter(s => s.data === dataIso);
   const comCombo = pagos.filter(p =>
     (p.desconto && p.desconto.tipo === 'combo') ||
     (p.itens || []).some(it => it.tipo === 'combo-desconto')).length;
@@ -4372,7 +4457,8 @@ async function enfileirarPendentesPortal(){
       const rel = await natalApi.papelResumo(d);
       if(rel && rel.success) papelRelatorio = rel;
     }catch{ }
-    if(await enfileirarPortal('vendas', d, montarSnapshotDia(d, papelRelatorio))) novos++;
+    const contagem = await contarSessoesDia(d);
+    if(await enfileirarPortal('vendas', d, montarSnapshotDia(d, papelRelatorio, contagem))) novos++;
   }
   if(novos) console.log('[sync] ' + novos + ' registro(s) na fila do portal');
   return novos;
@@ -4403,15 +4489,16 @@ async function enviarItemFila(item, ident){
       return 'ok';
     }
     const err = (res && res.error) || 'portal recusou o envio';
-    await natalApi.filaPortalErro({ id: item.id, erro: err });
+    const semRede = !!(res && res.offline);
+    await natalApi.filaPortalErro({ id: item.id, erro: err, offline: semRede });
     _sync.ultimoErro = err;
     // Portal inalcançável → para a rodada (a rede caiu). Erro de negócio
     // (LOJA_INVALIDA, ACAO_DESCONHECIDA, payload inválido) → segue para o
     // próximo item, senão um registro envenenado bloqueava TODA a fila.
-    return (res && res.offline) ? 'offline' : 'permanente';
+    return semRede ? 'offline' : 'permanente';
   }catch(e){
     const err = (e && e.message) || String(e);
-    try{ await natalApi.filaPortalErro({ id: item.id, erro: err }); }catch{ }
+    try{ await natalApi.filaPortalErro({ id: item.id, erro: err, offline: true }); }catch{ }
     _sync.ultimoErro = err;
     return 'offline';
   }
@@ -4535,11 +4622,12 @@ function montarPedidoPortal(p){
     meio: String(r.meio || meioInfoDeForma(r.forma).meio || '').toLowerCase(),
     forma: r.forma || '—', valor: +(r.valor || 0), parcelas: r.parcelas || 0,
   }));
-  const itens = (p.itens || []).map(it => {
+  const itens = (p.itens || []).map((it, i) => {
     let tipo = 'tamanho';
     if (it.tipo === 'extra') tipo = 'extra';
     else if (it.tipo === 'ajuste' || TIPOS_DESCONTO_CARRINHO.has(it.tipo)) tipo = 'ajuste';
     return {
+      chave: chaveItemPedido(it, i),
       tipo, produtoId: it.produtoId || '', label: it.label || '',
       qtd: it.qtd || 1,
       // unidades de ribbon: 15x20 = 2, 10x15/bolinha/polaroide = 1
@@ -4614,6 +4702,10 @@ function montarPedidoPortal(p){
       ? p.cancelamentoSolicitadoEm.toISOString()
       : (p.cancelamentoSolicitadoEm || ''),
     cancelamentoSolicitadoPor: p.cancelamentoSolicitadoPor || '',
+    devolucao: p.devolucao || null,
+    cancelamentoDecisao: p.cancelamentoDecisao || null,
+    itensDevolvidos: Array.isArray(p.itensDevolvidos) ? p.itensDevolvidos : [],
+    itensPerdidos: Array.isArray(p.itensPerdidos) ? p.itensPerdidos : [],
   };
 }
 
@@ -4960,7 +5052,6 @@ async function tentarLogin(getSelecionado){
         document.getElementById('login-error').textContent = 'Loja não autorizada no portal. Fale com o administrador.';
         return;
       }
-      else if(res && res.ok === false){ document.getElementById('login-error').textContent = 'Senha incorreta.'; return; }
       else offline = true;
     }catch{ offline = true; }
   } else {
@@ -5143,14 +5234,22 @@ async function criarPedidoReal(itens, total, origemPedidoId){
    Fluxo idêntico ao do React (CheckoutScreen.jsx → iniciarProducao). */
 // Pedidos antigos gravaram todas as fotos na 1ª sessão. Se o arquivo não existe
 // nela, procura a sessão que realmente contém a foto (fallback multi-sessão).
-function sessaoDaFoto(sessId, fileName){
+async function sessaoDaFoto(sessId, fileName){
   if(!fileName || !sessId) return sessId;
-  const atual = sessions.find(s => s.id === sessId);
+  const atual = await carregarDetalheSessao(sessId) || sessions.find(s => s.id === sessId);
   if(!atual) return sessId;
   const fotos = atual.fotos || [];
   if(!fotos.length || fotos.some(f => f.filename === fileName)) return sessId;
-  const outra = sessions.find(s => (s.fotos || []).some(f => f.filename === fileName));
-  return outra ? outra.id : sessId;
+  try{
+    const res = await natalApi.listarSessoes({ resumo: true });
+    if(!res || !res.success) return sessId;
+    const candidatas = (res.sessoes || []).filter(s => s.id !== sessId).slice(0, 40);
+    for(const s of candidatas){
+      const det = await carregarDetalheSessao(s.id);
+      if(det && (det.fotos || []).some(f => f.filename === fileName)) return det.id;
+    }
+  }catch{ }
+  return sessId;
 }
 
 async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
@@ -5167,7 +5266,7 @@ async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
   const agrupado = new Map();
   for(const f of fotos){
     const [sessSeed, fileName] = String(f.fotoSeed).split('/');
-    const sessId = sessaoDaFoto(sessSeed, fileName);
+    const sessId = await sessaoDaFoto(sessSeed, fileName);
     const base = (fileName || '').replace(/\.[^.]+$/, '');
     const tProd = TAMANHOS.find(x => x.id === f.produtoId);
     const modelo = tProd ? modeloDe(tProd) : f.produtoId;
@@ -5416,9 +5515,15 @@ function abrirQrDigital(codigo){
 // Recuperação para galerias presas SEM referência (vendas antigas, anteriores ao
 // registro de refs): o operador escolhe a sessão e a foto que deveriam ter sido
 // enviadas; o PDV compõe 10x15 e sobe pro código na hora.
-function abrirEscolherFotoDigital(codigo){
+async function abrirEscolherFotoDigital(codigo){
   if(!codigo){ toast('⚠ Código inválido'); return; }
-  const comFoto = (sessions || []).filter(s => s.fotos && s.fotos.length);
+  let comFoto = (sessions || []).filter(s => s.fotos && s.fotos.length);
+  if(!comFoto.length){
+    try{
+      const res = await natalApi.listarSessoes({ limite: 20, resumo: false });
+      comFoto = (res && res.success ? (res.sessoes || []) : []).map(mapSessao).filter(s => s.fotos.length);
+    }catch{ }
+  }
   if(!comFoto.length){ toast('⚠ Nenhuma sessão com fotos disponível neste PDV'); return; }
   const selStyle = 'width:100%;padding:10px;border-radius:8px;background:var(--navy-850);color:var(--cream-100);border:1px solid var(--navy-line);font-size:13px;font-family:Arial,sans-serif;margin-bottom:12px;outline:none;';
   const opts = comFoto.map(s => `<option value="${escHtml(s.id)}">Sessão ${escHtml(s.senha)} · ${escHtml(s.data)} ${escHtml(s.hora)} · ${s.fotos.length} foto${s.fotos.length === 1 ? '' : 's'}</option>`).join('');
@@ -5443,7 +5548,7 @@ function abrirEscolherFotoDigital(codigo){
   const selFoto = document.getElementById('ef-foto');
   const selOrient = document.getElementById('ef-orient');
   const preencher = ()=>{
-    const s = (sessions || []).find(x => x.id === selSess.value);
+    const s = comFoto.find(x => x.id === selSess.value);
     selFoto.innerHTML = (s ? s.fotos : []).map((f, idx) => `<option value="${escHtml(f.filename)}">Foto ${idx + 1} — ${escHtml(f.filename)}</option>`).join('');
   };
   preencher();
@@ -6052,7 +6157,7 @@ function sessaoRecebendoPausada(s){
 }
 
 function fotosSessaoLabel(s){
-  const qtd = Array.isArray(s.fotos) ? s.fotos.length : (Number(s.fotosQtd) || 0);
+  const qtd = Number(s.fotosQtd) || (Array.isArray(s.fotos) ? s.fotos.length : 0);
   const total = Number(s.fotosEsperadas) || 0;
   if(s.status === 'recebendo' && total) return `${qtd}/${total} fotos`;
   return `${qtd} foto${qtd === 1 ? '' : 's'}`;
@@ -6065,7 +6170,8 @@ function tagInfo(s){
   if(s.status==='recebendo'){
     const total = Number(s.fotosEsperadas) || 0;
     if(sessaoRecebendoPausada(s)) return {cls:'tag-recebendo is-pausado', label:'Recebendo (pausado)'};
-    return {cls:'tag-recebendo', label: total ? `Recebendo ${s.fotos.length}/${total}` : 'Recebendo fotos'};
+    const qtd = Number(s.fotosQtd) || (Array.isArray(s.fotos) ? s.fotos.length : 0);
+    return {cls:'tag-recebendo', label: total ? `Recebendo ${qtd}/${total}` : 'Recebendo fotos'};
   }
   return {cls:'tag-aguardando', label:'Aguardando conferência'};
 }
@@ -6084,12 +6190,17 @@ let filtroStatus = 'todas'; // Todas | Aguardando | Vendidas | Concluídas
 
 function renderDateSelect(){
   const sel = document.getElementById('date-select');
-  const datas = new Set([TODAY_ISO, ...sessions.map(s=>s.data)]); // Hoje sempre disponível mesmo sem sessões ainda
+  const datas = new Set([TODAY_ISO, ...datasSessoes, ...sessions.map(s=>s.data)]);
   const datesDesc = [...datas].sort((a,b)=>b.localeCompare(a));
   sel.innerHTML = datesDesc.map(iso=>
     `<option value="${iso}" ${iso===selectedDate?'selected':''}>${fmtDateLabel(iso, TODAY_ISO)}</option>`
   ).join('');
-  sel.onchange = ()=>{ selectedDate = sel.value; renderPainel(); };
+  sel.onchange = async ()=>{
+    selectedDate = sel.value;
+    await carregarSessoes({ data: selectedDate });
+    renderPainel();
+    renderIdleMarquee();
+  };
 }
 
 /* ---------------- RENDER: PAINEL ---------------- */
@@ -6138,7 +6249,7 @@ function renderPainel(){
         ${(s.status==='aguardando_abertura' && !(currentUser && currentUser.funcao==='Fotógrafo')) ? `<button class="sc-concluir" data-id="${s.id}">Concluir</button>` : ''}
       </div>
     `;
-    card.addEventListener('click', (ev)=>{
+    card.addEventListener('click', async (ev)=>{
       if(ev.target.closest('.sc-concluir')) return;
       const agora = Date.now();
       if(lastTapSessionId===s.id && agora-lastTapAt < 500){
@@ -6152,12 +6263,12 @@ function renderPainel(){
           toast('Login de fotógrafo não abre vendas — peça pra vendedora atender esta sessão');
           return;
         }
-        openVenda(s.id);
+        await openVenda(s.id);
         return;
       }
       lastTapSessionId = s.id;
       lastTapAt = agora;
-      showSlideFotosSessao(s);
+      await showSlideFotosSessao(s);
     });
     list.appendChild(card);
   });
@@ -6181,12 +6292,18 @@ function renderPainel(){
 
 /* ---------------- VISUALIZADOR INLINE DE FOTOS DA SESSÃO (clique único, sem modal) ---------------- */
 let slideIndiceAtual = 0;
-function showSlideFotosSessao(s){
+async function showSlideFotosSessao(s){
+  const detalhe = await carregarDetalheSessao(s.id);
+  const completa = detalhe || s;
+  if(!completa.fotos || !completa.fotos.length){
+    toast('Nenhuma foto disponível nesta sessão ainda');
+    return;
+  }
   slideIndiceAtual = 0;
   document.getElementById('screen-painel').classList.add('slide-open');
   document.getElementById('idle-default-content').style.display = 'none';
   document.getElementById('idle-slide-viewer').style.display = 'block';
-  renderSlideFotos(s);
+  renderSlideFotos(completa);
 }
 function fecharSlideFotosSessao(){
   document.getElementById('screen-painel').classList.remove('slide-open');
@@ -6237,8 +6354,8 @@ function thumbParaScrollar(el, i){
 }
 
 /* ---------------- OPEN VENDA ---------------- */
-function openVenda(sessionId){
-  const sessao = sessions.find(s=>s.id===sessionId);
+async function openVenda(sessionId){
+  const sessao = await carregarDetalheSessao(sessionId) || sessions.find(s=>s.id===sessionId);
   if(!sessao) return;
   if(sessao.status==='recebendo' || sessao.estado==='RECEBENDO'){
     toast(`Sessão #${sessao.senha} ainda recebendo/preparando as fotos — aguarde alguns segundos`);
@@ -6265,16 +6382,6 @@ function openVenda(sessionId){
   renderOptions();
   renderFrame();
   renderCart();
-
-  // pré-aquece a cache de miniaturas em background (lotes de 6) pra faixa e o
-  // editor já trocarem a foto quase sem o espaço em branco
-  const _fotos = currentSession.fotos;
-  let _i = 0;
-  (function warmNext(){
-    const fim = Math.min(_i + 6, _fotos.length);
-    for(; _i < fim; _i++) thumbUrl(_fotos[_i]);
-    if(_i < _fotos.length) setTimeout(warmNext, 80);
-  })();
 }
 
 document.getElementById('btn-voltar').addEventListener('click', ()=>{
@@ -9327,7 +9434,7 @@ async function showConfigModal(tabInicial){
   const resumoLimpar = document.getElementById('cfg-limpar-resumo');
   if(resumoLimpar){
     resumoLimpar.textContent =
-      `Nesta máquina agora: ${sessions.length} sessão(ões), ${pedidosRealizados.length} pedido(s), ` +
+      `Nesta máquina agora: ${totalSessoesConhecidas || sessions.length} sessão(ões), ${pedidosRealizados.length} pedido(s), ` +
       `${caixaAberto ? 'caixa aberto (' + ((caixaReal && (caixaReal.numero || caixaReal.id)) || '') + ')' : 'sem caixa aberto'}` +
       `${ribbonBalanceBase != null ? ', ribbon ' + ribbonBalanceBase + ' un.' : ''}.`;
   }
@@ -9692,8 +9799,12 @@ const r = await natalApi.limparFila({ pedidoId });
    manutenção e confirmação por escrito do que vai ser apagado. */
 async function abrirConfirmacaoLimparDados(){
   let qtdPedidos = pedidosRealizados.length;
-  let qtdSessoes = sessions.length;
+  let qtdSessoes = totalSessoesConhecidas || sessions.length;
   let qtdFila = 0;
+  try{
+    const r = await natalApi.listarSessoes({ resumo: true });
+    if(r && r.success) qtdSessoes = (r.sessoes || []).length;
+  }catch{}
   try{
     const f = await natalApi.filaImpressao();
     qtdFila = (f && Array.isArray(f.fila)) ? f.fila.filter(j => j.estado !== 'IMPRIMINDO').length : 0;
@@ -9760,7 +9871,7 @@ async function abrirConfirmacaoLimparDados(){
       if(r && r.success){
         closeModal();
         toast(`Dados limpos: ${r.sessoes} sessão(ões), ${r.pedidos} pedido(s) · backup em ${r.backup}`);
-        await Promise.allSettled([carregarPedidos(), carregarSessoes(), carregarCaixa(), carregarRibbon()]);
+        await Promise.allSettled([carregarPedidos(), carregarSessoes({ data: selectedDate }), carregarDatasSessoes(), carregarCaixa(), carregarRibbon()]);
         renderCaixaChip && renderCaixaChip();
         renderRibbonChip && renderRibbonChip();
         agendarSnapshotVendas(1500); // portal recebe o "dia zerado" logo em seguida
@@ -10108,17 +10219,22 @@ function showPaymentPickerModal(total, rowsIniciais, titulo, subtitulo, onConfir
 
 /* ---------------- VITRINE DE FOTOS (tela de espera) ---------------- */
 let _idleMarqueeSig = '';
-function renderIdleMarquee(){
+let _idleMarqueeCache = [];
+let _idleMarqueeFetchAt = 0;
+async function renderIdleMarquee(){
   const track = document.getElementById('idle-marquee-track');
   if(!track) return;
-  // Só a vitrine da tela inicial precisa disso. Reconstruir 12 imagens a cada
-  // evento SSE (a impressão emite printer:progress por foto) roubava a CPU
-  // justamente enquanto as fotos eram compostas/enviadas para a ASK-400.
   const painel = document.getElementById('screen-painel');
   if(painel && !painel.classList.contains('active')) return;
-  const seeds = [];
-  sessions.forEach(s => s.fotos.forEach(f => seeds.push(f.seed)));
-  const capped = seeds.slice(-6); // cap: no máximo 6 fotos no marquee (12 imgs no loop)
+  if(Date.now() - _idleMarqueeFetchAt > 60000){
+    _idleMarqueeFetchAt = Date.now();
+    try{
+      const res = await natalApi.listarSessoes({ limite: 6, resumo: false });
+      _idleMarqueeCache = (res && res.success ? (res.sessoes || []) : [])
+        .flatMap(s => (s.fotos || []).map(f => s.id + '/' + (f.filename || f.name)));
+    }catch{ _idleMarqueeCache = []; }
+  }
+  const capped = _idleMarqueeCache.slice(-6);
   const assinatura = capped.join(',');
   if(assinatura === _idleMarqueeSig) return;
   _idleMarqueeSig = assinatura;
@@ -10164,7 +10280,7 @@ document.getElementById('global-cart').addEventListener('click', ()=>{
   if(cart.length > 0){
     const targetSession = cart[cart.length-1].sessionId;
     if(document.getElementById('screen-venda').classList.contains('active') && currentSession && currentSession.id===targetSession) return;
-    openVenda(targetSession);
+    openVenda(targetSession).catch(()=>{});
   } else if(currentSession){
     // já está numa sessão, sem itens ainda — não faz nada, só reforça o estado vazio
     toast('Carrinho vazio — selecione fotos e tamanhos para adicionar');
@@ -10182,7 +10298,7 @@ function renderLoginUsers(){
   if(!USERS.length){
     wrap.innerHTML = equipeCarregando
       ? '<div class="login-users-empty"><span class="spin"></span>Carregando equipe...</div>'
-      : '<div class="login-users-empty">N&atilde;o foi poss&iacute;vel carregar a equipe.<br>Verifique a conex&atilde;o com o portal.</div>' +
+       : '<div class="login-users-empty">N&atilde;o foi poss&iacute;vel carregar a equipe.<br>Verifique o portal ou o cache local.</div>' +
         '<button type="button" class="login-retry" id="login-retry-equipe">Tentar novamente</button>';
     const retry = document.getElementById('login-retry-equipe');
     if(retry) retry.addEventListener('click', ()=>{
@@ -10843,7 +10959,7 @@ function mostrarAuditoriaSenha(){
 }
 
 /* ================= REABERTURA DE PEDIDO ================= */
-function showReopenOrder(pedidoId){
+async function showReopenOrder(pedidoId){
   const p = pedidosRealizados.find(x=>x.id===pedidoId);
   if(!p) return;
   const temFotoReprint = p.itens.some(it => it.tipo === 'tamanho' && it.fotoSeed);
@@ -10851,10 +10967,11 @@ function showReopenOrder(pedidoId){
   // todas as fotos de todas as sessões envolvidas (não só as compradas) — dá à vendedora o argumento completo
   const fotosCompradasSeeds = new Set(p.itens.filter(it=>it.tipo!=='combo-desconto').map(it=>it.fotoSeed));
   let gridHtml = '';
-  p.sessoes.forEach(sRef=>{
-    const s = sessions.find(x=>x.id===sRef.id);
+  const detalhes = await Promise.all(p.sessoes.map(async sRef =>
+    await carregarDetalheSessao(sRef.id) || sessions.find(x => x.id === sRef.id)));
+  detalhes.forEach(s=>{
     if(!s) return;
-    s.fotos.forEach(f=>{
+    (s.fotos || []).forEach(f=>{
       const comprada = fotosCompradasSeeds.has(f.seed);
       gridHtml += `<div class="reopen-thumb"><img src="${imgThumb(f.seed)}" loading="lazy">
         ${comprada ? '<div class="rt-tag">comprada · #'+s.senha+'</div>' : `<div class="rt-tag" style="color:var(--slate-400)">#${s.senha}</div>`}
@@ -11155,12 +11272,14 @@ function askFormaDevolucao(p, onConfirm){
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
       <button class="btn-primary" id="dv-dinheiro" style="background:linear-gradient(135deg,var(--green-500),var(--green-700));">Devolvido em dinheiro — ${fmt(total)}</button>
       <button class="btn-primary" id="dv-cartao" style="background:linear-gradient(135deg,#3b6ea5,#2c527c);">Estornado no cartão</button>
+      <button class="btn-primary" id="dv-pix" style="background:linear-gradient(135deg,#2f8f83,#236b62);">Devolvido via PIX — ${fmt(total)}</button>
       <button class="btn-secondary" id="dv-nao" style="width:100%;">Não devolvido ao cliente</button>
     </div>
-    <p class="modal-sub" style="color:var(--slate-500);font-size:11px;">A devolução não altera o total vendido do pedido; ela fica registrada para auditoria e conciliação do caixa.</p>
+    <p class="modal-sub" style="color:var(--slate-500);font-size:11px;">A devolução não altera o total vendido do pedido; ela fica registrada para auditoria e conciliação do caixa. PIX e cartão não tiram dinheiro da gaveta.</p>
   `);
   document.getElementById('dv-dinheiro').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'dinheiro', valor:Number(total.toFixed(2))}); });
   document.getElementById('dv-cartao').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'cartao', valor:Number(total.toFixed(2))}); });
+  document.getElementById('dv-pix').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'pix', valor:Number(total.toFixed(2))}); });
   document.getElementById('dv-nao').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'nao', valor:0}); });
 }
 
@@ -11500,24 +11619,37 @@ async function verificarCancelamentosPortal(){
   }
 }
 
-/* Aplica a aprovação do ADM: estoque (tudo volta / tudo perda) e reembolso
-   escolhidos no portal. Sem motivo e sem abrir a tela de itens. */
+function chaveItemPedido(it, i){
+  return String((it && it.key) || (it && it.chave)
+    || `${(it && it.produtoId) || ''}|${(it && it.label) || ''}|${(it && it.qtd) || 1}|${i}`);
+}
+
 function aplicarCancelamentoRemoto(p, d){
-  const itensReais = (p.itens || []).filter(it =>
+  const itensComIndice = (p.itens || []).map((it, i) => ({ it, i })).filter(({ it }) =>
     !['combo-desconto','ajuste','desconto-catalogo','desconto-senha-master','desconto-falha-operacional','desconto-comercial'].includes(it.tipo)
     && it.preco >= 0);
+  const itensReais = itensComIndice.map(x => x.it);
   const todosVoltam = String(d.estoque || 'voltar') !== 'perder';
-  const voltam = todosVoltam ? itensReais : [];
+  const decisoes = new Map((Array.isArray(d.itens) ? d.itens : [])
+    .map(x => [String((x && (x.chave || x.key)) || ''), x]));
+  const voltam = [];
   const perdaInfo = new Map();
-  if(!todosVoltam) itensReais.forEach(it => perdaInfo.set(it, 'portal'));
-  const forma = ['dinheiro','cartao'].includes(String(d.reembolso && d.reembolso.forma)) ? d.reembolso.forma : 'nao';
+  itensComIndice.forEach(({ it, i })=>{
+    const dec = decisoes.get(chaveItemPedido(it, i));
+    const volta = dec ? dec.volta !== false : todosVoltam;
+    if(volta) voltam.push(it); else perdaInfo.set(it, 'portal');
+  });
+  const forma = ['dinheiro','cartao','pix'].includes(String(d.reembolso && d.reembolso.forma)) ? d.reembolso.forma : 'nao';
   const valor = forma === 'nao' ? 0 : Math.min(Number(d.reembolso && d.reembolso.valor) || 0, Number(p.total) || 0);
   const decisao = {
     status: 'aprovado',
-    estoque: todosVoltam ? 'voltar' : 'perder',
+    estoque: decisoes.size ? 'itens' : (todosVoltam ? 'voltar' : 'perder'),
     reembolso: { forma, valor },
     decididoEm: d.decididoEm || '',
   };
+  if(decisoes.size){
+    decisao.itens = [...decisoes].map(([chave, x]) => ({ chave, volta: x.volta !== false }));
+  }
   efetivarCancelamento(p, itensReais, voltam, '', '', perdaInfo, { forma, valor }, {
     silencioso: true,
     cancelamentoDecisao: decisao,
@@ -11563,17 +11695,19 @@ function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, motivo, perdaIn
 }
 
 /* ================= REABERTURA → TELA DE EDIÇÃO COMPLETA ================= */
-function reabrirParaEdicao(pedidoId){
+async function reabrirParaEdicao(pedidoId){
   const p = pedidosRealizados.find(x=>x.id===pedidoId);
   if(!p) return;
 
   // monta uma "sessão combinada" com as fotos de todas as sessões envolvidas no pedido
   const fotosCombinadas = [];
-  p.sessoes.forEach(sRef=>{
-    const s = sessions.find(x=>x.id===sRef.id);
-    if(s) fotosCombinadas.push(...s.fotos);
-  });
-  if(fotosCombinadas.length===0) fotosCombinadas.push(...(sessions[0]?sessions[0].fotos:[]));
+  const detalhes = await Promise.all(p.sessoes.map(async sRef =>
+    await carregarDetalheSessao(sRef.id) || sessions.find(x => x.id === sRef.id)));
+  detalhes.forEach(s => { if(s) fotosCombinadas.push(...(s.fotos || [])); });
+  if(fotosCombinadas.length === 0 && sessions[0]){
+    const fallback = await carregarDetalheSessao(sessions[0].id) || sessions[0];
+    if(fallback) fotosCombinadas.push(...(fallback.fotos || []));
+  }
 
   editingPedidoId = p.id;
   currentSession = {
@@ -11968,11 +12102,12 @@ document.getElementById('cx-ultima-conciliacao').addEventListener('click', (e)=>
   mostrarListaConciliacoes();
 });
 
-function mostrarListaConciliacoes(){
+let _motivoCorrecaoLogin = '';
+function mostrarListaConciliacoes(preAutorizado = false){
   if(conciliacoesCaixa.length===0){
     openModal(`
       <div class="modal-head"><div><div class="modal-step-label">Conciliações</div><h3>Nenhuma ainda</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
-      <p class="modal-sub">Ainda não há nenhum fechamento de caixa registrado nesta loja.</p>
+      <p class="modal-sub">${preAutorizado ? 'Ainda não há caixa fechado para arrumar. Feche um caixa primeiro.' : 'Ainda não há nenhum fechamento de caixa registrado nesta loja.'}</p>
     `);
     return;
   }
@@ -11992,8 +12127,8 @@ function mostrarListaConciliacoes(){
     </tr>`;
   }).join('');
   openModal(`
-    <div class="modal-head"><div><div class="modal-step-label">Histórico</div><h3>Conciliações de caixa</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
-    <p class="modal-sub">Clique numa linha para ver o detalhe por forma de pagamento.</p>
+    <div class="modal-head"><div><div class="modal-step-label">Histórico</div><h3>${preAutorizado ? 'Corrigir fechamento' : 'Conciliações de caixa'}</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
+    <p class="modal-sub">${preAutorizado ? 'Escolha o caixa fechado para ajustar — a senha master já foi validada.' : 'Clique numa linha para ver o detalhe por forma de pagamento.'}</p>
     <div class="ped-list-wrap">
       <table class="ped-table">
         <tr><th>Data</th><th>Caixa</th><th>Gerado (sistema)</th><th>Lançado (real)</th><th>Diferença</th><th></th></tr>
@@ -12017,7 +12152,7 @@ function mostrarListaConciliacoes(){
     btn.addEventListener('click', e=>{
       e.stopPropagation();
       const f = conciliacoesCaixa[+btn.dataset.corrigir];
-      if(f) corrigirFechamentoCaixa(f);
+      if(f) preAutorizado ? abrirPedidosCorrecaoCaixa(f, _motivoCorrecaoLogin) : corrigirFechamentoCaixa(f);
     });
   });
 }
@@ -12028,6 +12163,18 @@ function corrigirFechamentoCaixa(f){
     'Corrigir caixa ' + (f.numero ? 'nº ' + f.numero : 'fechado'),
     'Este caixa já está fechado. Informe a senha master e o motivo para ajustar os pedidos, o relatório e refechar.',
     (_senha, motivo)=> abrirPedidosCorrecaoCaixa(f, motivo)
+  );
+}
+
+function abrirCorrecaoPeloLogin(){
+  if(!conciliacoesCaixa.length){ mostrarListaConciliacoes(true); return; }
+  askSenhaMotivo(
+    'Corrigir fechamento anterior',
+    'Escolha o caixa fechado, informe a senha master e o motivo. Não é preciso abrir um caixa novo.',
+    (_senha, motivo)=>{
+      _motivoCorrecaoLogin = motivo;
+      mostrarListaConciliacoes(true);
+    }
   );
 }
 
@@ -12487,6 +12634,7 @@ async function abrirTelaFechamento(){
     if(!d) return 'Sem devolução registrada';
     if(d.forma === 'dinheiro') return `Devolvido em dinheiro — ${fmt(d.valor)} (sangria registrada)`;
     if(d.forma === 'cartao') return `Estornado no cartão — ${fmt(d.valor)}`;
+    if(d.forma === 'pix') return `Devolvido via PIX — ${fmt(d.valor)} (sem sangria, fora da gaveta)`;
     return 'Não devolvido ao cliente';
   };
   const canceladosHtml = canceladosDoCaixa.length ? `
@@ -12757,7 +12905,10 @@ async function abrirTelaFechamento(){
       enfileirarCaixaPortal(caixaReal);
       try{
         const rel = (fechado && fechado.papelRelatorio) || (caixaReal && caixaReal.papelRelatorio) || null;
-        if(rel && rel.data) await enfileirarPortal('vendas', rel.data, montarSnapshotDia(rel.data, rel));
+        if(rel && rel.data){
+          const contagem = await contarSessoesDia(rel.data);
+          await enfileirarPortal('vendas', rel.data, montarSnapshotDia(rel.data, rel, contagem));
+        }
       }catch(e){ console.warn('[sync] não consegui atualizar o snapshot com o papel do dia', e); }
 
       const caixaEntry = caixasHoje.find(c=>c.aberto);
@@ -12908,8 +13059,15 @@ async function abrirTesteFotografo(){
   abrirTesteEscolherSessao();
 }
 
-function abrirTesteEscolherSessao(){
-  const sessoesHtml = sessions.filter(s => s.fotos && s.fotos.length).map(s=>{
+async function abrirTesteEscolherSessao(){
+  let base = (sessions || []).filter(s => s.fotos && s.fotos.length);
+  if(!base.length){
+    try{
+      const res = await natalApi.listarSessoes({ limite: 20, resumo: false });
+      base = (res && res.success ? (res.sessoes || []) : []).map(mapSessao).filter(s => s.fotos.length);
+    }catch{ }
+  }
+  const sessoesHtml = base.map(s=>{
     const t = tagInfo(s);
     return `<div class="conf-item" data-id="${s.id}" style="cursor:pointer;">
       <div class="conf-info">
@@ -12929,8 +13087,8 @@ function abrirTesteEscolherSessao(){
   });
 }
 
-function abrirTesteEscolherFoto(sessionId){
-  const s = sessions.find(x=>x.id===sessionId);
+async function abrirTesteEscolherFoto(sessionId){
+  const s = await carregarDetalheSessao(sessionId) || sessions.find(x=>x.id===sessionId);
   if(!s) return;
   const gridHtml = s.fotos.map(f=>`
     <div class="reopen-thumb" data-seed="${f.seed}" style="cursor:pointer;">
@@ -13182,6 +13340,7 @@ async function INIT(){
   _operadorRestauradoSessao = restaurarOperadorSessao();
   setupOptionTabs();
   document.getElementById('login-entrar').addEventListener('click', ()=>tentarLogin(()=>loginSelecionado));
+  document.getElementById('login-corrigir').addEventListener('click', abrirCorrecaoPeloLogin);
   document.getElementById('login-senha').addEventListener('keydown', e=>{
     if(e.key==='Enter') tentarLogin(()=>loginSelecionado);
   });
@@ -13237,8 +13396,11 @@ if(_dslrChip) _dslrChip.addEventListener('click', () => {
   setInterval(() => {
     if(window.kioskPair && window.kioskPair.ok) emparelharKiosk();
   }, 300000);
+  let _buscaTimer = null;
   document.getElementById('busca-sessao').addEventListener('input', e=>{
     buscaSessao = e.target.value;
+    clearTimeout(_buscaTimer);
+    _buscaTimer = setTimeout(()=>{ recarregarPainelSessoes(); }, 250);
     renderPainel();
   });
   document.getElementById('session-filters').addEventListener('click', e=>{
@@ -13256,8 +13418,9 @@ if(_dslrChip) _dslrChip.addEventListener('click', () => {
     if(_operadorRestauradoSessao) reconciliarOperadorSessao();
     document.getElementById('user-chip').textContent = currentUser ? ('👤 ' + currentUser.nome) : '👤 Selecione seu usuário';
   });
-  try{ await Promise.all([carregarSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon(), carregarAuditoria(), carregarTestesStatus()]); }
+  try{ await Promise.all([carregarSessoes({ data: selectedDate }), carregarDatasSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon(), carregarAuditoria(), carregarTestesStatus()]); }
   catch{ /* logs no console do sidecar */ }
+  renderLoginUsers();
   finalizarRestauracaoOperador();
   try{ await _sincronizarEstadoFila(); }catch{} // fila persistida de boot anterior → chip correto
   agendarSnapshotVendas(4000); // snapshot inicial após o boot (se já emparelhado)
@@ -13279,8 +13442,7 @@ if(_dslrChip) _dslrChip.addEventListener('click', () => {
   setInterval(async ()=>{
     try{
       // mantém o painel fresco mesmo se um evento SSE passar despercebido
-      await carregarSessoes();
-      renderDateSelect(); // datas novas (ex.: sessão de dias atrás) entram no seletor sozinhas
+      await recarregarPainelSessoes();
       const ativo = (document.querySelector('.screen.active') || {}).id;
       if(ativo === 'screen-painel') renderPainel();
       if(ativo === 'screen-pedidos') renderPedidosScreen();
@@ -13288,12 +13450,17 @@ if(_dslrChip) _dslrChip.addEventListener('click', () => {
     }catch{ /* sidecar no boot ainda */ }
   }, 15000); // sessões importadas da pasta chegam sozinhas
   setInterval(carregarPrecosPortal, 60000); // preço muda no portal → PDV aberto atualiza sozinho
+  setInterval(atualizarEquipeSilenciosa, 60000);
   setInterval(carregarOverlaysPortal, 60000); // overlay muda no portal → PDV aberto atualiza sozinho
   setInterval(verificarCancelamentosPortal, 60000); // aprovação/recusa do ADM volta para o PDV
   setTimeout(verificarCancelamentosPortal, 8000);
   // Internet voltou: não espera o ciclo de 60s para subir as fotos digitais.
   window.addEventListener('online', ()=>{
     carregarEquipe().catch(()=>{});
+    carregarPrecosPortal().catch(()=>{});
+    verificarCancelamentosPortal().catch(()=>{});
+    natalApi.filaPortalReativar().catch(()=>{});
+    sincronizarComPortal().catch(()=>{});
     natalApi.sincronizarGaleria().then(()=>{
       renderDigitalConfigPanel();
       renderSyncChip();
@@ -13305,7 +13472,11 @@ if(_dslrChip) _dslrChip.addEventListener('click', () => {
     // por foto) travava a composição das imagens no meio da impressão. Só as
     // eventos que mudam sessão pedem recarga.
     if(['sessao:criada','sessao:status','sessao:concluida','pedido:criado','pedido:pago','pedido:atualizado','print-complete'].includes(key)){
-      carregarSessoes().then(()=> renderDateSelect()); // mantém o seletor por dia sincronizado
+      if(key === 'sessao:criada'){
+        _idleMarqueeFetchAt = 0;
+        carregarDatasSessoes().then(()=> renderDateSelect()).catch(()=>{});
+      }
+      recarregarPainelSessoes().catch(()=>{});
     }
     if(key==='print-start'){ printando = true; _printFinalizadoEm = 0; _printPedidoId = data && data.pedidoId ? String(data.pedidoId) : null; _printFila = 0; _printFilaUltimoAviso = 0; if(data && data.total) _printProgress = { current: 0, total: data.total }; toast(data && data.reimpressao ? '🖨️ Reimpressão iniciada — aguardando terminar...' : '🖨️ Impressão iniciada — aguardando terminar...'); }
     if(key==='print-waiting'){

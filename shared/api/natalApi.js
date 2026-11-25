@@ -54,7 +54,14 @@ async function api(method, path, body = null, isBinary = false) {
 const natalApi = {
   // ─── Sessões (fotógrafo cria/transfere; PDV lê) ──────────
   criarSessao: () => api('POST', '/api/sessoes'),
-  listarSessoes: () => api('GET', '/api/sessoes'),
+  listarSessoes: (opts = {}) => {
+    const parts = [];
+    if (opts.data) parts.push('data=' + encodeURIComponent(opts.data));
+    if (opts.limite) parts.push('limite=' + encodeURIComponent(String(opts.limite)));
+    if (opts.resumo) parts.push('resumo=1');
+    const qs = parts.join('&');
+    return api('GET', `/api/sessoes${qs ? '?' + qs : ''}`);
+  },
   getSessao: (id) => api('GET', `/api/sessoes/${encodeURIComponent(id)}`),
   finalizarSessao: (id) => api('POST', `/api/sessoes/${encodeURIComponent(id)}/finalizar`),
   cancelarSessao: (id) => api('POST', `/api/sessoes/${encodeURIComponent(id)}/cancelar`),
@@ -98,6 +105,7 @@ const natalApi = {
   filaPortalAdd: (item) => api('POST', '/api/portal/fila', item),
   filaPortalConfirmar: (item) => api('POST', '/api/portal/fila/confirmar', item),
   filaPortalErro: (item) => api('POST', '/api/portal/fila/erro', item),
+  filaPortalReativar: () => api('POST', '/api/portal/fila/reativar', {}),
   filaPortalLimpar: (senha) => api('POST', '/api/portal/fila/limpar', { senha }),
 
   // ─── Cache local do portal (preços, equipe, credenciais) ──

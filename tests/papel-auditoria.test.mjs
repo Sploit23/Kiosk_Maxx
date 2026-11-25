@@ -50,25 +50,31 @@ test('relatorio de papel cruza impressoes, testes pendentes e leituras do caixa'
   const base = `http://127.0.0.1:${port}`;
   fs.mkdirSync(db, { recursive: true });
 
-  const agora = Date.now();
-  const hoje = dataLocal(agora);
+  const inicioDia = new Date();
+  inicioDia.setHours(0, 0, 0, 0);
+  const marco = inicioDia.getTime() + 1000;
+  const hoje = dataLocal(marco);
+  const abertoEm = marco;
+  const pagoEm = marco + 5 * 60000;
+  const impressoEm = marco + 10 * 60000;
+  const testeEm = marco + 15 * 60000;
   fs.writeFileSync(path.join(db, 'config.json'), JSON.stringify({
     lojaId: 'L1', lojaNome: 'Loja Teste', pdvNome: 'PDV 1',
   }));
   fs.writeFileSync(path.join(db, 'caixa.json'), JSON.stringify({
     id: 'CX-PAPEL1', operador: 'QA', valorInicial: 10,
-    abertoEm: agora - 3600000, fechadoEm: null,
+    abertoEm, fechadoEm: null,
     pedidos: ['PED-PAPEL1'], sangrias: [],
     papelInicio: { '10x15': 100, '15x20': 50 },
   }));
   fs.writeFileSync(path.join(db, 'pedidos.json'), JSON.stringify([{
     id: 'PED-PAPEL1', numero: 1, caixaId: 'CX-PAPEL1', status: 'PAGO',
-    total: 90, pagoEm: agora - 300000,
+    total: 90, pagoEm,
     pagamentos: [{ meio: 'dinheiro', valor: 90 }],
     fotos10x15: 3, fotos15x20: 1,
   }]));
   const evento = (tipo, f10, f15, extra = {}) => ({
-    id: `IMP-${tipo}-${f10}-${f15}`, tipo, em: agora - 240000, data: hoje,
+    id: `IMP-${tipo}-${f10}-${f15}`, tipo, em: impressoEm, data: hoje,
     lojaId: 'L1', fotos10x15: f10, fotos15x20: f15,
     unidadesRibbon: f10 + f15 * 2, ...extra,
   });
@@ -80,7 +86,7 @@ test('relatorio de papel cruza impressoes, testes pendentes e leituras do caixa'
   fs.writeFileSync(path.join(db, 'testes.json'), JSON.stringify([{
     id: 'TST-1', data: hoje, lojaId: 'L1', status: 'IMPRESSO',
     sessaoSenha: '1234', label: '10x15', operador: 'QA',
-    impressoEm: agora - 200000,
+    impressoEm: testeEm,
   }]));
 
   let logs = '';

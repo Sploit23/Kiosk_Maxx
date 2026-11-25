@@ -44,6 +44,26 @@ test('portalApi expoe cancelamento.decisoes e o admin tem os endpoints', () => {
   assert.match(admin, /id="cancel-badge"/);
 });
 
+test('cancelamento registra PIX, pagamento original e estoque por item', () => {
+  const html = ler('vendas.html');
+  assert.match(html, /id="dv-pix"/);
+  assert.match(html, /Devolvido via PIX/);
+  assert.match(html, /function chaveItemPedido/);
+  assert.match(html, /\['dinheiro','cartao','pix'\]/);
+  assert.match(html, /devolucao: p\.devolucao \|\| null/);
+  const php = ler('backend', 'api.php');
+  assert.match(php, /\['dinheiro', 'cartao', 'pix', 'nao'\]/);
+  assert.match(php, /\$itensDecisao/);
+  assert.match(php, /\$pagamentoOriginal/);
+  const admin = ler('backend', 'admin.html');
+  assert.match(admin, /value="pix"/);
+  assert.match(admin, /data-cx-item/);
+  assert.match(admin, /Pagamento original/);
+  const sidecar = ler('sidecar', 'natal-core.cjs');
+  assert.match(sidecar, /\['dinheiro', 'cartao', 'pix', 'nao'\]/);
+  assert.match(sidecar, /d\.itens\.map/);
+});
+
 test('admin tem a aba Cancelamentos com pendentes e ultimas decisoes', () => {
   const admin = ler('backend', 'admin.html');
   assert.match(admin, /data-screen="cancelamentos"/);
@@ -111,8 +131,18 @@ test('sidecar guarda pedido de cancelamento e a decisao aprovada', async () => {
     status: 'PAGO',
     operador: 'QA',
     itens: [{ produtoId: 'foto-10x15', label: 'Foto 10x15', qtd: 1, preco: 50, tipo: 'tamanho' }],
-    pagamentos: [{ meio: 'dinheiro', forma: 'Dinheiro', valor: 50 }],
+    pagamentos: [{ meio: 'pix', forma: 'PIX', valor: 50 }],
   }], null, 2));
+  fs.writeFileSync(path.join(db, 'caixa.json'), JSON.stringify({
+    id: 'CX-1',
+    operador: 'QA',
+    valorInicial: 0,
+    abertoEm: Date.now(),
+    fechadoEm: null,
+    pedidos: [],
+    meios: {},
+    sangrias: [],
+  }, null, 2));
 
   const { child, base } = await subirSidecar(db, porta);
   const put = async (body) => {
@@ -144,25 +174,38 @@ test('sidecar guarda pedido de cancelamento e a decisao aprovada', async () => {
       cancelamentoSolicitado: false,
       cancelamentoDecisao: {
         status: 'aprovado',
-        estoque: 'perder',
-        reembolso: { forma: 'dinheiro', valor: 50 },
+        estoque: 'itens',
+        reembolso: { forma: 'pix', valor: 50 },
+        itens: [{ chave: 'foto-10x15|Foto 10x15|1|0', volta: false }],
         decididoEm: new Date().toISOString(),
       },
       itensDevolvidos: [],
       itensPerdidos: ['Foto 10x15'],
-      devolucao: { forma: 'dinheiro', valor: 50 },
+      devolucao: { forma: 'pix', valor: 50 },
     });
     assert.equal(aprovado.status, 200);
     assert.equal(aprovado.json.pedido.status, 'CANCELADO');
     assert.equal(aprovado.json.pedido.cancelamentoSolicitado, false);
     assert.equal(aprovado.json.pedido.cancelamentoDecisao.status, 'aprovado');
-    assert.equal(aprovado.json.pedido.cancelamentoDecisao.estoque, 'perder');
+    assert.equal(aprovado.json.pedido.cancelamentoDecisao.estoque, 'itens');
+    assert.equal(aprovado.json.pedido.cancelamentoDecisao.itens[0].volta, false);
     assert.deepEqual(aprovado.json.pedido.itensPerdidos, ['Foto 10x15']);
 
     const listado = await (await fetch(base + '/api/pedidos')).json();
     const salvo = listado.pedidos.find((p) => p.id === 'PED-CANC1');
     assert.equal(salvo.status, 'CANCELADO');
-    assert.equal(salvo.cancelamentoDecisao.reembolso.forma, 'dinheiro');
+    assert.equal(salvo.cancelamentoDecisao.reembolso.forma, 'pix');
+    assert.equal(salvo.devolucao.forma, 'pix');
+
+    const fechamento = await fetch(base + '/api/pdv/caixa/fechar', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ meios: { dinheiro: 0, debito: 0, credito: 0, pix: 0 }, valorEnvelope: 0 }),
+    });
+    assert.equal(fechamento.status, 200);
+    const fechado = await fechamento.json();
+    assert.equal(fechado.caixa.totalVendido, 0);
+    assert.deepEqual(fechado.caixa.totalPorMeio, {});
   } finally {
     await parar(child);
   }
