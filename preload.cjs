@@ -35,7 +35,7 @@ contextBridge.exposeInMainWorld('natal', {
     photosFolder: config.photosFolder || '',
     logoTexto: config.logoTexto || 'SHOPPING PALLADIUM',
   }),
-  selectFolder: () => ipcRenderer.invoke('natal:selectFolder'),
+  selectFolder: (opts) => ipcRenderer.invoke('natal:selectFolder', opts || {}),
   listPrinters: () => ipcRenderer.invoke('natal:listPrinters'),
   saveConfig: async (partial) => {
     const res = await ipcRenderer.invoke('natal:saveConfig', partial);
@@ -46,8 +46,14 @@ contextBridge.exposeInMainWorld('natal', {
     'natal:printBematech',
     typeof payload === 'string' ? { texto: payload } : (payload || {})
   ),
+  setBusy: (busy) => ipcRenderer.send('natal:setBusy', !!busy),
   restartImporter: () => ipcRenderer.invoke('natal:restartImporter'),
   importerInfo: () => ipcRenderer.invoke('natal:importerInfo'),
   openImporterLog: () => ipcRenderer.invoke('natal:openImporterLog'),
+  dslrSync: (enabled) => ipcRenderer.invoke('natal:dslrSync', !!enabled),
+  dslrInfo: () => ipcRenderer.invoke('natal:dslrInfo'),
+  dslrRestart: () => ipcRenderer.invoke('natal:dslrRestart'),
+  dslrStop: () => ipcRenderer.invoke('natal:dslrStop'),
+  openDslrLog: () => ipcRenderer.invoke('natal:openDslrLog'),
   openPath: (target) => ipcRenderer.invoke('natal:openPath', target),
 });

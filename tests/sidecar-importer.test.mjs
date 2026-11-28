@@ -72,6 +72,11 @@ test('sidecar enxerga o importador na porta configurada e cria sessao do lote', 
   assert.equal(fs.readdirSync(previewsDir).length, 2);
   assert.ok(fs.statSync(path.join(originalsDir, fs.readdirSync(originalsDir)[0])).nlink >= 2);
 
+  const resumo = await waitJson(sidecar.base, '/api/sessoes?resumo=1', (data) => (
+    data.success && data.sessoes.some((s) => s.id === sessao.id && s.fotosQtd === 2)
+  ), { message: 'resumo do painel nao contou as fotos importadas do cartao', timeout: 15000 });
+  assert.equal(resumo.sessoes.find((s) => s.id === sessao.id).fotosQtd, 2);
+
   copyPhoto(importFolder, 'nao-deve-entrar.jpg', 'jpg');
   const sync = await postJson(sidecar.base, '/api/import/sincronizar');
   assert.equal(sync.status, 200);

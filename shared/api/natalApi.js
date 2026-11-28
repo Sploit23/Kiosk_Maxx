@@ -22,27 +22,46 @@ async function api(method, path, body = null, isBinary = false) {
       opts.body = typeof body === 'string' ? body : JSON.stringify(body);
     }
   }
-  const res = await fetch(`${SIDECAR_URL}${path}`, opts);
-  const text = await res.text();
-  if (res.status === 401) {
-    try {
-      if (typeof window !== 'undefined' && /^\/pdv(\/|$)/.test(String(window.location.pathname || ''))) {
-        window.location.replace('/pdv/');
-      }
-    } catch { /* sem window */ }
-    return { success: false, error: 'PAIRING_REQUIRED', pairing: true, status: 401 };
-  }
+  // Sem timeout, um sidecar travado (impressão/importação/disco lento) pendurava
+  // o PDV para sempre (login, caixa, fechar venda). Upload binário (foto grande)
+  // ganha mais prazo que as chamadas JSON.
+  const AC = (typeof globalThis !== 'undefined' && globalThis.AbortController) || null;
+  const ctrl = AC ? new AC() : null;
+  const timeoutMs = isBinary ? 60000 : 15000;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  if (ctrl) opts.signal = ctrl.signal;
   try {
-    return JSON.parse(text);
-  } catch {
-    return { success: false, error: text || `Erro HTTP ${res.status}` };
+    const res = await fetch(`${SIDECAR_URL}${path}`, opts);
+    const text = await res.text();
+    if (res.status === 401) {
+      try {
+        if (typeof window !== 'undefined' && /^\/pdv(\/|$)/.test(String(window.location.pathname || ''))) {
+          window.location.replace('/pdv/');
+        }
+      } catch { /* sem window */ }
+      return { success: false, error: 'PAIRING_REQUIRED', pairing: true, status: 401 };
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { success: false, error: text || `Erro HTTP ${res.status}` };
+    }
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 const natalApi = {
   // ─── Sessões (fotógrafo cria/transfere; PDV lê) ──────────
   criarSessao: () => api('POST', '/api/sessoes'),
-  listarSessoes: () => api('GET', '/api/sessoes'),
+  listarSessoes: (opts = {}) => {
+    const parts = [];
+    if (opts.data) parts.push('data=' + encodeURIComponent(opts.data));
+    if (opts.limite) parts.push('limite=' + encodeURIComponent(String(opts.limite)));
+    if (opts.resumo) parts.push('resumo=1');
+    const qs = parts.join('&');
+    return api('GET', `/api/sessoes${qs ? '?' + qs : ''}`);
+  },
   getSessao: (id) => api('GET', `/api/sessoes/${encodeURIComponent(id)}`),
   finalizarSessao: (id) => api('POST', `/api/sessoes/${encodeURIComponent(id)}/finalizar`),
   cancelarSessao: (id) => api('POST', `/api/sessoes/${encodeURIComponent(id)}/cancelar`),
@@ -86,6 +105,7 @@ const natalApi = {
   filaPortalAdd: (item) => api('POST', '/api/portal/fila', item),
   filaPortalConfirmar: (item) => api('POST', '/api/portal/fila/confirmar', item),
   filaPortalErro: (item) => api('POST', '/api/portal/fila/erro', item),
+  filaPortalReativar: () => api('POST', '/api/portal/fila/reativar', {}),
   filaPortalLimpar: (senha) => api('POST', '/api/portal/fila/limpar', { senha }),
 
   // ─── Cache local do portal (preços, equipe, credenciais) ──
@@ -155,6 +175,11 @@ const natalApi = {
   // 8099 via sidecar) + força busca no cartão agora.
   importStatus: () => api('GET', '/api/import/status'),
   importSincronizar: () => api('POST', '/api/import/sincronizar'),
+  // Câmera DSLR em modo "cabo 100% direto" (digiCamControl): as fotos caem numa
+  // pasta local e a sessão só nasce no "Fechar sessão".
+  dslrStatus: () => api('GET', '/api/dslr/status'),
+  dslrFechar: () => api('POST', '/api/dslr/fechar'),
+  dslrDescartar: () => api('POST', '/api/dslr/descartar'),
   // Câmera USB (WPD/MTP): o fotógrafo escolhe quando criar a sessão.
   importCameraScan: () => api('POST', '/api/import/camera/scan'),
   importCameraCapture: () => api('POST', '/api/import/camera/capture'),

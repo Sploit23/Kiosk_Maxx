@@ -83,6 +83,9 @@ Fonte: `sidecar/natal-core.cjs`. Todas as respostas são JSON; CORS liberado
 | POST | `/api/config` | Salva config da máquina |
 | GET | `/api/import/status` | Status do importador do cartão (proxy do `:8099/api/status`) + pasta/flag + mapa `lote → sessão` |
 | POST | `/api/import/sincronizar` | Força o importador a procurar o cartão agora (proxy do `:8099/api/sync-now`) |
+| GET | `/api/dslr/status` | Câmera no cabo 100% direto: `{ enabled, folder, exists, online, closing, count, pending, total, photos[] }` (pasta do digiCamControl, contador e se o `CameraControl.exe` responde) |
+| POST | `/api/dslr/fechar` | Cria a sessão `NATAL-*` com as fotos da pasta da câmera (ordem = mtime, copiadas como `f0001_...`), arquiva os originais em `database/dslr/<carimbo>-<id>` e limpa a pasta → `{ success, sessaoId, count, fotos, backup, arquivadas, falhas }`; 409 `SEM_FOTOS`/`DESATIVADO`/`FECHANDO` |
+| POST | `/api/dslr/descartar` | Move as fotos da câmera para `database/dslr-descartadas/<carimbo>` sem criar sessão → `{ success, descartadas }` |
 | POST | `/api/sessoes` | Criar sessão (`NATAL-<numero>`, estado `CRIADA`) |
 | GET | `/api/sessoes` | Listar sessões (com fotos) |
 | GET | `/api/sessoes/:id` | Buscar uma sessão |
@@ -289,6 +292,8 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 ├── public/overlays/         # PNGs de overlay (bolinha, 10x15, 15x20)
 ├── tools/pegar-fotos/       # Importador de cartão (fonte Python + spec PyInstaller)
 │   └── dist/Natal_Foto_Import.exe  # gerado por build:importador → resources/importador
+├── tools/preparar-digicam.ps1  # copia o digiCamControl instalado → digicam/ (embutido no instalador)
+├── digicam/                 # digiCamControl 2.1.x copiado (gitignored, ~225 MB) → resources/digicam
 ├── build/installer.nsh      # regras de firewall do importador (NSIS elevado)
 ├── dist/                    # Build Vite (index.html, vendas.html, assets/, overlays/)
 └── .github/workflows/       # ci.yml + release.yml (tag v* → build win + publish)
@@ -609,7 +614,9 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   /api/config`; a UI salva também no `electron-config.json`. `importFolder`
   vazio = `<photosFolder>\_cartao` (valor efetivo exposto por `GET /api/config`
   como `importFolder`, e o custom como `importFolderCustom`); `importSessoes`
-  (default `true`) liga/desliga a criação de sessões no sidecar.
+  (default `true`) liga/desliga a criação de sessões no sidecar; `dslrEnabled`
+  (default `false`) e `dslrFolder` (vazio = pasta do digiCamControl) ligam o
+  modo **câmera no cabo 100% direto**.
 - **Botão ⚙ Config** (`vendas.html`) — modal `showConfigModal(tab)` com **3 abas**:
   **Sincronizar** (aberta por padrão, qualquer operador) = painel "Sincronização
   com o portal" (pendentes, "Sincronizar agora", "Limpar fila de envio") +
@@ -671,6 +678,29 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   importador ficava parado com "Pasta de fotos ainda nao configurada" e o PC
   não recebia nada; a pasta escolhida no ⚙ tem prioridade e o diagnóstico da
   aba Cartão mostra o motivo real com o botão **Definir pasta de fotos**.
+- **Câmera no cabo 100% direto (`dslr`)** — 3ª modalidade de captura: o
+  fotógrafo dispara **pelo botão da câmera** e o digiCamControl (2.1.x,
+  embutido em `resources/digicam`, mesma pasta que a versão avulsa) grava cada
+  foto direto no PC (modo "Session", `CaptureInSdRam=false`). O main sobe o
+  `CameraControl.exe` (porta **5513**) quando `dslrEnabled` e mantém um
+  **watchdog de 30s** (`startDigiCamWatchdog`); `ajustarDigiCamSettings()` liga
+  `UseWebserver`/`NoDownload` e desliga `NewSessionOnStartUp`, e o
+  `natal:dslrSync`/`dslrInfo`/`dslrRestart`/`dslrStop`/`openDslrLog` (preload)
+  controlam o processo pela aba ⚙ → Sistema. O sidecar
+  (`GET /api/dslr/status`) lê a pasta `dslrFolder` (vazio = a pasta da sessão do
+  digiCamControl, deduzida do `settings.json`/`Pictures\digiCamControl`) e
+  mostra barra `#dslr-bar` no PDV com contador e se a câmera respondeu; a sessão
+  `NATAL-*` só é criada no **"Fechar sessão"** (`POST /api/dslr/fechar`), que
+  espera a última foto estabilizar (até 8s), ordena por mtime (`f0001_…`),
+  arquiva os originais em `database/dslr/<carimbo>-<id>` e limpa a pasta para a
+  próxima sessão. "Descartar" (`POST /api/dslr/descartar`) joga as fotos em
+  `database/dslr-descartadas/<carimbo>` sem criar sessão. A pasta do modo direto
+  é reservada em `pastasReservadas()` e ignorada pelo watcher do cartão (não
+  vira sessão por engano, mesmo dentro de `photosFolder`). Configurar em ⚙ →
+  Sistema → "Câmera no cabo (100% direto)": ligar (`dslrEnabled`), pasta das
+  fotos (`dslrFolder`) e diagnósticos (abrir pasta/reiniciar/abrir log).
+  Distribuição: binários **GPL-3.0** com a pasta `Licenses` junto (ver
+  `tools/preparar-digicam.ps1`).
 - **Importação de lotes do cartão** (`natal-core.cjs`) — regra da drop zone:
   **1 subpasta = 1 sessão**, tanto em `photosFolder` (programa externo) quanto em
   `importFolder` (importador embutido). No `importFolder`, a subpasta só é
@@ -736,7 +766,13 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
 - `npm run build` — build Vite (main + pdv) para `dist/`
 - `npm run build:importador` — compila `tools/pegar-fotos/dist/Natal_Foto_Import.exe`
   (requer Python 3 + `pip install pyinstaller`; o CI usa Python 3.12)
-- `npm run build:win` — compila o importador + build Vite + empacotador (NSIS elevado)
+- `npm run preparar:digicam` — copia o digiCamControl instalado no PC
+  (`C:\Program Files (x86)\digiCamControl`, 2.1.x) para `digicam/`, de onde o
+  empacotador o embute em `resources/digicam` (`-Force` recopia; `-Origem` usa
+  outra instalação). **A máquina de build precisa ter o digiCamControl
+  instalado** (a pasta não vai para o git); o `release.yml` baixa e instala o
+  setup 2.1.7.0 (SourceForge, NSIS `/S`) antes do `build:win`.
+- `npm run build:win` — importador + digiCamControl + build Vite + empacotador (NSIS elevado)
 - `npm run release` — build completo + publish GitHub (release)
 - `npm run lint` — ESLint
 - `backend/publish.ps1` — deploy FTP do portal PHP **+ página `/natal`** (credenciais em `../../credencial.txt`)
@@ -796,3 +832,35 @@ JRE instalado na máquina, então o PDV não depende de instalação externa.
   A cada 60s ele consulta `overlays`; hash igual não baixa de novo. Sem portal,
   usa a última arte baixada ou o PNG bundled. Trocar de loja usa outra chave de
   cache e volta ao padrão se não houver arte baixada para a nova loja.
+
+## Continuidade entre PCs (Sploit-Forge)
+
+Este projeto pode ser trabalhado em mais de um PC da malha Sploit-Forge
+(ex: Casa, Escritório), por engines diferentes (opencode ou Claude Code).
+
+- No INÍCIO de qualquer sessão: leia `.sploit-handoff.md` (se existir) pra
+  saber onde a última sessão parou. Se este projeto for um repositório git
+  com remote configurado, dê `git pull` antes de começar.
+- No FIM de qualquer sessão (ou de qualquer pedido que mudou algo):
+  reescreva `.sploit-handoff.md` com data/hora, o que foi feito, estado
+  atual e o próximo passo. Se houve mudança de código e existe remote
+  git, comite e dê `git push`.
+- Nunca pule esses dois passos -- é assim que a pessoa consegue continuar
+  o mesmo projeto de outro PC ou do celular depois.
+
+## Memória da malha (Sploit-Forge)
+
+Além do bilhete deste projeto (.sploit-handoff.md), existe uma memória
+COMPARTILHADA entre TODOS os projetos da malha: `MESH_MEMORY.md`, na raiz
+do projeto "sploit" (ache o caminho/máquina dele com a ferramenta MCP
+list_projects -- pode estar neste PC ou em outro).
+
+- No INÍCIO de um trabalho que pareça não ser específico só deste projeto
+  (ex: uma API externa, uma peculiaridade de algum PC/hardware, uma
+  convenção de equipe): leia esse `MESH_MEMORY.md` (via read_file, com
+  `machine` se o projeto sploit estiver em outro PC) antes de agir.
+- Se aprender algo que vale pra qualquer projeto/PC da malha (não só
+  este): adicione uma linha curta lá (via edit_file, só acrescentando --
+  nunca reescreva o arquivo inteiro nem apague o que já tem).
+- Só vale a pena registrar ali o que é genuinamente reaproveitável fora
+  deste projeto -- detalhe específico demais fica só no handoff local.

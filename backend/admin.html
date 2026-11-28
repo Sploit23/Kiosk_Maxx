@@ -3915,16 +3915,32 @@ function decidirCancelamento(p, opts){
 }
 function abrirAprovarCancelamento(p){
   var total = toNum(p.total);
+  var pgs = (Array.isArray(p.pagamentos) ? p.pagamentos : []).filter(function(pg){ return pg && toNum(pg.valor) > 0; });
+  var pagTxt = pgs.length
+    ? pgs.map(function(pg){ return esc(pg.forma||pg.meio||'—')+' '+fmtBRL(toNum(pg.valor)); }).join(' · ')
+    : '—';
+  var itens = (Array.isArray(p.itens) ? p.itens : []).filter(function(it){
+    return it && !/^(ajuste|desconto)/.test(String(it.tipo||'')) && toNum(it.subtotal) >= 0;
+  });
+  var itensHtml = itens.length ? itens.map(function(it,i){
+    var nome = it.label || it.produtoId || ('Item '+(i+1));
+    return '<label style="display:block;margin:6px 0;font-size:12px;">'+
+      '<input type="checkbox" data-cx-item="'+i+'" checked> '+esc(nome)+
+      ' <span style="color:var(--slate-400);">'+(Number(it.qtd)>1?Number(it.qtd)+'x ':'')+fmtBRL(toNum(it.subtotal))+'</span>'+
+      '</label>';
+  }).join('') : '<p style="font-size:11.5px;color:var(--slate-400);">Sem itens físicos neste pedido.</p>';
   openPortalModal(
     '<div class="modal-head"><h3>Aprovar cancelamento</h3><button class="modal-close" onclick="nacCloseModal()">×</button></div>'+
     '<p style="font-size:12px;color:var(--slate-400);margin-bottom:12px;">Pedido '+esc(p.numero||pedId(p))+' · '+fmtBRL(total)+' · '+esc(p.lojaNome||'')+'</p>'+
-    '<div class="mf-label">Estoque</div>'+
-    '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-est" value="voltar" checked> Tudo volta ao estoque</label>'+
-    '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-est" value="perder"> Tudo como perda (não volta ao estoque)</label>'+
+    '<div class="mf-label">Pagamento original</div>'+
+    '<p style="font-size:12px;color:var(--slate-200);margin:6px 0 12px;">'+pagTxt+'</p>'+
+    '<div class="mf-label">Estoque por item <span style="font-weight:400;color:var(--slate-400);">(marcado volta, desmarcado é perda)</span></div>'+
+    '<div style="max-height:150px;overflow-y:auto;border:1px solid var(--navy-line);border-radius:8px;padding:8px 10px;margin-top:6px;">'+itensHtml+'</div>'+
     '<div class="mf-label" style="margin-top:12px;">Reembolso ao cliente</div>'+
     '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-re" value="nao" checked> Não devolvido</label>'+
     '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-re" value="dinheiro"> Dinheiro</label>'+
     '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-re" value="cartao"> Estorno no cartão</label>'+
+    '<label style="display:block;margin:6px 0;"><input type="radio" name="cx-re" value="pix"> Devolvido via PIX</label>'+
     '<input class="form-input" id="cx-re-valor" type="number" min="0" step="0.01" value="'+total.toFixed(2)+'" style="margin-top:8px;max-width:180px;" disabled>'+
     '<div style="display:flex;gap:8px;margin-top:14px;">'+
       '<button class="btn" id="cx-confirmar" style="background:var(--green-500);color:#fff;">Confirmar aprovação</button>'+
@@ -3938,10 +3954,16 @@ function abrirAprovarCancelamento(p){
     });
   });
   $('#cx-confirmar').addEventListener('click', function(){
-    var est = (document.querySelector('input[name="cx-est"]:checked')||{}).value || 'voltar';
     var forma = (document.querySelector('input[name="cx-re"]:checked')||{}).value || 'nao';
     var valor = forma === 'nao' ? 0 : toNum($('#cx-re-valor').value);
-    decidirCancelamento(p, { decisao:'aprovar', estoque:est, reembolso:{ forma:forma, valor:valor } });
+    var itensDecisao = itens.map(function(it,i){
+      var el = document.querySelector('input[data-cx-item="'+i+'"]');
+      return {
+        chave: it.chave || String((it.produtoId||'')+'|'+(it.label||'')+'|'+(it.qtd||1)+'|'+i),
+        volta: !!(el && el.checked),
+      };
+    });
+    decidirCancelamento(p, { decisao:'aprovar', estoque:'itens', itens:itensDecisao, reembolso:{ forma:forma, valor:valor } });
   });
 }
 // ——— ABA CANCELAMENTOS ———
@@ -3995,7 +4017,8 @@ function cxRenderPendentes(){
 function cxTextoReembolso(c){
   var r = c && c.reembolso;
   if(!r || !r.forma || r.forma === 'nao') return 'sem reembolso';
-  return (r.forma === 'dinheiro' ? 'dinheiro' : 'estorno no cartão') + ' ' + fmtBRL(toNum(r.valor));
+  var nome = r.forma === 'dinheiro' ? 'dinheiro' : (r.forma === 'pix' ? 'PIX' : 'estorno no cartão');
+  return nome + ' ' + fmtBRL(toNum(r.valor));
 }
 function cxRenderHistorico(){
   var tab = $('#cx-hist-tabela');
@@ -4006,19 +4029,22 @@ function cxRenderHistorico(){
     return String(b.cancelamento.decididoEm||'').localeCompare(String(a.cancelamento.decididoEm||''));
   }).slice(0, 30);
   if(!lista.length){
-    tab.innerHTML = '<tr><td class="empty" colspan="6">Nenhuma decisão registrada ainda.</td></tr>';
+    tab.innerHTML = '<tr><td class="empty" colspan="7">Nenhuma decisão registrada ainda.</td></tr>';
     return;
   }
-  tab.innerHTML = '<tr><th>Pedido</th><th>Decidido</th><th>Loja / PDV</th><th>Decisão</th><th>Estoque</th><th>Reembolso</th></tr>'+
+  tab.innerHTML = '<tr><th>Pedido</th><th>Decidido</th><th>Loja / PDV</th><th>Decisão</th><th>Pagamento original</th><th>Estoque</th><th>Reembolso</th></tr>'+
     lista.map(function(p){
       var c = p.cancelamento || {};
       var ok = c.status === 'aprovado';
+      var pgs = Array.isArray(c.pagamentoOriginal) ? c.pagamentoOriginal : [];
+      var pgTxt = pgs.length ? pgs.map(function(pg){ return esc(pg.forma||pg.meio||'—')+' '+fmtBRL(toNum(pg.valor)); }).join(' · ') : '—';
       return '<tr>'+
         '<td><b>'+esc(p.numero||pedId(p))+'</b></td>'+
         '<td style="white-space:nowrap;">'+fmtDt(c.decididoEm||'')+'</td>'+
         '<td>'+esc(p.lojaNome||p.lojaId||'—')+'<div style="font-size:11px;color:var(--slate-400);">'+esc(p.pdvNome||'')+'</div></td>'+
         '<td><span class="pill '+(ok?'pill-green':'pill-red')+'">'+(ok?'aprovado':'recusado')+'</span></td>'+
-        '<td style="font-size:11.5px;">'+(ok ? (c.estoque === 'perder' ? 'perda' : 'voltou ao estoque') : '—')+'</td>'+
+        '<td style="font-size:11.5px;">'+(ok ? pgTxt : '—')+'</td>'+
+        '<td style="font-size:11.5px;">'+(ok ? (c.estoque === 'itens' ? 'por item' : (c.estoque === 'perder' ? 'perda' : 'voltou ao estoque')) : '—')+'</td>'+
         '<td style="font-size:11.5px;">'+(ok ? esc(cxTextoReembolso(c)) : '—')+'</td></tr>';
     }).join('');
 }

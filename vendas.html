@@ -513,6 +513,28 @@
   .import-banner[data-kind="warn"] .ib-dot{background:var(--amber-500);}
   .import-banner[data-kind="error"]{border-color:rgba(193,102,107,.6);background:rgba(193,102,107,.12);}
   .import-banner[data-kind="error"] .ib-dot{background:var(--red-400);}
+  /* Câmera DSLR "cabo 100% direto" (digiCamControl): barra com contador e o
+     botão "Fechar sessão" que cria a sessão NATAL. */
+  .dslr-bar{
+    display:flex;align-items:center;gap:10px;flex:0 0 auto;
+    margin:0 12px 8px;padding:9px 11px;border-radius:9px;
+    background:rgba(212,162,76,.10);border:1px solid rgba(212,162,76,.45);
+    color:var(--slate-300);font-size:12px;line-height:1.3;
+  }
+  .dslr-bar .dslr-dot{width:9px;height:9px;border-radius:50%;background:var(--slate-500);flex:0 0 auto;}
+  .dslr-bar .dslr-dot.on{background:var(--green-500);}
+  .dslr-bar .dslr-dot.pending{background:var(--gold-500);}
+  .dslr-bar .dslr-dot.off{background:var(--red-400);}
+  .dslr-bar .dslr-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+  .dslr-bar .dslr-title{font-size:12px;font-weight:800;color:var(--cream-100);}
+  .dslr-bar .dslr-sub{font-size:11px;color:var(--slate-400);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .dslr-bar .dslr-btn{
+    padding:7px 11px;border-radius:8px;border:1px solid var(--navy-line);
+    background:var(--navy-800);color:var(--slate-200);font-size:11.5px;
+    font-weight:700;font-family:Arial,sans-serif;cursor:pointer;flex:0 0 auto;
+  }
+  .dslr-bar .dslr-btn.primary{border-color:var(--gold-500);background:var(--gold-500);color:var(--navy-950);}
+  .dslr-bar .dslr-btn:disabled{opacity:.45;cursor:not-allowed;}
   .session-list{flex:1;overflow-y:auto;padding:6px 12px 18px;display:flex;flex-direction:column;gap:8px;}
   .session-card{
     background:var(--navy-850);
@@ -1079,7 +1101,10 @@
 
   /* ===== MODAL / CHECKOUT ===== */
   .modal-overlay{
-    position:fixed;inset:0;background:rgba(6,12,22,.72);backdrop-filter:blur(3px);
+    position:fixed;inset:0;background:rgba(6,12,22,.86);
+    /* SEM backdrop-filter: o desfoque de tela cheia obriga o compositor a
+       reprocessar o fundo a cada repaint (o chip "Imprimindo" pisca durante a
+       impressao) e travava a composicao das fotos no kiosk */
     /* acima do login-overlay (200): o ⚙ Config é acessível ANTES do login */
     display:none;align-items:center;justify-content:center;z-index:260;
   }
@@ -1666,6 +1691,7 @@
       <button class="btn-primary" id="login-entrar">Entrar</button>
     </div>
     <p class="login-error" id="login-error"></p>
+    <button type="button" class="login-peer" id="login-corrigir"><span class="dot"></span><span>Arrumar caixa fechado</span><span class="hint">senha master ›</span></button>
     <button type="button" class="login-peer" id="login-peer" style="display:none;"><span class="dot"></span><span id="login-peer-txt"></span><span class="hint">ver fotos ›</span></button>
     <button type="button" class="login-peer" id="login-camera" style="display:none;"><span class="dot"></span><span id="login-camera-txt"></span><span class="hint">criar sessão ›</span></button>
     <div class="login-peer" id="login-card" style="display:none;cursor:default;"><span class="dot"></span><span id="login-card-txt"></span></div>
@@ -1766,6 +1792,7 @@
     </div>
     <button class="op-chip op-chip-btn" id="import-chip" style="display:none;" title="Cartão de memória e conexão com o outro PC"><span class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6l2-4z"/><path d="M9 2v5h7V2"/><path d="M9 12h6M9 16h6"/></svg></span><span class="peer-alert-dot" aria-hidden="true"></span><span id="import-chip-txt">Cartão</span></button>
     <button class="op-chip op-chip-btn" id="camera-chip" style="display:none;" title="Pegar as fotos novas da câmera e criar uma sessão"><span>📷</span> <span id="camera-chip-txt">Sessão da câmera</span></button>
+    <button class="op-chip op-chip-btn" id="dslr-chip" style="display:none;" title="Abrir a câmera no cabo direto"><span>📷</span> <span id="dslr-chip-txt">Cabo direto</span></button>
     <div class="op-chip" id="ribbon-chip">🖨️ Ribbon: — un.</div>
     <button class="op-chip op-chip-btn" id="update-chip" style="display:none;" title="Nova versão pronta para instalar" onclick="window.abrirUpdatePronto()">⬇️ Atualizar</button>
     <button class="op-chip op-chip-btn" id="user-chip">👤 —</button>
@@ -1829,6 +1856,15 @@
       <div class="filter-pill" data-filtro="concluidas">Concluídas</div>
     </div>
     <div class="import-banner" id="import-banner" style="display:none;"></div>
+    <div class="dslr-bar" id="dslr-bar" style="display:none;">
+      <span class="dslr-dot off" id="dslr-dot"></span>
+      <div class="dslr-body">
+        <span class="dslr-title">Câmera: <span id="dslr-count">0</span> foto(s)</span>
+        <span class="dslr-sub" id="dslr-sub">—</span>
+      </div>
+      <button type="button" class="dslr-btn" id="dslr-descartar" title="Descarta as fotos da câmera sem criar sessão">Descartar</button>
+      <button type="button" class="dslr-btn primary" id="dslr-fechar">Fechar sessão</button>
+    </div>
     <div class="session-list" id="session-list"></div>
   </div>
 
@@ -2502,43 +2538,314 @@ function formaDeMeio(meio, parcelas){
 }
 
 /* ---------------- LOADERS (sidecar -> estado do protótipo) ---------------- */
-async function carregarSessoes(){
+/* ───────────── Câmera DSLR "cabo 100% direto" (digiCamControl) ─────────────
+   O fotógrafo dispara pelo botão da câmera; o digiCamControl grava o JPEG numa
+   pasta do PC. A sessão NATAL só é criada quando o operador clica em "Fechar
+   sessão" — aí o sidecar copia as fotos e gera os previews em background. */
+let _dslrInfo = null;
+let _dslrBusy = false;
+let _dslrFechando = false;
+let _dslrCountAnterior = 0;
+let _dslrTimer = null;
+let _dslrAberto = false;
+
+function renderDslr(){
+  const bar = document.getElementById('dslr-bar');
+  const chip = document.getElementById('dslr-chip');
+  const chipTxt = document.getElementById('dslr-chip-txt');
+  const dot = document.getElementById('dslr-dot');
+  const countEl = document.getElementById('dslr-count');
+  const subEl = document.getElementById('dslr-sub');
+  const btnFechar = document.getElementById('dslr-fechar');
+  const btnDesc = document.getElementById('dslr-descartar');
+  if(!bar) return;
+  const info = _dslrInfo;
+  // Pode usar se o modo foi habilitado na máquina, se a pasta da câmera está
+  // configurada (primeiro clique = "Ativar") ou se ele já está aberto.
+  const podeUsar = !!(info && (info.enabled || info.online || info.configurado || String(info.folder || '').trim()));
+  const ativo = !!(info && (info.online || info.closing || _dslrAberto));
+  // O chip da topbar é o ÚNICO lugar de ligar/desligar a câmera: fica sempre
+  // visível e vira "Parar câmera" quando ela está aberta. Assim o controle não
+  // muda de posição (antes o "Parar" aparecia só dentro da barra da sessão).
+  if(chip){
+    chip.style.display = podeUsar ? 'inline-flex' : 'none';
+    if(chipTxt) chipTxt.textContent = ativo ? 'Parar câmera' : ((info && info.enabled) ? 'Cabo direto' : 'Ativar cabo direto');
+    chip.title = ativo ? 'Fecha o digiCamControl; as fotos continuam na pasta' : 'Abrir a câmera no cabo direto';
+  }
+  if(!ativo){
+    bar.style.display = 'none';
+    return;
+  }
+  const total = Number(info.total) || 0;
+  const pending = Number(info.pending) || 0;
+  const count = Number(info.count) || 0;
+  bar.style.display = 'flex';
+  if(countEl) countEl.textContent = String(total);
+  if(dot) dot.className = 'dslr-dot ' + (info.online ? (pending ? 'pending' : 'on') : 'off');
+  if(subEl){
+    if(pending) subEl.textContent = 'recebendo foto...';
+    else if(!info.online) subEl.textContent = 'câmera fechada — clique em Ativar cabo direto';
+    else if(!info.exists) subEl.textContent = 'aguardando a primeira foto';
+    else if(!total) subEl.textContent = 'câmera pronta para fotografar';
+    else subEl.textContent = count + ' pronta(s) para fechar a sessão';
+    subEl.title = info.folder || '';
+  }
+  if(btnFechar){
+    btnFechar.disabled = _dslrBusy || pending > 0 || count === 0;
+    btnFechar.textContent = _dslrFechando ? 'Fechando...' : ('Fechar sessão' + (count ? ' (' + count + ')' : ''));
+  }
+  if(btnDesc) btnDesc.disabled = _dslrBusy || total === 0;
+}
+
+async function carregarDslr(){
+  let info = null;
+  try{ info = await natalApi.dslrStatus(); }catch{}
+  _dslrInfo = (info && info.success) ? info : null;
+  _dslrAberto = !!(_dslrInfo && _dslrInfo.online);
+  renderDslr();
+  const podeUsar = !!(_dslrInfo && (_dslrInfo.enabled || _dslrInfo.online || _dslrInfo.configurado || String(_dslrInfo.folder || '').trim()));
+  if(podeUsar){
+    const total = Number(_dslrInfo.total) || 0;
+    if(!_dslrBusy && total > _dslrCountAnterior && document.visibilityState === 'visible'){
+      toast(total + ' foto(s) na câmera');
+    }
+    _dslrCountAnterior = total;
+    // Mantém o contador fresco; o modo NÃO abre sozinho (só pelo botão).
+    if(!_dslrTimer){
+      _dslrTimer = setInterval(()=>{ carregarDslr().catch(()=>{}); }, 2000);
+    }
+  }else if(_dslrTimer){
+    clearInterval(_dslrTimer);
+    _dslrTimer = null;
+    _dslrCountAnterior = 0;
+  }
+}
+
+// "Fechar sessão"/"Descartar" exigem dslrEnabled=true no sidecar. O botão do
+// painel liga o modo sem pedir a senha do Sistema (o Config continua atrás dela).
+async function habilitarModoDslr(){
+  if(_dslrInfo && _dslrInfo.enabled) return;
+  try{ await natalApi.saveConfig({ dslrEnabled: true }); }catch{}
+  if(_dslrInfo) _dslrInfo.enabled = true;
+}
+
+async function iniciarCameraDslr(){
+  if(_dslrBusy) return;
+  if(!window.natal?.dslrSync){ toast('Abra a câmera no PC da venda'); return; }
+  _dslrBusy = true;
+  renderDslr();
   try{
-    const res = await natalApi.listarSessoes();
-    if(!res || !res.success) return;
-    sessions = (res.sessoes || []).map(s => {
-      const d = new Date(s.criadaEm);
-      const data = isoDataLocal(d);
-      const hora = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-      const fotos = (s.fotos || []).map(f => {
-        const filename = f.filename || f.name;
-        // seed único por sessão: mesmo nome de arquivo em sessões diferentes NÃO colide
-        const seed = filename ? (s.id + '/' + filename) : ('f' + Math.random().toString(36).slice(2, 6));
-        if(filename){
-          URL_POR_FOTO[seed] = natalApi.fotoUrl(s.id, 'previews', filename);
-          URL_POR_THUMB[seed] = natalApi.fotoUrl(s.id, 'thumbs', filename);
-        }
-        return { id: filename || 'f', filename, seed };
-      });
-      const E = s.estado;
-      let status = 'aguardando_abertura', temVenda = false;
-      if(E === 'FINALIZADA') status = 'finalizada';
-      else if(E === 'CANCELADA') status = 'abandonada';
-      else if(E === 'VENDIDA'){ status = 'vendida'; temVenda = true; }
-      else if(E === 'RECEBENDO') status = 'recebendo';
-      return {
-        id: s.id, senha: numeroSessao(s.id), data, hora, status, temVenda,
-        fotosQtd: s.fotosQtd ?? fotos.length, fotos, estado: E,
-        fotosEsperadas: Number(s.fotosEsperadas) || 0,
-        recebendoDesde: s.recebendoDesde || null,
-        ultimoProgressoEm: s.ultimoProgressoEm || null,
-        importadaDe: s.importadaDe || null,
-        importacaoParcial: !!s.importacaoParcial,
-        operadorFotografo: s.operadorFotografo || null,
-      };
-    }).sort((a, b) => (b.data + b.hora).localeCompare(a.data + a.hora));
+    // Primeiro clique em "Ativar": grava o modo na máquina (sem senha do
+    // Sistema) para o "Fechar sessão"/"Descartar" funcionarem.
+    await habilitarModoDslr();
+    const r = await window.natal.dslrSync(true);
+    if(r && r.success === false){
+      toast('Não foi possível abrir a câmera' + (r.error ? ': ' + r.error : ''));
+    }else{
+      _dslrAberto = true;
+    }
+  }catch(e){
+    toast('Erro ao abrir a câmera: ' + (e && e.message ? e.message : e));
+  }finally{
+    _dslrBusy = false;
+    await carregarDslr().catch(()=>{});
+  }
+}
+
+async function pararCameraDslr(){
+  if(_dslrBusy) return;
+  if(!window.natal?.dslrStop && !window.natal?.dslrSync){ toast('Pare a câmera no PC da venda'); return; }
+  const n = _dslrInfo && _dslrInfo.total ? _dslrInfo.total : 0;
+  if(n && !window.confirm('Parar a câmera? ' + n + ' foto(s) continuam na pasta e podem ser fechadas depois.')) return;
+  _dslrBusy = true;
+  renderDslr();
+  try{
+    if(window.natal?.dslrStop) await window.natal.dslrStop();
+    else await window.natal.dslrSync(false);
+    _dslrAberto = false;
+  }catch(e){
+    toast('Erro ao parar a câmera: ' + (e && e.message ? e.message : e));
+  }finally{
+    _dslrBusy = false;
+    await carregarDslr().catch(()=>{});
+  }
+}
+
+async function fecharSessaoDslr(){
+  if(_dslrBusy) return;
+  _dslrBusy = true; _dslrFechando = true;
+  renderDslr();
+  try{
+    await habilitarModoDslr();
+    const r = await natalApi.dslrFechar();
+    if(r && r.success){
+      toast('Sessão ' + (r.sessaoId || '') + ' criada com ' + (r.count || 0) + ' foto(s)'
+        + (r.falhas ? ' — ' + r.falhas + ' original(is) não arquivado(s)' : ''));
+      _dslrCountAnterior = 0;
+      if(typeof carregarSessoes === 'function') await carregarSessoes({ data: selectedDate }).catch(()=>{});
+      if(typeof carregarDatasSessoes === 'function') await carregarDatasSessoes().catch(()=>{});
+      if(typeof renderPainel === 'function') renderPainel();
+      try{ atualizarStatusImport?.(); }catch{}
+    }else{
+      const erro = (r && r.error) || '';
+      if(erro === 'SEM_FOTOS') toast('Nenhuma foto na câmera ainda');
+      else if(erro === 'FECHANDO') toast('Já está fechando a sessão…');
+      else if(erro === 'SEM_PASTA') toast('Pasta da câmera não configurada');
+      else toast('Não foi possível fechar a sessão' + (erro ? ': ' + erro : ''));
+    }
+  }catch(e){
+    toast('Erro ao fechar sessão: ' + (e && e.message ? e.message : e));
+  }finally{
+    _dslrBusy = false; _dslrFechando = false;
+    await carregarDslr().catch(()=>{});
+  }
+}
+
+async function descartarDslr(){
+  const n = _dslrInfo && _dslrInfo.total ? _dslrInfo.total : 0;
+  if(!n) return;
+  if(!window.confirm('Descartar ' + n + ' foto(s) da câmera? Elas não viram sessão.')) return;
+  _dslrBusy = true;
+  try{
+    await habilitarModoDslr();
+    const r = await natalApi.dslrDescartar();
+    if(r && r.success){
+      toast((r.descartadas || 0) + ' foto(s) descartada(s)');
+      _dslrCountAnterior = 0;
+    }else{
+      toast('Não foi possível descartar' + (r && r.error ? ': ' + r.error : ''));
+    }
+  }catch(e){
+    toast('Erro ao descartar: ' + (e && e.message ? e.message : e));
+  }finally{
+    _dslrBusy = false;
+    await carregarDslr().catch(()=>{});
+  }
+}
+
+// "Concluir" no painel é um dismiss local (a sessão e as fotos continuam no
+// sidecar). Antes a marca vivia só em memória e o poll de 15s recriava a lista,
+// fazendo a sessão "reabrir" na cara da operadora; agora fica no localStorage.
+const CONCLUIDAS_KEY = 'natal-sessoes-concluidas';
+let sessoesConcluidasLocal = new Set();
+try{ sessoesConcluidasLocal = new Set(JSON.parse(localStorage.getItem(CONCLUIDAS_KEY) || '[]')); }catch{ sessoesConcluidasLocal = new Set(); }
+function marcarSessaoConcluida(id){
+  if(!id) return;
+  sessoesConcluidasLocal.add(id);
+  try{ localStorage.setItem(CONCLUIDAS_KEY, JSON.stringify([...sessoesConcluidasLocal])); }catch{}
+}
+const _detalhesSessoes = new Map();
+let datasSessoes = new Set();
+let totalSessoesConhecidas = 0;
+
+function mapSessao(s){
+  const d = new Date(s.criadaEm);
+  const data = isoDataLocal(d);
+  const hora = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  const fotos = (s.fotos || []).map(f => {
+    const filename = f.filename || f.name;
+    const seed = filename ? (s.id + '/' + filename) : ('f' + Math.random().toString(36).slice(2, 6));
+    if(filename){
+      URL_POR_FOTO[seed] = natalApi.fotoUrl(s.id, 'previews', filename);
+      URL_POR_THUMB[seed] = natalApi.fotoUrl(s.id, 'thumbs', filename);
+    }
+    return { id: filename || 'f', filename, seed };
+  });
+  const E = s.estado;
+  let status = 'aguardando_abertura', temVenda = false;
+  if(E === 'FINALIZADA') status = 'finalizada';
+  else if(E === 'CANCELADA') status = 'abandonada';
+  else if(E === 'VENDIDA'){ status = 'vendida'; temVenda = true; }
+  else if(E === 'RECEBENDO') status = 'recebendo';
+  if(status === 'aguardando_abertura' && sessoesConcluidasLocal.has(s.id)) status = 'finalizada';
+  return {
+    id: s.id, senha: numeroSessao(s.id), data, hora, status, temVenda,
+    fotosQtd: s.fotosQtd ?? fotos.length, fotos, estado: E,
+    fotosEsperadas: Number(s.fotosEsperadas) || 0,
+    recebendoDesde: s.recebendoDesde || null,
+    ultimoProgressoEm: s.ultimoProgressoEm || null,
+    importadaDe: s.importadaDe || null,
+    importacaoParcial: !!s.importacaoParcial,
+    operadorFotografo: s.operadorFotografo || null,
+  };
+}
+
+function ordenarSessoes(lista){
+  return lista.sort((a, b) => (b.data + b.hora).localeCompare(a.data + a.hora));
+}
+
+async function carregarSessoes(opts = {}){
+  try{
+    const q = { resumo: opts.resumo !== false, data: opts.data || selectedDate || TODAY_ISO };
+    if(opts.limite) q.limite = opts.limite;
+    const res = await natalApi.listarSessoes(q);
+    if(!res || !res.success) return false;
+    sessions = ordenarSessoes((res.sessoes || []).map(mapSessao));
     _sessionsLoaded = true;
-  }catch{ /* sidecar iniciando — painel fica vazio até a próxima carga */ }
+    return true;
+  }catch{ return false; }
+}
+
+async function carregarDatasSessoes(){
+  try{
+    const res = await natalApi.listarSessoes({ resumo: true });
+    if(!res || !res.success) return;
+    datasSessoes = new Set([TODAY_ISO]);
+    totalSessoesConhecidas = 0;
+    (res.sessoes || []).forEach(s => {
+      const data = isoDataLocal(new Date(s.criadaEm));
+      if(data) datasSessoes.add(data);
+      totalSessoesConhecidas++;
+    });
+  }catch{ /* sidecar iniciando */ }
+}
+
+async function carregarDetalheSessao(id){
+  if(!id) return null;
+  if(_detalhesSessoes.has(id)) return _detalhesSessoes.get(id);
+  try{
+    const res = await natalApi.getSessao(id);
+    if(!res || !res.success) return null;
+    const det = mapSessao(res.sessao);
+    if(_detalhesSessoes.size > 80) _detalhesSessoes.clear();
+    _detalhesSessoes.set(id, det);
+    const i = sessions.findIndex(x => x.id === id);
+    if(i >= 0) sessions[i] = Object.assign({}, sessions[i], det, { fotos: det.fotos });
+    return det;
+  }catch{ return null; }
+}
+
+async function buscarSessoesNoServidor(){
+  const term = buscaSessao.trim().toLowerCase();
+  if(!term){
+    await carregarSessoes({ data: selectedDate });
+    renderPainel();
+    return;
+  }
+  try{
+    const res = await natalApi.listarSessoes({ resumo: true });
+    if(!res || !res.success) return;
+    sessions = ordenarSessoes((res.sessoes || []).map(mapSessao)
+      .filter(s => ('#' + String(s.senha)).toLowerCase().includes(term)));
+    _sessionsLoaded = true;
+    renderPainel();
+  }catch{ /* mantém o painel atual se o sidecar não responder */ }
+}
+
+async function contarSessoesDia(dataIso){
+  try{
+    const res = await natalApi.listarSessoes({ data: dataIso, resumo: true });
+    if(res && res.success) return (res.sessoes || []).map(s => ({ estado: s.estado, data: dataIso }));
+  }catch{ }
+  return sessions.filter(s => s.data === dataIso).map(s => ({ estado: s.estado }));
+}
+
+async function recarregarPainelSessoes(){
+  if(buscaSessao.trim()) await buscarSessoesNoServidor();
+  else await carregarSessoes({ data: selectedDate });
+  renderDateSelect();
+  renderPainel();
+  renderIdleMarquee();
 }
 
 function labelProduto(produtoId, tipo){
@@ -2557,14 +2864,17 @@ function mapearPedido(p){
     ? p.sessoes.map(s => ({ id: s.id, senha: numeroSessao(s.id) }))
     : (sessaoId ? [{ id: sessaoId, senha: senhaSessao }] : []);
   const itens = [
-    ...(p.itens || []).map(it => {
+    ...(p.itens || []).map((it, idx) => {
       // Multi-sessão: cada foto guarda a própria sessão; pedidos antigos caem na 1ª.
       const itemSessao = it.sessaoId || sessaoId;
       const itemSenha = itemSessao ? numeroSessao(itemSessao) : senhaSessao;
       const modelo = modeloProduto(it.key);
       const variant = config.getOverlayVariants(modelo).length ? (it.overlayVariant || '1') : null;
+      // idx + enquadramento no cartId: dois crops da mesma foto não podem ser o
+      // mesmo item (remover um apagava os dois / a revisão abria sempre o 1º).
+      const enqCart = [it.scale || 100, it.diffx || 0, it.diffy || 0, it.angle || 0, it.luz || 0, it.logo ? 1 : 0].join(',');
       return {
-        cartId: 'ped-f-' + p.id + '-' + (it.filename || '') + '-' + it.key + (variant ? '-ov' + variant : ''),
+        cartId: 'ped-f-' + p.id + '-' + idx + '-' + (it.filename || '') + '-' + it.key + (variant ? '-ov' + variant : '') + '-' + enqCart,
         sessionId: itemSessao, sessionSenha: itemSenha,
         fotoSeed: it.filename ? (itemSessao ? itemSessao + '/' + it.filename : it.filename) : (it.key || null),
         tipo: 'tamanho', produtoId: it.key, label: labelProduto(it.key, 'tamanho'),
@@ -2587,6 +2897,9 @@ function mapearPedido(p){
   return {
     id: String(p.numero ?? p.id),
     _realId: p.id, numero: p.numero, horario,
+    registradoEm: p.registradoEm ? new Date(p.registradoEm) : null,
+    periodoEm: p.periodoEm ? new Date(p.periodoEm) : null,
+    caixaPeriodoDivergente: !!p.caixaPeriodoDivergente,
     pagoEm: p.pagoEm ? new Date(p.pagoEm) : null,
     atualizadoEm: p.atualizadoEm ? new Date(p.atualizadoEm) : null,
     impresso: p.status === 'IMPRESSO' || !!p.impressoEm,
@@ -2598,17 +2911,17 @@ function mapearPedido(p){
     itens, total: p.total || 0,
     pagamentosEfetivos: (p.pagamentos || []).map(pg => {
       // Legado: pedidos gravados antes do fix vinham sem `meio` (o sidecar
-      // guardava ''), e a forma virava '—'. Recupera o meio pela forma para
-      // o snapshot e o push ao portal não perderem o pagamento.
-      const forma = (pg.forma && pg.forma !== '—') ? pg.forma : formaDeMeio(pg.meio, pg.parcelas);
-      const meio = (pg.meio && pg.meio !== '—') ? pg.meio : (meioInfoDeForma(forma).meio || '');
+      // guardava ''), e a forma virava '�?"'. Recupera o meio pela forma para
+      // o snapshot e o push ao portal nǜo perderem o pagamento.
+      const forma = (pg.forma && pg.forma !== '�?"') ? pg.forma : formaDeMeio(pg.meio, pg.parcelas);
+      const meio = (pg.meio && pg.meio !== '�?"') ? pg.meio : (meioInfoDeForma(forma).meio || '');
       return { forma, valor: pg.valor || 0, meio, parcelas: pg.parcelas };
     }),
     status: ['PAGO', 'IMPRESSO'].includes(p.status) ? 'pago'
       : (p.status === 'CANCELADO' ? 'cancelado' : String(p.status || 'pago').toLowerCase()),
     caixaId: p.caixaId || null,
     origemTerminal: p.origemTerminal || null,
-    operador: p.operador || '—',
+    operador: p.operador || '�?"',
     origemPedidoId: p.origemPedidoId || null,
     guiaImpressa: !!p.guiaImpressa,
     codigoDigital: p.codigoDigital || null,
@@ -2633,10 +2946,24 @@ function numeroDoPedido(id){
   return p ? String(p.numero ?? p.id ?? alvo) : alvo;
 }
 
+function dataExibicaoPedido(p){
+  if(!p) return null;
+  // Venda de sessão antiga recebida/paga no caixa de hoje: mostrar no dia do recebimento
+  // (operacional) e sinalizar a sessão original, sem alterar snapshots/DRE (que usam horario).
+  if(p.caixaPeriodoDivergente && p.registradoEm instanceof Date && !isNaN(p.registradoEm)) return p.registradoEm;
+  if(p.registradoEm instanceof Date && !isNaN(p.registradoEm) && p.horario instanceof Date && !isNaN(p.horario)
+    && chaveDia(p.registradoEm) !== chaveDia(p.horario)) return p.registradoEm;
+  return p.horario instanceof Date && !isNaN(p.horario) ? p.horario : null;
+}
+function pedidoSessaoOutroDia(p){
+  const exib = dataExibicaoPedido(p);
+  return !!(p && p.horario instanceof Date && !isNaN(p.horario) && exib && chaveDia(exib) !== chaveDia(p.horario));
+}
+
 function recalcularVendasHoje(){
-  const hoje = new Date().toDateString();
+  const hoje = chaveDia(new Date());
   vendasHojeTotal = pedidosRealizados
-    .filter(p => p.status === 'pago' && p.horario && p.horario.toDateString() === hoje)
+    .filter(p => p.status === 'pago' && chaveDia(dataExibicaoPedido(p) || p.horario) === hoje)
     .reduce((s, p) => s + (p.total || 0), 0);
 }
 
@@ -2777,6 +3104,7 @@ function usuariosDeEquipe(lista){
         nome,
         funcao: ex.funcao,
         usuario: String(u.usuario || u.login || u.nome || nome).trim(),
+        senhaHash: String(u.senhaHash || '').trim(),
         isAdmin: !!ex.isAdmin,
       };
     })
@@ -2825,6 +3153,13 @@ async function carregarEquipePortal(){
   return false;
 }
 
+async function atualizarEquipeSilenciosa(){
+  const assinatura = () => USERS.map(u => [u.id, u.usuario, u.senhaHash].join('|')).join(';');
+  const antes = assinatura();
+  const ok = await carregarEquipePortal();
+  if(ok && assinatura() !== antes) renderLoginUsers();
+}
+
 let _equipeProm = null;
 function carregarEquipe(){
   if(_equipeProm) return _equipeProm;
@@ -2862,7 +3197,7 @@ async function recarregarLojaLocal(lojaId){
 }
 
 async function recarregarDados(){
-  await Promise.all([carregarSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon()]);
+  await Promise.all([carregarSessoes({ data: selectedDate }), carregarDatasSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon()]);
   renderCaixaChip();
   renderRibbonChip();
   const ativo = document.querySelector('.screen.active');
@@ -3050,6 +3385,7 @@ async function emparelharKiosk(){
         carregarOverlaysPortal();
       }
       if(_wz.ativo && _wz.etapa === 2) wzIr(3); // wizard: pareou → próxima etapa
+      natalApi.filaPortalReativar().catch(()=>{});
       agendarSincronizacao(1500); // manda o que estiver pendente assim que liberar
     } else if(res && !res.offline && res.error && res.error !== 'KIOSK_NAO_EMPARELELHADO'){
       console.warn('[pair] falha:', res.error);
@@ -3789,7 +4125,7 @@ async function renderRecebimento(){
   const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   let r = null, ss = null;
   try{
-    const [a, b] = await Promise.all([natalApi.importStatus(), natalApi.listarSessoes()]);
+    const [a, b] = await Promise.all([natalApi.importStatus(), natalApi.listarSessoes({ limite: 8, resumo: true })]);
     r = a; ss = b;
   }catch{}
   _importStatus = r;
@@ -3987,7 +4323,7 @@ async function enfileirarCaixaPortal(cx){
    O dia de um pedido é o dia da CRIAÇÃO (mesmo critério do pedido.push),
    para o portal conseguir reconciliar snapshot × pedidos. Ribbon/papel são
    o valor ATUAL (o portal não guarda histórico de estoque). */
-function montarSnapshotDia(dataIso, papelRelatorio = null){
+function montarSnapshotDia(dataIso, papelRelatorio = null, contagemSessoes = null){
   const pagos = pedidosRealizados.filter(p =>
     p.status === 'pago' && p.horario instanceof Date && !isNaN(p.horario) && isoDataLocal(p.horario) === dataIso);
   const meios = { dinheiro: 0, debito: 0, credito: 0, pix: 0 };
@@ -3995,7 +4331,7 @@ function montarSnapshotDia(dataIso, papelRelatorio = null){
     const m = String(pg.meio || meioInfoDeForma(pg.forma).meio || '').toLowerCase();
     if(meios[m] != null) meios[m] += (+pg.valor || 0);
   }));
-  const sessoesDia = sessions.filter(s => s.data === dataIso);
+  const sessoesDia = contagemSessoes || sessions.filter(s => s.data === dataIso);
   const comCombo = pagos.filter(p =>
     (p.desconto && p.desconto.tipo === 'combo') ||
     (p.itens || []).some(it => it.tipo === 'combo-desconto')).length;
@@ -4121,7 +4457,8 @@ async function enfileirarPendentesPortal(){
       const rel = await natalApi.papelResumo(d);
       if(rel && rel.success) papelRelatorio = rel;
     }catch{ }
-    if(await enfileirarPortal('vendas', d, montarSnapshotDia(d, papelRelatorio))) novos++;
+    const contagem = await contarSessoesDia(d);
+    if(await enfileirarPortal('vendas', d, montarSnapshotDia(d, papelRelatorio, contagem))) novos++;
   }
   if(novos) console.log('[sync] ' + novos + ' registro(s) na fila do portal');
   return novos;
@@ -4143,23 +4480,27 @@ async function enviarItemFila(item, ident){
       res = await portalApi.auditoriaPush({ ...payload, pdvNome: payload.pdvNome || ident.pdvNome });
     } else {
       await natalApi.filaPortalConfirmar({ id: item.id }); // tipo desconhecido → descarta
-      return true;
+      return 'ok';
     }
     if(res && res.ok){
       await natalApi.filaPortalConfirmar({ id: item.id });
       _sync.ultimoEnvio = Date.now();
       _sync.ultimoErro = '';
-      return true;
+      return 'ok';
     }
     const err = (res && res.error) || 'portal recusou o envio';
-    await natalApi.filaPortalErro({ id: item.id, erro: err });
+    const semRede = !!(res && res.offline);
+    await natalApi.filaPortalErro({ id: item.id, erro: err, offline: semRede });
     _sync.ultimoErro = err;
-    return false;
+    // Portal inalcançável → para a rodada (a rede caiu). Erro de negócio
+    // (LOJA_INVALIDA, ACAO_DESCONHECIDA, payload inválido) → segue para o
+    // próximo item, senão um registro envenenado bloqueava TODA a fila.
+    return semRede ? 'offline' : 'permanente';
   }catch(e){
     const err = (e && e.message) || String(e);
-    try{ await natalApi.filaPortalErro({ id: item.id, erro: err }); }catch{ }
+    try{ await natalApi.filaPortalErro({ id: item.id, erro: err, offline: true }); }catch{ }
     _sync.ultimoErro = err;
-    return false;
+    return 'offline';
   }
 }
 
@@ -4185,8 +4526,14 @@ async function drenarFilaPortal(){
   let ok = 0, falhas = 0;
   try{
     for(const item of itens.slice(0, 30)){
-      if(await enviarItemFila(item, ident)) ok++;
-      else { falhas++; break; } // rede caiu → para a rodada, tenta no próximo tick
+      // Item com erro permanente repetido (ex.: ação que não existe no portal
+      // publicado) fica na fila, mas não bloqueia os seguintes nem martela o
+      // portal a cada tick.
+      if((item.tentativas || 0) >= 5) continue;
+      const r = await enviarItemFila(item, ident);
+      if(r === 'ok') ok++;
+      else if(r === 'offline') { falhas++; break; } // rede caiu → para a rodada
+      else falhas++; // erro de negócio → segue para o próximo
     }
   } finally {
     _sync.enviando = false;
@@ -4275,11 +4622,12 @@ function montarPedidoPortal(p){
     meio: String(r.meio || meioInfoDeForma(r.forma).meio || '').toLowerCase(),
     forma: r.forma || '—', valor: +(r.valor || 0), parcelas: r.parcelas || 0,
   }));
-  const itens = (p.itens || []).map(it => {
+  const itens = (p.itens || []).map((it, i) => {
     let tipo = 'tamanho';
     if (it.tipo === 'extra') tipo = 'extra';
     else if (it.tipo === 'ajuste' || TIPOS_DESCONTO_CARRINHO.has(it.tipo)) tipo = 'ajuste';
     return {
+      chave: chaveItemPedido(it, i),
       tipo, produtoId: it.produtoId || '', label: it.label || '',
       qtd: it.qtd || 1,
       // unidades de ribbon: 15x20 = 2, 10x15/bolinha/polaroide = 1
@@ -4354,6 +4702,10 @@ function montarPedidoPortal(p){
       ? p.cancelamentoSolicitadoEm.toISOString()
       : (p.cancelamentoSolicitadoEm || ''),
     cancelamentoSolicitadoPor: p.cancelamentoSolicitadoPor || '',
+    devolucao: p.devolucao || null,
+    cancelamentoDecisao: p.cancelamentoDecisao || null,
+    itensDevolvidos: Array.isArray(p.itensDevolvidos) ? p.itensDevolvidos : [],
+    itensPerdidos: Array.isArray(p.itensPerdidos) ? p.itensPerdidos : [],
   };
 }
 
@@ -4695,8 +5047,11 @@ async function tentarLogin(getSelecionado){
         // quando a internet cair.
         natalApi.cachePortalSave({ credenciais: { [(u.usuario || u.nome)]: senha } }).catch(()=>{});
       }
-      else if(res && (res.offline || res.error === 'LOJA_INVALIDA' || /^HTTP \d+/.test(res.error || ''))) offline = true;
-      else if(res && res.ok === false){ document.getElementById('login-error').textContent = 'Senha incorreta.'; return; }
+      else if(res && /^HTTP 5\d\d/.test(res.error || '')) offline = true; // portal quebrado (5xx) → fallback offline
+      else if(res && res.error === 'LOJA_INVALIDA'){
+        document.getElementById('login-error').textContent = 'Loja não autorizada no portal. Fale com o administrador.';
+        return;
+      }
       else offline = true;
     }catch{ offline = true; }
   } else {
@@ -4844,10 +5199,32 @@ async function criarPedidoReal(itens, total, origemPedidoId){
           tipo: descontos.some(d => d.tipo === 'combo-desconto') ? 'combo' : 'manual', motivo: null }
       : null,
   };
-  const criado = await natalApi.criarPedido(payload);
+  let criado;
+  try {
+    criado = await natalApi.criarPedido(payload);
+  } catch (e) {
+    return { error: 'Sem conexão com o servidor local: ' + ((e && e.message) || e) };
+  }
   if(!criado || !criado.success) return { error: (criado && criado.error) || 'Erro ao criar pedido' };
-  const pago = await natalApi.registrarPagamento(criado.pedido.id, { pagamentos });
-  if(!pago || !pago.success) return { error: (pago && pago.error) || 'Erro ao registrar pagamento' };
+  let pago;
+  try {
+    pago = await natalApi.registrarPagamento(criado.pedido.id, { pagamentos });
+  } catch (e) {
+    pago = { success: false, error: (e && e.message) || String(e) };
+  }
+  if(!pago || !pago.success){
+    // Não deixa pedido AGUARDANDO órfão: o retry criava um SEGUNDO pedido das
+    // mesmas fotos. Antes de anular, confere se o pagamento chegou (resposta
+    // perdida por timeout) para não cancelar uma venda que já foi paga.
+    try {
+      const check = await natalApi.getPedido(criado.pedido.id);
+      const est = check && check.pedido && check.pedido.status;
+      if (est === 'PAGO' || est === 'IMPRESSO') return { pedido: mapearPedido(check.pedido) };
+    } catch {}
+    natalApi.atualizarPedido(criado.pedido.id, { status: 'cancelado' })
+      .catch(e => console.warn('[pdv] falha ao anular pedido sem pagamento:', e));
+    return { error: (pago && pago.error) || 'Erro ao registrar pagamento' };
+  }
   return { pedido: mapearPedido(pago.pedido) };
 }
 
@@ -4857,14 +5234,22 @@ async function criarPedidoReal(itens, total, origemPedidoId){
    Fluxo idêntico ao do React (CheckoutScreen.jsx → iniciarProducao). */
 // Pedidos antigos gravaram todas as fotos na 1ª sessão. Se o arquivo não existe
 // nela, procura a sessão que realmente contém a foto (fallback multi-sessão).
-function sessaoDaFoto(sessId, fileName){
+async function sessaoDaFoto(sessId, fileName){
   if(!fileName || !sessId) return sessId;
-  const atual = sessions.find(s => s.id === sessId);
+  const atual = await carregarDetalheSessao(sessId) || sessions.find(s => s.id === sessId);
   if(!atual) return sessId;
   const fotos = atual.fotos || [];
   if(!fotos.length || fotos.some(f => f.filename === fileName)) return sessId;
-  const outra = sessions.find(s => (s.fotos || []).some(f => f.filename === fileName));
-  return outra ? outra.id : sessId;
+  try{
+    const res = await natalApi.listarSessoes({ resumo: true });
+    if(!res || !res.success) return sessId;
+    const candidatas = (res.sessoes || []).filter(s => s.id !== sessId).slice(0, 40);
+    for(const s of candidatas){
+      const det = await carregarDetalheSessao(s.id);
+      if(det && (det.fotos || []).some(f => f.filename === fileName)) return det.id;
+    }
+  }catch{ }
+  return sessId;
 }
 
 async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
@@ -4877,19 +5262,24 @@ async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
   }
   const fotos = itens.filter(c => c.tipo === 'tamanho' && c.fotoSeed);
   if(!fotos.length){ _printPendente = null; return; }
-  void registrarPapelInicioCaixa();
   // Agrupar por arquivo+filtro pra não imprimir a mesma foto duas vezes se vier duplicada no carrinho
   const agrupado = new Map();
   for(const f of fotos){
     const [sessSeed, fileName] = String(f.fotoSeed).split('/');
-    const sessId = sessaoDaFoto(sessSeed, fileName);
+    const sessId = await sessaoDaFoto(sessSeed, fileName);
     const base = (fileName || '').replace(/\.[^.]+$/, '');
     const tProd = TAMANHOS.find(x => x.id === f.produtoId);
     const modelo = tProd ? modeloDe(tProd) : f.produtoId;
     const variant = config.getOverlayVariants(modelo).length ? (f.overlayVariant || '1') : null;
     const variantSuffix = variant ? '__ov' + variant : '';
-    const uploadName = sessId + '__' + base + '__' + f.produtoId + variantSuffix + '.jpg';
-    const id = sessId + '/' + (fileName || '') + '__' + f.produtoId + variantSuffix;
+    // A assinatura do enquadramento entra no nome do arquivo/job: duas cópias da
+    // MESMA foto com recortes diferentes são impressões diferentes (antes viravam
+    // um item só, com qty 2, e a segunda saía com o crop da primeira).
+    const enqSig = [Math.round(Number(f.zoom) || 100), Math.round(Number(f.offX) || 0),
+      Math.round(Number(f.offY) || 0), Math.round(Number(f.rotation) || 0),
+      Number(f.luz) || 0, f.logo ? 'L' : ''].join(',');
+    const uploadName = sessId + '__' + base + '__' + f.produtoId + variantSuffix + '__' + enqSig.replace(/,/g, '-') + '.jpg';
+    const id = sessId + '/' + (fileName || '') + '__' + f.produtoId + variantSuffix + '__' + enqSig;
     const existente = agrupado.get(id);
     if(existente) existente.qty += (f.qtd || 1);
     else {
@@ -4913,25 +5303,34 @@ async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
   _printProgress = { current: 0, total: lista.length };
   printando = true;
   renderRibbonChip();
+  window.natal?.setBusy?.(true);
   toast('🖨️ Preparando ' + lista.length + ' foto(s)' + (reimpressao ? ' para reimpressão...' : ' para impressão...'));
   let etapa = 'preparação';
+  const inicioPrint = performance.now();
   try{
     for(let i = 0; i < lista.length; i++){
       const f = lista[i];
       etapa = 'composição da imagem (' + f.filename + ')';
+      const tCompose = performance.now();
       const blob = await composePrintImage(f);
+      const msCompose = Math.round(performance.now() - tCompose);
       etapa = 'upload da imagem de impressão (' + f.filename + ')';
+      const tUp = performance.now();
       const up = await natalApi.uploadImpressao(pedidoId, f.filename, blob);
+      const msUp = Math.round(performance.now() - tUp);
+      console.log(`[print:tempo] ${i + 1}/${lista.length} compose ${msCompose}ms + upload ${msUp}ms (${f.filename})`);
       if(!up.success) throw new Error(up.error || 'Falha ao enviar imagem');
       _printProgress = { current: i + 1, total: lista.length };
       renderRibbonChip();
     }
     etapa = 'início da impressão';
+    const tEnq = performance.now();
     const res = await natalApi.imprimirPedido(
       pedidoId,
       lista.map(f => ({ key: f.key, filename: f.filename, qty: f.qty })),
       { reimpressao, motivo, operador },
     );
+    console.log(`[print:tempo] preparo total ${Math.round(performance.now() - inicioPrint)}ms, enfileirar ${Math.round(performance.now() - tEnq)}ms`);
     if(!res.success) throw new Error(res.error || 'Falha ao iniciar impressão');
     /* enfileirou: o estado real chega por SSE (print-start se a impressora estiver
        ligada, print-waiting se estiver desligada). Não trava o chip em "Imprimindo". */
@@ -4946,8 +5345,11 @@ async function iniciarImpressaoFotos(pedidoId, itens, opts = {}){
     _printProgress = null;
     renderRibbonChip();
     mostrarFalhaImpressao('Falha ao preparar a impressão', `${detalheEtapa} — ${e.message}`);
+  }finally{
+    window.natal?.setBusy?.(false);
   }
 }
+
 
 /* ---------------- ENVIO DIGITAL (produto: foto no celular por código) ----------------
    A foto escolhida (enquadramento atual) sobe para a galeria pública /natal
@@ -5113,9 +5515,15 @@ function abrirQrDigital(codigo){
 // Recuperação para galerias presas SEM referência (vendas antigas, anteriores ao
 // registro de refs): o operador escolhe a sessão e a foto que deveriam ter sido
 // enviadas; o PDV compõe 10x15 e sobe pro código na hora.
-function abrirEscolherFotoDigital(codigo){
+async function abrirEscolherFotoDigital(codigo){
   if(!codigo){ toast('⚠ Código inválido'); return; }
-  const comFoto = (sessions || []).filter(s => s.fotos && s.fotos.length);
+  let comFoto = (sessions || []).filter(s => s.fotos && s.fotos.length);
+  if(!comFoto.length){
+    try{
+      const res = await natalApi.listarSessoes({ limite: 20, resumo: false });
+      comFoto = (res && res.success ? (res.sessoes || []) : []).map(mapSessao).filter(s => s.fotos.length);
+    }catch{ }
+  }
   if(!comFoto.length){ toast('⚠ Nenhuma sessão com fotos disponível neste PDV'); return; }
   const selStyle = 'width:100%;padding:10px;border-radius:8px;background:var(--navy-850);color:var(--cream-100);border:1px solid var(--navy-line);font-size:13px;font-family:Arial,sans-serif;margin-bottom:12px;outline:none;';
   const opts = comFoto.map(s => `<option value="${escHtml(s.id)}">Sessão ${escHtml(s.senha)} · ${escHtml(s.data)} ${escHtml(s.hora)} · ${s.fotos.length} foto${s.fotos.length === 1 ? '' : 's'}</option>`).join('');
@@ -5140,7 +5548,7 @@ function abrirEscolherFotoDigital(codigo){
   const selFoto = document.getElementById('ef-foto');
   const selOrient = document.getElementById('ef-orient');
   const preencher = ()=>{
-    const s = (sessions || []).find(x => x.id === selSess.value);
+    const s = comFoto.find(x => x.id === selSess.value);
     selFoto.innerHTML = (s ? s.fotos : []).map((f, idx) => `<option value="${escHtml(f.filename)}">Foto ${idx + 1} — ${escHtml(f.filename)}</option>`).join('');
   };
   preencher();
@@ -5334,7 +5742,6 @@ async function finalizarVendaImpl(){
   if(r.error){ toast('⚠ ' + r.error); return; }
 
   const novoPedido = r.pedido;
-  void registrarPapelInicioCaixa();
   closeCartDrawer();
   const pedidoId = novoPedido._realId || novoPedido.id;
   const pedidoNumero = novoPedido.numero ?? novoPedido.id;
@@ -5494,7 +5901,7 @@ function mostrarFalhaImpressao(titulo, detalhe){
     </div>
     ${pend.pedidoId ? `<p class="modal-sub" style="margin-bottom:10px;">Pedido ${pend.pedidoId} · ${pend.total || 0} foto(s)</p>` : ''}
     <div style="background:var(--navy-900);border:1px solid var(--red-400);border-radius:10px;padding:14px;font-size:13px;color:var(--slate-300);margin-bottom:16px;word-break:break-word;">
-      ${detalhe || 'Sem detalhes'}
+      ${escHtml(detalhe || 'Sem detalhes')}
     </div>
     <div class="receipt" style="margin-bottom:16px;">
       <div class="rc-line"><span>Status</span><span style="color:var(--red-400);font-weight:700;">FALHOU</span></div>
@@ -5750,7 +6157,7 @@ function sessaoRecebendoPausada(s){
 }
 
 function fotosSessaoLabel(s){
-  const qtd = Array.isArray(s.fotos) ? s.fotos.length : (Number(s.fotosQtd) || 0);
+  const qtd = Number(s.fotosQtd) || (Array.isArray(s.fotos) ? s.fotos.length : 0);
   const total = Number(s.fotosEsperadas) || 0;
   if(s.status === 'recebendo' && total) return `${qtd}/${total} fotos`;
   return `${qtd} foto${qtd === 1 ? '' : 's'}`;
@@ -5763,7 +6170,8 @@ function tagInfo(s){
   if(s.status==='recebendo'){
     const total = Number(s.fotosEsperadas) || 0;
     if(sessaoRecebendoPausada(s)) return {cls:'tag-recebendo is-pausado', label:'Recebendo (pausado)'};
-    return {cls:'tag-recebendo', label: total ? `Recebendo ${s.fotos.length}/${total}` : 'Recebendo fotos'};
+    const qtd = Number(s.fotosQtd) || (Array.isArray(s.fotos) ? s.fotos.length : 0);
+    return {cls:'tag-recebendo', label: total ? `Recebendo ${qtd}/${total}` : 'Recebendo fotos'};
   }
   return {cls:'tag-aguardando', label:'Aguardando conferência'};
 }
@@ -5782,12 +6190,17 @@ let filtroStatus = 'todas'; // Todas | Aguardando | Vendidas | Concluídas
 
 function renderDateSelect(){
   const sel = document.getElementById('date-select');
-  const datas = new Set([TODAY_ISO, ...sessions.map(s=>s.data)]); // Hoje sempre disponível mesmo sem sessões ainda
+  const datas = new Set([TODAY_ISO, ...datasSessoes, ...sessions.map(s=>s.data)]);
   const datesDesc = [...datas].sort((a,b)=>b.localeCompare(a));
   sel.innerHTML = datesDesc.map(iso=>
     `<option value="${iso}" ${iso===selectedDate?'selected':''}>${fmtDateLabel(iso, TODAY_ISO)}</option>`
   ).join('');
-  sel.onchange = ()=>{ selectedDate = sel.value; renderPainel(); };
+  sel.onchange = async ()=>{
+    selectedDate = sel.value;
+    await carregarSessoes({ data: selectedDate });
+    renderPainel();
+    renderIdleMarquee();
+  };
 }
 
 /* ---------------- RENDER: PAINEL ---------------- */
@@ -5836,7 +6249,7 @@ function renderPainel(){
         ${(s.status==='aguardando_abertura' && !(currentUser && currentUser.funcao==='Fotógrafo')) ? `<button class="sc-concluir" data-id="${s.id}">Concluir</button>` : ''}
       </div>
     `;
-    card.addEventListener('click', (ev)=>{
+    card.addEventListener('click', async (ev)=>{
       if(ev.target.closest('.sc-concluir')) return;
       const agora = Date.now();
       if(lastTapSessionId===s.id && agora-lastTapAt < 500){
@@ -5850,12 +6263,12 @@ function renderPainel(){
           toast('Login de fotógrafo não abre vendas — peça pra vendedora atender esta sessão');
           return;
         }
-        openVenda(s.id);
+        await openVenda(s.id);
         return;
       }
       lastTapSessionId = s.id;
       lastTapAt = agora;
-      showSlideFotosSessao(s);
+      await showSlideFotosSessao(s);
     });
     list.appendChild(card);
   });
@@ -5864,6 +6277,7 @@ function renderPainel(){
       e.stopPropagation();
       const s = sessions.find(x=>x.id===btn.dataset.id);
       s.status='finalizada';
+      marcarSessaoConcluida(s.id);
       renderPainel();
       toast(`Sessão #${s.senha} concluída`);
     });
@@ -5878,12 +6292,18 @@ function renderPainel(){
 
 /* ---------------- VISUALIZADOR INLINE DE FOTOS DA SESSÃO (clique único, sem modal) ---------------- */
 let slideIndiceAtual = 0;
-function showSlideFotosSessao(s){
+async function showSlideFotosSessao(s){
+  const detalhe = await carregarDetalheSessao(s.id);
+  const completa = detalhe || s;
+  if(!completa.fotos || !completa.fotos.length){
+    toast('Nenhuma foto disponível nesta sessão ainda');
+    return;
+  }
   slideIndiceAtual = 0;
   document.getElementById('screen-painel').classList.add('slide-open');
   document.getElementById('idle-default-content').style.display = 'none';
   document.getElementById('idle-slide-viewer').style.display = 'block';
-  renderSlideFotos(s);
+  renderSlideFotos(completa);
 }
 function fecharSlideFotosSessao(){
   document.getElementById('screen-painel').classList.remove('slide-open');
@@ -5934,8 +6354,8 @@ function thumbParaScrollar(el, i){
 }
 
 /* ---------------- OPEN VENDA ---------------- */
-function openVenda(sessionId){
-  const sessao = sessions.find(s=>s.id===sessionId);
+async function openVenda(sessionId){
+  const sessao = await carregarDetalheSessao(sessionId) || sessions.find(s=>s.id===sessionId);
   if(!sessao) return;
   if(sessao.status==='recebendo' || sessao.estado==='RECEBENDO'){
     toast(`Sessão #${sessao.senha} ainda recebendo/preparando as fotos — aguarde alguns segundos`);
@@ -5962,16 +6382,6 @@ function openVenda(sessionId){
   renderOptions();
   renderFrame();
   renderCart();
-
-  // pré-aquece a cache de miniaturas em background (lotes de 6) pra faixa e o
-  // editor já trocarem a foto quase sem o espaço em branco
-  const _fotos = currentSession.fotos;
-  let _i = 0;
-  (function warmNext(){
-    const fim = Math.min(_i + 6, _fotos.length);
-    for(; _i < fim; _i++) thumbUrl(_fotos[_i]);
-    if(_i < _fotos.length) setTimeout(warmNext, 80);
-  })();
 }
 
 document.getElementById('btn-voltar').addEventListener('click', ()=>{
@@ -8609,17 +9019,22 @@ document.getElementById('numpad-overlay').addEventListener('pointerdown', e=>{
 /* ---------------- CONFIGURAÇÕES (modal) ---------------- */
 async function showConfigModal(tabInicial){
   await garantirIdentidade(); // garante o código do kiosk para exibir aqui
-  const [cfg, printer, fila, impStatus] = await Promise.all([
+  const [cfg, printer, fila, impStatus, dslrLocal] = await Promise.all([
     natalApi.getConfig().catch(()=>({})),
     natalApi.printerStatus().catch(()=>({})),
     natalApi.filaImpressao().catch(()=>({ success:false, fila: [] })),
     natalApi.importStatus().catch(()=>null),
+    (window.natal && window.natal.dslrInfo) ? window.natal.dslrInfo().catch(()=>({})) : Promise.resolve({}),
   ]);
   const filaJobs = (fila && Array.isArray(fila.fila)) ? fila.fila : [];
   const filaLimpar = filaJobs.filter(j => j.estado !== 'IMPRIMINDO');
   const importFolderCfg = String((impStatus && impStatus.importFolder) || cfg.importFolder || '');
   const importFolderCustomCfg = String(cfg.importFolderCustom || '');
   const importSessoesCfg = (impStatus ? impStatus.importSessoes !== false : cfg.importSessoes !== false);
+  const dslrEnabledCfg = cfg.dslrEnabled === true;
+  const dslrFolderCustomCfg = String(cfg.dslrFolder || '');
+  const dslrFolderResolvedCfg = String(cfg.dslrFolderResolved || '');
+  const dslrLocalInfo = dslrLocal || {};
   const folder = cfg.photosFolder || '';
   const thermalPrinterAtual = String(
     (window.natal && window.natal.getConfig && window.natal.getConfig().thermalPrinterName)
@@ -8686,6 +9101,32 @@ async function showConfigModal(tabInicial){
         <button id="cfg-import-browse" style="padding:10px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;white-space:nowrap;font-family:Arial,sans-serif;">Procurar</button>
       </div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Onde o importador grava os lotes recebidos do cartão. Vazio = <b>_cartao</b> dentro da pasta de fotos.</div>
+    </div>
+
+    <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <div style="font-size:11px;color:var(--slate-400);text-transform:uppercase;letter-spacing:.5px;font-weight:700;">Câmera no cabo (100% direto)</div>
+        <span style="font-size:11px;color:${dslrLocalInfo.running ? 'var(--green-400)' : 'var(--slate-500)'};font-weight:700;">${dslrLocalInfo.running ? '● digiCamControl aberto' : '○ digiCamControl fechado'}</span>
+      </div>
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;font-size:12px;color:var(--slate-300);cursor:pointer;">
+        <input id="cfg-dslr-enabled" type="checkbox" ${dslrEnabledCfg ? 'checked' : ''} style="margin-top:2px;" />
+        <span>Usar esta máquina com a câmera no cabo (disparo pelo botão da câmera)<br>
+          <span style="font-size:11px;color:var(--slate-500);">Habilita o botão "Cabo direto" no painel. O digiCamControl só abre quando você clica nele (nada no boot, nada de cartão de memória).</span>
+        </span>
+      </label>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+        <input id="cfg-dslr-folder" type="text" value="${dslrFolderCustomCfg.replace(/"/g,'&quot;')}"
+          placeholder="${dslrFolderResolvedCfg.replace(/"/g,'&quot;') || 'detectado automaticamente'}"
+          style="flex:1;padding:10px 12px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-950);color:var(--gold-050);font-size:13px;font-family:Arial,sans-serif;outline:none;" />
+        <button id="cfg-dslr-browse" type="button" style="padding:10px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:13px;cursor:pointer;white-space:nowrap;font-family:Arial,sans-serif;">Procurar</button>
+      </div>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:4px;">Pasta onde o digiCamControl salva (vazio = a pasta da sessão ativa dele). Detectada: <b style="color:var(--slate-300);">${escHtml(dslrFolderResolvedCfg || '—')}</b></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button id="cfg-dslr-open" type="button" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:var(--navy-800);color:var(--slate-200);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">📂 Abrir pasta</button>
+        <button id="cfg-dslr-restart" type="button" style="padding:8px 14px;border:1px solid var(--gold-500);border-radius:8px;background:var(--gold-500);color:var(--navy-950);font-size:12px;font-weight:800;cursor:pointer;font-family:Arial,sans-serif;">Reabrir câmera</button>
+        <button id="cfg-dslr-log" type="button" style="padding:8px 14px;border:1px solid var(--navy-line);border-radius:8px;background:transparent;color:var(--slate-400);font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">Abrir log</button>
+      </div>
+      <div style="font-size:11px;color:var(--slate-500);margin-top:6px;">Programa: <b style="color:var(--slate-300);">${escHtml(dslrLocalInfo.exe || 'digiCamControl')}</b>${dslrLocalInfo.bundled ? ' (embutido no instalador)' : (dslrLocalInfo.exeExists ? '' : ' — não encontrado neste PC')}</div>
     </div>
 
     <div data-cfg-sec="system" style="margin-top:18px;border-top:1px solid var(--navy-line);padding-top:14px;">
@@ -8916,6 +9357,40 @@ async function showConfigModal(tabInicial){
     }catch{}
   };
 
+  // ─── Aba Sistema: câmera DSLR direta (digiCamControl) ───
+  const dslrBrowse = document.getElementById('cfg-dslr-browse');
+  if(dslrBrowse) dslrBrowse.onclick = async ()=>{
+    try{
+      const campo = document.getElementById('cfg-dslr-folder');
+      const sel = await window.natal?.selectFolder({ title: 'Pasta onde o digiCamControl salva as fotos', defaultPath: campo?.value || dslrFolderResolvedCfg });
+      if(sel && campo) campo.value = sel;
+    }catch{}
+  };
+  const dslrOpen = document.getElementById('cfg-dslr-open');
+  if(dslrOpen) dslrOpen.onclick = async ()=>{
+    const alvo = (document.getElementById('cfg-dslr-folder')?.value || dslrFolderResolvedCfg || '').trim();
+    if(!alvo){ toast('Pasta da câmera não configurada'); return; }
+    try{ await window.natal?.openPath(alvo); }catch{}
+  };
+  const dslrRestart = document.getElementById('cfg-dslr-restart');
+  if(dslrRestart) dslrRestart.onclick = async ()=>{
+    if(!window.natal?.dslrRestart){ toast('Só no PC da venda'); return; }
+    dslrRestart.disabled = true;
+    try{
+      const r = await window.natal.dslrRestart();
+      if(r && r.success) toast('Câmera reaberta' + (r.running ? '' : ' (conecte a câmera no cabo)'));
+      else toast('Não consegui abrir a câmera' + (r && r.error ? ': ' + r.error : ''));
+    }catch(e){ toast('Erro ao abrir a câmera'); }
+    dslrRestart.disabled = false;
+  };
+  const dslrLog = document.getElementById('cfg-dslr-log');
+  if(dslrLog) dslrLog.onclick = async ()=>{
+    try{
+      const r = window.natal?.openDslrLog ? await window.natal.openDslrLog() : null;
+      if(r && !r.success) toast('Log não encontrado: ' + (r.error || ''));
+    }catch(e){ toast('Não foi possível abrir o log'); }
+  };
+
   // ─── Aba Cartão: status do importador, busca manual e pasta ───
   renderImportConfigPanel();
   const impCameraBtn = document.getElementById('cfg-camera-capture');
@@ -8959,7 +9434,7 @@ async function showConfigModal(tabInicial){
   const resumoLimpar = document.getElementById('cfg-limpar-resumo');
   if(resumoLimpar){
     resumoLimpar.textContent =
-      `Nesta máquina agora: ${sessions.length} sessão(ões), ${pedidosRealizados.length} pedido(s), ` +
+      `Nesta máquina agora: ${totalSessoesConhecidas || sessions.length} sessão(ões), ${pedidosRealizados.length} pedido(s), ` +
       `${caixaAberto ? 'caixa aberto (' + ((caixaReal && (caixaReal.numero || caixaReal.id)) || '') + ')' : 'sem caixa aberto'}` +
       `${ribbonBalanceBase != null ? ', ribbon ' + ribbonBalanceBase + ' un.' : ''}.`;
   }
@@ -9263,6 +9738,10 @@ const r = await natalApi.limparFila({ pedidoId });
     const impFolderVal = (impFolderEl ? impFolderEl.value.trim() : '');
   const impSessoesEl = document.getElementById('cfg-import-sessoes');
   const impSessoesVal = impSessoesEl ? !!impSessoesEl.checked : true;
+  const dslrEnabledEl = document.getElementById('cfg-dslr-enabled');
+  const dslrEnabledVal = dslrEnabledEl ? !!dslrEnabledEl.checked : false;
+  const dslrFolderEl = document.getElementById('cfg-dslr-folder');
+  const dslrFolderVal = (dslrFolderEl ? dslrFolderEl.value.trim() : '');
   try{
       const partial = { photosFolder: val };
       const thermalSelEl = document.getElementById('cfg-thermal-printer');
@@ -9271,6 +9750,8 @@ const r = await natalApi.limparFila({ pedidoId });
       if(lojaNomeEl) partial.lojaNome = lojaNomeVal;
       if(impFolderEl) partial.importFolder = impFolderVal;
       if(impSessoesEl) partial.importSessoes = impSessoesVal;
+      if(dslrEnabledEl) partial.dslrEnabled = dslrEnabledVal;
+      if(dslrFolderEl) partial.dslrFolder = dslrFolderVal;
       // _allowLojaChange: mudar a loja pelo ⚙ é uma ação deliberada do
       // operador — o sidecar preserva a loja em saves automáticos, mas aqui
       // a edição vale (machineId/kioskCode continuam protegidos).
@@ -9295,6 +9776,14 @@ const r = await natalApi.limparFila({ pedidoId });
       if((impFolderMudou || fotosFolderMudou) && window.natal?.restartImporter){
         try{ await window.natal.restartImporter(); }catch{}
       }
+      // Câmera direta: liga/desliga o digiCamControl no PC da venda e mantém a
+      // pasta customizada no electron-config (o sidecar é a fonte da verdade).
+      // Câmera no cabo: desmarcar fecha o programa; marcar só habilita o
+      // botão do painel (o digiCamControl NÃO abre sozinho no boot/salvar).
+      if(window.natal?.dslrSync && !dslrEnabledVal){
+        try{ await window.natal.dslrSync(false); }catch{}
+      }
+      carregarDslr().catch(()=>{});
       if(lojaIdEl && lojaIdVal) agendarSincronizacao(1000);
       toast('Configurações salvas');
       closeModal();
@@ -9310,8 +9799,12 @@ const r = await natalApi.limparFila({ pedidoId });
    manutenção e confirmação por escrito do que vai ser apagado. */
 async function abrirConfirmacaoLimparDados(){
   let qtdPedidos = pedidosRealizados.length;
-  let qtdSessoes = sessions.length;
+  let qtdSessoes = totalSessoesConhecidas || sessions.length;
   let qtdFila = 0;
+  try{
+    const r = await natalApi.listarSessoes({ resumo: true });
+    if(r && r.success) qtdSessoes = (r.sessoes || []).length;
+  }catch{}
   try{
     const f = await natalApi.filaImpressao();
     qtdFila = (f && Array.isArray(f.fila)) ? f.fila.filter(j => j.estado !== 'IMPRIMINDO').length : 0;
@@ -9378,7 +9871,7 @@ async function abrirConfirmacaoLimparDados(){
       if(r && r.success){
         closeModal();
         toast(`Dados limpos: ${r.sessoes} sessão(ões), ${r.pedidos} pedido(s) · backup em ${r.backup}`);
-        await Promise.allSettled([carregarPedidos(), carregarSessoes(), carregarCaixa(), carregarRibbon()]);
+        await Promise.allSettled([carregarPedidos(), carregarSessoes({ data: selectedDate }), carregarDatasSessoes(), carregarCaixa(), carregarRibbon()]);
         renderCaixaChip && renderCaixaChip();
         renderRibbonChip && renderRibbonChip();
         agendarSnapshotVendas(1500); // portal recebe o "dia zerado" logo em seguida
@@ -9725,12 +10218,26 @@ function showPaymentPickerModal(total, rowsIniciais, titulo, subtitulo, onConfir
 }
 
 /* ---------------- VITRINE DE FOTOS (tela de espera) ---------------- */
-function renderIdleMarquee(){
+let _idleMarqueeSig = '';
+let _idleMarqueeCache = [];
+let _idleMarqueeFetchAt = 0;
+async function renderIdleMarquee(){
   const track = document.getElementById('idle-marquee-track');
   if(!track) return;
-  const seeds = [];
-  sessions.forEach(s => s.fotos.forEach(f => seeds.push(f.seed)));
-  const capped = seeds.slice(-6); // cap: no máximo 6 fotos no marquee (12 imgs no loop)
+  const painel = document.getElementById('screen-painel');
+  if(painel && !painel.classList.contains('active')) return;
+  if(Date.now() - _idleMarqueeFetchAt > 60000){
+    _idleMarqueeFetchAt = Date.now();
+    try{
+      const res = await natalApi.listarSessoes({ limite: 6, resumo: false });
+      _idleMarqueeCache = (res && res.success ? (res.sessoes || []) : [])
+        .flatMap(s => (s.fotos || []).map(f => s.id + '/' + (f.filename || f.name)));
+    }catch{ _idleMarqueeCache = []; }
+  }
+  const capped = _idleMarqueeCache.slice(-6);
+  const assinatura = capped.join(',');
+  if(assinatura === _idleMarqueeSig) return;
+  _idleMarqueeSig = assinatura;
   if(capped.length === 0){ track.innerHTML = ''; return; }
   const loop = [...capped, ...capped];
   track.innerHTML = loop.map(seed =>
@@ -9773,7 +10280,7 @@ document.getElementById('global-cart').addEventListener('click', ()=>{
   if(cart.length > 0){
     const targetSession = cart[cart.length-1].sessionId;
     if(document.getElementById('screen-venda').classList.contains('active') && currentSession && currentSession.id===targetSession) return;
-    openVenda(targetSession);
+    openVenda(targetSession).catch(()=>{});
   } else if(currentSession){
     // já está numa sessão, sem itens ainda — não faz nada, só reforça o estado vazio
     toast('Carrinho vazio — selecione fotos e tamanhos para adicionar');
@@ -9791,7 +10298,7 @@ function renderLoginUsers(){
   if(!USERS.length){
     wrap.innerHTML = equipeCarregando
       ? '<div class="login-users-empty"><span class="spin"></span>Carregando equipe...</div>'
-      : '<div class="login-users-empty">N&atilde;o foi poss&iacute;vel carregar a equipe.<br>Verifique a conex&atilde;o com o portal.</div>' +
+       : '<div class="login-users-empty">N&atilde;o foi poss&iacute;vel carregar a equipe.<br>Verifique o portal ou o cache local.</div>' +
         '<button type="button" class="login-retry" id="login-retry-equipe">Tentar novamente</button>';
     const retry = document.getElementById('login-retry-equipe');
     if(retry) retry.addEventListener('click', ()=>{
@@ -9983,28 +10490,30 @@ function renderPedidosScreen(){
 
   // lista de pedidos
   const tabPed = document.getElementById('ped-tabela-pedidos');
-  tabPed.innerHTML = `<tr><th>Pedido</th><th>Horário</th><th>Sessões</th><th>Valor</th><th>Forma(s) de pagamento</th><th>Status</th><th>Origem/Gerado</th><th></th></tr>` +
-    [...pedidosHoje].reverse().map(p=>{
+  tabPed.innerHTML = `<tr><th>Pedido</th><th>Horǭrio</th><th>Sess��es</th><th>Valor</th><th>Forma(s) de pagamento</th><th>Status</th><th>Origem/Gerado</th><th></th></tr>` +
+    [...pedidosHoje].sort((a,b)=>+(dataExibicaoPedido(b)||b.horario||0)-+(dataExibicaoPedido(a)||a.horario||0)).map(p=>{
       const terminal = p.origemTerminal === 'tablet'
         ? '<span style="color:var(--gold-300);font-weight:600;">Tablet</span>'
         : (p.origemTerminal === 'caixa'
           ? '<span style="color:var(--slate-400);font-weight:600;">Caixa</span>'
           : '');
       let vinculo = terminal;
-      if(p.origemPedidoId) vinculo += `${terminal ? '<br>' : ''}<span style="color:var(--gold-300);">← originado de ${numeroDoPedido(p.origemPedidoId)}</span>`;
-      else if(p.pedidoGeradoId) vinculo += `${terminal ? '<br>' : ''}<span style="color:var(--slate-400);">→ gerou ${numeroDoPedido(p.pedidoGeradoId)}</span>`;
-      if(!vinculo) vinculo = '—';
+      if(p.origemPedidoId) vinculo += `${terminal ? '<br>' : ''}<span style="color:var(--gold-300);">��? originado de ${numeroDoPedido(p.origemPedidoId)}</span>`;
+      else if(p.pedidoGeradoId) vinculo += `${terminal ? '<br>' : ''}<span style="color:var(--slate-400);">��' gerou ${numeroDoPedido(p.pedidoGeradoId)}</span>`;
+      if(!vinculo) vinculo = '�?"';
       const canCancelar = p.status==='pago';
+      const dtExib = dataExibicaoPedido(p) || p.horario;
+      const sessaoDia = pedidoSessaoOutroDia(p) ? `<div style="font-size:10px;color:var(--gold-300);margin-top:2px;">sessǜo ${chaveDia(p.horario)}</div>` : '';
       return `
       <tr data-id="${p.id}">
         <td>${p.id}</td>
-        <td>${p.horario.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td>
+        <td>${dtExib && !isNaN(dtExib) ? dtExib.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '�?"'}${sessaoDia}</td>
         <td>#${p.sessoes.map(s=>s.senha).join(', #')}</td>
         <td>${fmt(p.total)}</td>
         <td style="font-size:11.5px;">${formatarFormasPagamento(p.pagamentosEfetivos)}</td>
         <td><span class="ped-status ${p.status}">${p.status}</span>${p.cancelamentoSolicitado ? '<div style="margin-top:4px;"><span class="ped-status" style="background:rgba(212,162,76,.18);color:var(--gold-300);">cancel. solicitado</span></div>' : ''}</td>
         <td style="font-size:11px;">${vinculo}</td>
-        <td>${p.pedidoGeradoId ? '' : `<button class="ped-action-btn" data-reopen="${p.id}">Reabrir</button>`}${p.codigoDigital ? `<button class="ped-action-btn" data-qr="${p.codigoDigital}">📲 QR</button>` : ''}</td>
+        <td>${p.pedidoGeradoId ? '' : `<button class="ped-action-btn" data-reopen="${p.id}">Reabrir</button>`}${p.codigoDigital ? `<button class="ped-action-btn" data-qr="${p.codigoDigital}">�Y"� QR</button>` : ''}</td>
       </tr>
     `;
     }).join('') +
@@ -10040,7 +10549,8 @@ function chaveDia(data){ return data.toLocaleDateString('pt-BR'); } // dd/mm/aaa
 
 function pedidoDoDia(p, dia){
   const alvo = dia || chaveDia(new Date());
-  return !!(p && p.horario && chaveDia(p.horario) === alvo);
+  const exib = dataExibicaoPedido(p);
+  return !!(exib && chaveDia(exib) === alvo);
 }
 
 function filtrarPedidosDoDia(pedidos, dia){
@@ -10050,8 +10560,9 @@ function filtrarPedidosDoDia(pedidos, dia){
 
 function diasComVendas(){
   const chaves = [...new Set(pedidosRealizados
-    .filter(p=>p && p.horario && !isNaN(+p.horario))
-    .map(p=>chaveDia(p.horario)))];
+    .map(p=>dataExibicaoPedido(p))
+    .filter(d=>d && !isNaN(+d))
+    .map(d=>chaveDia(d)))];
   if(chaves.length===0) chaves.push(chaveDia(new Date())); // sem nenhuma venda ainda, mostra o dia de hoje mesmo assim
   return chaves.sort((a,b)=>{
     const [da,ma,ya]=a.split('/'); const [db,mb,yb]=b.split('/');
@@ -10082,12 +10593,13 @@ function renderVendasScreen(){
   sel.innerHTML = dias.map(d=>`<option value="${d}" ${d===vendasDiaSelecionado?'selected':''}>${d===chaveDia(new Date())?'Hoje — '+d:d}</option>`).join('');
   sel.onchange = ()=>{ vendasDiaSelecionado = sel.value; renderVendasScreen(); };
 
-  const pedidosDoDia = pedidosRealizados.filter(p=>chaveDia(p.horario)===vendasDiaSelecionado);
+  const pedidosDoDia = pedidosRealizados.filter(p=>pedidoDoDia(p, vendasDiaSelecionado));
   const pagosDoDia = pedidosDoDia.filter(p=>p.status==='pago');
   const totalDia = pagosDoDia.reduce((s,p)=>s+p.total,0);
   const ticketDia = pagosDoDia.length ? totalDia/pagosDoDia.length : 0;
   const canceladosDia = pedidosDoDia.filter(p=>p.status==='cancelado').length;
   const porMeioDia = resumoPagamentosPorMeio(pagosDoDia);
+  const sessoesAntigasDia = pagosDoDia.filter(p=>pedidoSessaoOutroDia(p)).length;
 
   document.getElementById('vendas-summary').innerHTML = `
     <div class="ped-stat"><div class="n">${pagosDoDia.length}</div><div class="l">vendas em ${vendasDiaSelecionado}</div></div>
@@ -10098,6 +10610,7 @@ function renderVendasScreen(){
     <div class="ped-stat ped-stat-pagto"><div class="n">${fmt(porMeioDia.debito)}</div><div class="l">D&eacute;bito</div></div>
     <div class="ped-stat ped-stat-pagto"><div class="n">${fmt(porMeioDia.pix)}</div><div class="l">PIX</div></div>
     <div class="ped-stat ped-stat-pagto"><div class="n">${fmt(porMeioDia.credito)}</div><div class="l">Cr&eacute;dito</div></div>
+    ${sessoesAntigasDia ? `<div class="ped-stat" style="border-color:rgba(212,162,76,.35);"><div class="n">${sessoesAntigasDia}</div><div class="l">de sess&atilde;o de outro dia (pago hoje)</div></div>` : ''}
   `;
 
   // dia a dia desde o início da operação
@@ -10134,18 +10647,21 @@ function renderVendasScreen(){
 
   // pedidos do dia selecionado, detalhado
   const tabPedDia = document.getElementById('vendas-tabela-pedidos-dia');
-  tabPedDia.innerHTML = `<tr><th>Pedido</th><th>Horário</th><th>Sessões</th><th>Valor</th><th>Forma</th><th>Operador</th><th>Status</th></tr>` +
-    pedidosDoDia.map(p=>`
+  tabPedDia.innerHTML = `<tr><th>Pedido</th><th>Horǭrio</th><th>Sess��es</th><th>Valor</th><th>Forma</th><th>Operador</th><th>Status</th></tr>` +
+    pedidosDoDia.map(p=>{
+      const dtExib = dataExibicaoPedido(p) || p.horario;
+      const sessaoDia = pedidoSessaoOutroDia(p) ? `<div style="font-size:10px;color:var(--gold-300);margin-top:2px;">sessǜo ${chaveDia(p.horario)}</div>` : '';
+      return `
       <tr>
         <td>${p.id}</td>
-        <td>${p.horario.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</td>
+        <td>${dtExib && !isNaN(dtExib) ? dtExib.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '�?"'}${sessaoDia}</td>
         <td>#${p.sessoes.map(s=>s.senha).join(', #')}</td>
         <td>${fmt(p.total)}</td>
         <td>${p.pagamentosEfetivos.map(r=>r.forma).join(', ')}</td>
-        <td>${p.operador||'—'}</td>
+        <td>${escHtml(p.operador||'�?"')}</td>
         <td><span class="ped-status ${p.status}">${p.status}</span></td>
       </tr>
-    `).join('') +
+    `}).join('') +
     (pedidosDoDia.length===0 ? `<tr><td colspan="7" style="color:var(--slate-500)">Nenhum pedido neste dia</td></tr>` : '');
 }
 
@@ -10443,7 +10959,7 @@ function mostrarAuditoriaSenha(){
 }
 
 /* ================= REABERTURA DE PEDIDO ================= */
-function showReopenOrder(pedidoId){
+async function showReopenOrder(pedidoId){
   const p = pedidosRealizados.find(x=>x.id===pedidoId);
   if(!p) return;
   const temFotoReprint = p.itens.some(it => it.tipo === 'tamanho' && it.fotoSeed);
@@ -10451,10 +10967,11 @@ function showReopenOrder(pedidoId){
   // todas as fotos de todas as sessões envolvidas (não só as compradas) — dá à vendedora o argumento completo
   const fotosCompradasSeeds = new Set(p.itens.filter(it=>it.tipo!=='combo-desconto').map(it=>it.fotoSeed));
   let gridHtml = '';
-  p.sessoes.forEach(sRef=>{
-    const s = sessions.find(x=>x.id===sRef.id);
+  const detalhes = await Promise.all(p.sessoes.map(async sRef =>
+    await carregarDetalheSessao(sRef.id) || sessions.find(x => x.id === sRef.id)));
+  detalhes.forEach(s=>{
     if(!s) return;
-    s.fotos.forEach(f=>{
+    (s.fotos || []).forEach(f=>{
       const comprada = fotosCompradasSeeds.has(f.seed);
       gridHtml += `<div class="reopen-thumb"><img src="${imgThumb(f.seed)}" loading="lazy">
         ${comprada ? '<div class="rt-tag">comprada · #'+s.senha+'</div>' : `<div class="rt-tag" style="color:var(--slate-400)">#${s.senha}</div>`}
@@ -10524,24 +11041,36 @@ function showReopenOrder(pedidoId){
           showPaymentPickerModal(valor, null, 'Forma de pagamento da diferença',
             `Pode ser uma forma diferente do restante do pedido — ${fmt(valor)} a cobrar.`,
             (rows)=>{
-              p.itens.push({tipo:'ajuste', produtoId:'diferenca', label:`Diferença cobrada (senha ${senha})`, qtd:1, precoUnit:valor, preco:valor, sessionSenha:p.sessoes[0].senha, fotoSeed:p.itens[0].fotoSeed});
-              p.total = +(p.total + valor).toFixed(2);
-              p.pagamentosEfetivos = p.pagamentosEfetivos.concat(rows);
-              if(p.horario && p.horario.toDateString() === new Date().toDateString()) vendasHojeTotal += valor;
-              try{
-                // persiste a diferença no sidecar (senão some no restart e o portal fica com o total antigo)
-                natalApi.atualizarPedido(p._realId || p.id, {
-                  total: p.total,
-                  pagamentos: p.pagamentosEfetivos.filter(r=>r.valor>0).map(r=>{
-                    const m = meioInfoDeForma(r.forma);
-                    return { meio: m.meio, valor: r.valor, parcelas: m.parcelas || undefined };
-                  }),
-                });
+              const novoTotal = +(p.total + valor).toFixed(2);
+              const novosPagamentos = p.pagamentosEfetivos.concat(rows);
+              const novoSessaoSenha = p.sessoes[0] && p.sessoes[0].senha;
+              const novoSeed = p.itens[0] && p.itens[0].fotoSeed;
+              (async ()=>{
+                try{
+                  // persiste a diferença no sidecar ANTES de mexer no estado local
+                  // (senão some no restart e o portal fica com o total antigo)
+                  const r = await natalApi.atualizarPedido(p._realId || p.id, {
+                    total: novoTotal,
+                    pagamentos: novosPagamentos.filter(r2=>r2.valor>0).map(r2=>{
+                      const m = meioInfoDeForma(r2.forma);
+                      return { meio: m.meio, valor: r2.valor, parcelas: m.parcelas || undefined };
+                    }),
+                  });
+                  if(!r || r.success === false) throw new Error((r && (r.error || r.message)) || 'falha ao salvar');
+                }catch(e){
+                  console.warn('[pdv] falha ao persistir diferença:', e);
+                  toast('⚠ Não foi possível registrar a diferença — nada foi cobrado. Tente novamente.');
+                  return;
+                }
+                p.itens.push({tipo:'ajuste', produtoId:'diferenca', label:`Diferença cobrada (senha ${senha})`, qtd:1, precoUnit:valor, preco:valor, sessionSenha:novoSessaoSenha, fotoSeed:novoSeed});
+                p.total = novoTotal;
+                p.pagamentosEfetivos = novosPagamentos;
+                if(p.horario && p.horario.toDateString() === new Date().toDateString()) vendasHojeTotal += valor;
                 agendarPedidosPortal(500);
                 agendarSnapshotVendas(1200);
-              }catch(e){ console.warn('[pdv] falha ao persistir diferença:', e); }
-              toast(`Diferença de ${fmt(valor)} cobrada no ${p.id} — motivo registrado`);
-              renderPedidosScreen();
+                toast(`Diferença de ${fmt(valor)} cobrada no ${p.id} — motivo registrado`);
+                renderPedidosScreen();
+              })();
             });
         });
       });
@@ -10555,20 +11084,27 @@ function showReopenOrder(pedidoId){
       showPaymentPickerModal(p.total, p.pagamentosEfetivos, 'Corrigir forma de pagamento',
         `Selecione a nova composição de pagamento para o ${p.id} — pode dividir em mais de uma forma.`,
         (rows)=>{
-          p.pagamentosEfetivos = rows;
-          try{
-            // persiste a correção no sidecar (senão reverte após restart e o portal guarda a forma antiga)
-            natalApi.atualizarPedido(p._realId || p.id, {
-              pagamentos: rows.filter(r=>r.valor>0).map(r=>{
-                const m = meioInfoDeForma(r.forma);
-                return { meio: m.meio, valor: r.valor, parcelas: m.parcelas || undefined };
-              }),
-            });
+          (async ()=>{
+            try{
+              // persiste a correção no sidecar ANTES de trocar na tela
+              const r = await natalApi.atualizarPedido(p._realId || p.id, {
+                pagamentos: rows.filter(r2=>r2.valor>0).map(r2=>{
+                  const m = meioInfoDeForma(r2.forma);
+                  return { meio: m.meio, valor: r2.valor, parcelas: m.parcelas || undefined };
+                }),
+              });
+              if(!r || r.success === false) throw new Error((r && (r.error || r.message)) || 'falha ao salvar');
+            }catch(e){
+              console.warn('[pdv] falha ao persistir forma de pagamento:', e);
+              toast('⚠ Não foi possível alterar a forma de pagamento — nada mudou. Tente novamente.');
+              return;
+            }
+            p.pagamentosEfetivos = rows;
             agendarPedidosPortal(500);
             agendarSnapshotVendas(1200);
-          }catch(e){ console.warn('[pdv] falha ao persistir forma de pagamento:', e); }
-          toast(`Forma de pagamento do ${p.id} corrigida`);
-          renderPedidosScreen();
+            toast(`Forma de pagamento do ${p.id} corrigida`);
+            renderPedidosScreen();
+          })();
         });
     });
 
@@ -10620,8 +11156,14 @@ function showReprintModal(p){
       <button class="fc-btn" id="rp-todas" style="padding:8px 12px;border-radius:8px;font-size:12px;">Marcar todas</button>
     </div>
     <label style="display:block;font-size:11px;color:var(--slate-400);margin:0 0 6px;">Motivo da reimpressão (obrigatório)</label>
-    <input type="text" id="rp-motivo" maxlength="160" autocomplete="off" placeholder="Ex.: atolamento, foto manchada, cliente voltou"
-      style="width:100%;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:14px;">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-bottom:14px;">
+      <div style="flex:1 1 280px;min-width:0;">
+        <input type="text" id="rp-motivo" maxlength="160" autocomplete="off" placeholder="Ex.: atolamento, foto manchada, cliente voltou"
+          style="width:100%;background:var(--navy-850);border:1px solid var(--navy-line);color:var(--cream-100);border-radius:8px;padding:10px 12px;font-size:13px;">
+        <div class="kb-hint" style="font-size:11px;color:var(--slate-500);margin-top:6px;">Use o teclado ao lado para escrever o motivo.</div>
+      </div>
+      <div class="eq-kb" id="rp-teclado">${eqKbTecladoHtml('Confirmar')}</div>
+    </div>
     <div class="reopen-actions">
       <button class="btn-primary" id="rp-confirmar" disabled>🖨️ Reimprimir selecionadas</button>
       <button class="btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -10666,6 +11208,33 @@ function showReprintModal(p){
   });
   motivoInput.addEventListener('input', atualizar);
 
+  // Teclado de letras da reimpressão: o quiosque pode não ter teclado físico e
+  // o motivo é obrigatório, então sem isto a operadora fica sem como escrever.
+  const tecladoRp = document.getElementById('rp-teclado');
+  const inserirMotivoRp = (ch)=>{
+    const atual = motivoInput.value;
+    const inicioFrase = atual.length === 0 || /[\s(]$/.test(atual);
+    let c = ch;
+    if(ch !== ' ' && ch !== '-' && ch !== "'") c = inicioFrase ? ch.toUpperCase() : ch.toLowerCase();
+    motivoInput.value = (atual + c).slice(0, 160);
+    try{ motivoInput.setSelectionRange(motivoInput.value.length, motivoInput.value.length); }catch{}
+    atualizar();
+  };
+  if(tecladoRp){
+    tecladoRp.querySelectorAll('[data-ch]').forEach(b=>{
+      b.addEventListener('click', ()=> inserirMotivoRp(b.getAttribute('data-ch')));
+    });
+    tecladoRp.querySelectorAll('[data-k]').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        const k = b.getAttribute('data-k');
+        if(k === 'space') inserirMotivoRp(' ');
+        else if(k === 'back'){ motivoInput.value = motivoInput.value.slice(0,-1); atualizar(); }
+        else if(k === 'clear'){ motivoInput.value = ''; atualizar(); }
+        else if(k === 'add' && !btnConfirmar.disabled) btnConfirmar.click();
+      });
+    });
+  }
+
   document.getElementById('rp-todas').addEventListener('click', () => {
     linhas.forEach((row, idx) => {
       row.querySelector('.rp-check').checked = true;
@@ -10703,12 +11272,14 @@ function askFormaDevolucao(p, onConfirm){
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
       <button class="btn-primary" id="dv-dinheiro" style="background:linear-gradient(135deg,var(--green-500),var(--green-700));">Devolvido em dinheiro — ${fmt(total)}</button>
       <button class="btn-primary" id="dv-cartao" style="background:linear-gradient(135deg,#3b6ea5,#2c527c);">Estornado no cartão</button>
+      <button class="btn-primary" id="dv-pix" style="background:linear-gradient(135deg,#2f8f83,#236b62);">Devolvido via PIX — ${fmt(total)}</button>
       <button class="btn-secondary" id="dv-nao" style="width:100%;">Não devolvido ao cliente</button>
     </div>
-    <p class="modal-sub" style="color:var(--slate-500);font-size:11px;">A devolução não altera o total vendido do pedido; ela fica registrada para auditoria e conciliação do caixa.</p>
+    <p class="modal-sub" style="color:var(--slate-500);font-size:11px;">A devolução não altera o total vendido do pedido; ela fica registrada para auditoria e conciliação do caixa. PIX e cartão não tiram dinheiro da gaveta.</p>
   `);
   document.getElementById('dv-dinheiro').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'dinheiro', valor:Number(total.toFixed(2))}); });
   document.getElementById('dv-cartao').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'cartao', valor:Number(total.toFixed(2))}); });
+  document.getElementById('dv-pix').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'pix', valor:Number(total.toFixed(2))}); });
   document.getElementById('dv-nao').addEventListener('click', ()=>{ closeModal(); onConfirm({forma:'nao', valor:0}); });
 }
 
@@ -10921,31 +11492,36 @@ function efetivarCancelamento(p, itensReais, itensQueVoltam, senha, motivo, perd
   p.cancelamentoSolicitado = false;
   if(opts.cancelamentoDecisao) p.cancelamentoDecisao = opts.cancelamentoDecisao;
   if(p.horario && p.horario.toDateString() === new Date().toDateString()) vendasHojeTotal -= p.total;
-  try{
-    // persiste o cancelamento no sidecar (sobrevive a restart — sem isso o pedido
-    // volta a 'pago' no reboot e o portal "des-cancela" o registro)
-    const persistir = {
-      status: 'cancelado',
-      devolucao: dev,
-      itensDevolvidos: p.itensDevolvidos,
-      itensPerdidos: p.itensPerdidos,
-      cancelamentoSolicitado: false,
-    };
-    if(opts.cancelamentoDecisao) persistir.cancelamentoDecisao = opts.cancelamentoDecisao;
-    natalApi.atualizarPedido(p._realId || p.id, persistir)
-      .catch(e=> console.warn('[pdv] falha ao persistir cancelamento:', e))
-      .then(()=> natalApi.limparFila({ pedidoId: p._realId || p.id }))
-      .catch(()=>{});
-    if(dev.forma === 'dinheiro' && Number(dev.valor) > 0 && caixaAberto){
-      natalApi.caixaSangria({
-        valor: Number(dev.valor),
-        motivo: `Devolução do pedido ${p.id}` + (motivo ? ` — ${motivo}` : ''),
-        pedidoId: p._realId || p.id,
-        por: currentUser ? currentUser.nome : '',
-      }).then(r=>{ if(r && r.caixa) caixaReal = r.caixa; })
-        .catch(e=> console.warn('[pdv] falha ao registrar sangria da devolução:', e));
+  (async ()=>{
+    try{
+      // persiste o cancelamento no sidecar (sobrevive a restart — sem isso o pedido
+      // volta a 'pago' no reboot e o portal "des-cancela" o registro)
+      const persistir = {
+        status: 'cancelado',
+        devolucao: dev,
+        itensDevolvidos: p.itensDevolvidos,
+        itensPerdidos: p.itensPerdidos,
+        cancelamentoSolicitado: false,
+      };
+      if(opts.cancelamentoDecisao) persistir.cancelamentoDecisao = opts.cancelamentoDecisao;
+      const r = await natalApi.atualizarPedido(p._realId || p.id, persistir);
+      if(!r || r.success === false) throw new Error((r && (r.error || r.message)) || 'falha ao salvar');
+      // Só limpa a fila de impressão DEPOIS de o cancelamento estar salvo.
+      await natalApi.limparFila({ pedidoId: p._realId || p.id }).catch(()=>{});
+      if(dev.forma === 'dinheiro' && Number(dev.valor) > 0 && caixaAberto){
+        const rs = await natalApi.caixaSangria({
+          valor: Number(dev.valor),
+          motivo: `Devolução do pedido ${p.id}` + (motivo ? ` — ${motivo}` : ''),
+          pedidoId: p._realId || p.id,
+          por: currentUser ? currentUser.nome : '',
+        });
+        if(rs && rs.caixa) caixaReal = rs.caixa;
+      }
+    }catch(e){
+      console.warn('[pdv] falha ao persistir cancelamento:', e);
+      toast('⚠ Cancelamento não foi salvo no servidor — o pedido pode voltar como pago. Tente novamente.');
     }
-  }catch(e){ console.warn('[pdv] falha ao persistir cancelamento:', e); }
+  })();
   agendarPedidosPortal(500);
   renderRibbonChip();
   renderCombos();
@@ -11043,24 +11619,37 @@ async function verificarCancelamentosPortal(){
   }
 }
 
-/* Aplica a aprovação do ADM: estoque (tudo volta / tudo perda) e reembolso
-   escolhidos no portal. Sem motivo e sem abrir a tela de itens. */
+function chaveItemPedido(it, i){
+  return String((it && it.key) || (it && it.chave)
+    || `${(it && it.produtoId) || ''}|${(it && it.label) || ''}|${(it && it.qtd) || 1}|${i}`);
+}
+
 function aplicarCancelamentoRemoto(p, d){
-  const itensReais = (p.itens || []).filter(it =>
+  const itensComIndice = (p.itens || []).map((it, i) => ({ it, i })).filter(({ it }) =>
     !['combo-desconto','ajuste','desconto-catalogo','desconto-senha-master','desconto-falha-operacional','desconto-comercial'].includes(it.tipo)
     && it.preco >= 0);
+  const itensReais = itensComIndice.map(x => x.it);
   const todosVoltam = String(d.estoque || 'voltar') !== 'perder';
-  const voltam = todosVoltam ? itensReais : [];
+  const decisoes = new Map((Array.isArray(d.itens) ? d.itens : [])
+    .map(x => [String((x && (x.chave || x.key)) || ''), x]));
+  const voltam = [];
   const perdaInfo = new Map();
-  if(!todosVoltam) itensReais.forEach(it => perdaInfo.set(it, 'portal'));
-  const forma = ['dinheiro','cartao'].includes(String(d.reembolso && d.reembolso.forma)) ? d.reembolso.forma : 'nao';
+  itensComIndice.forEach(({ it, i })=>{
+    const dec = decisoes.get(chaveItemPedido(it, i));
+    const volta = dec ? dec.volta !== false : todosVoltam;
+    if(volta) voltam.push(it); else perdaInfo.set(it, 'portal');
+  });
+  const forma = ['dinheiro','cartao','pix'].includes(String(d.reembolso && d.reembolso.forma)) ? d.reembolso.forma : 'nao';
   const valor = forma === 'nao' ? 0 : Math.min(Number(d.reembolso && d.reembolso.valor) || 0, Number(p.total) || 0);
   const decisao = {
     status: 'aprovado',
-    estoque: todosVoltam ? 'voltar' : 'perder',
+    estoque: decisoes.size ? 'itens' : (todosVoltam ? 'voltar' : 'perder'),
     reembolso: { forma, valor },
     decididoEm: d.decididoEm || '',
   };
+  if(decisoes.size){
+    decisao.itens = [...decisoes].map(([chave, x]) => ({ chave, volta: x.volta !== false }));
+  }
   efetivarCancelamento(p, itensReais, voltam, '', '', perdaInfo, { forma, valor }, {
     silencioso: true,
     cancelamentoDecisao: decisao,
@@ -11086,7 +11675,7 @@ function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, motivo, perdaIn
       <div class="rc-line"><span>Operador</span><span>${currentUser?currentUser.nome:'—'}</span></div>
       <div class="rc-line"><span>Devolução</span><span>${p.devolucao ? (p.devolucao.forma==='dinheiro' ? `dinheiro — ${fmt(p.devolucao.valor)}` : (p.devolucao.forma==='cartao' ? `estorno no cartão — ${fmt(p.devolucao.valor)}` : 'não devolvido ao cliente')) : '—'}</span></div>
       <div class="rc-line"><span>Data/hora</span><span>${new Date().toLocaleString('pt-BR')}</span></div>
-      ${motivo ? `<div class="rc-line"><span>Motivo</span><span style="text-align:right;max-width:200px;">${motivo}</span></div>` : ''}
+      ${motivo ? `<div class="rc-line"><span>Motivo</span><span style="text-align:right;max-width:200px;">${escHtml(motivo)}</span></div>` : ''}
       <h4 style="margin-top:12px;">Itens perdidos (anexar a este relatório)</h4>
       ${linhasPerdidos}
       <div class="rc-total"><span>Valor perdido</span><span>${fmt(itensPerdidos.reduce((s,it)=>s+it.preco,0))}</span></div>
@@ -11106,17 +11695,19 @@ function mostrarRelatorioPerda(p, itensPerdidos, itensQueVoltam, motivo, perdaIn
 }
 
 /* ================= REABERTURA → TELA DE EDIÇÃO COMPLETA ================= */
-function reabrirParaEdicao(pedidoId){
+async function reabrirParaEdicao(pedidoId){
   const p = pedidosRealizados.find(x=>x.id===pedidoId);
   if(!p) return;
 
   // monta uma "sessão combinada" com as fotos de todas as sessões envolvidas no pedido
   const fotosCombinadas = [];
-  p.sessoes.forEach(sRef=>{
-    const s = sessions.find(x=>x.id===sRef.id);
-    if(s) fotosCombinadas.push(...s.fotos);
-  });
-  if(fotosCombinadas.length===0) fotosCombinadas.push(...(sessions[0]?sessions[0].fotos:[]));
+  const detalhes = await Promise.all(p.sessoes.map(async sRef =>
+    await carregarDetalheSessao(sRef.id) || sessions.find(x => x.id === sRef.id)));
+  detalhes.forEach(s => { if(s) fotosCombinadas.push(...(s.fotos || [])); });
+  if(fotosCombinadas.length === 0 && sessions[0]){
+    const fallback = await carregarDetalheSessao(sessions[0].id) || sessions[0];
+    if(fallback) fotosCombinadas.push(...(fallback.fotos || []));
+  }
 
   editingPedidoId = p.id;
   currentSession = {
@@ -11511,11 +12102,12 @@ document.getElementById('cx-ultima-conciliacao').addEventListener('click', (e)=>
   mostrarListaConciliacoes();
 });
 
-function mostrarListaConciliacoes(){
+let _motivoCorrecaoLogin = '';
+function mostrarListaConciliacoes(preAutorizado = false){
   if(conciliacoesCaixa.length===0){
     openModal(`
       <div class="modal-head"><div><div class="modal-step-label">Conciliações</div><h3>Nenhuma ainda</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
-      <p class="modal-sub">Ainda não há nenhum fechamento de caixa registrado nesta loja.</p>
+      <p class="modal-sub">${preAutorizado ? 'Ainda não há caixa fechado para arrumar. Feche um caixa primeiro.' : 'Ainda não há nenhum fechamento de caixa registrado nesta loja.'}</p>
     `);
     return;
   }
@@ -11535,8 +12127,8 @@ function mostrarListaConciliacoes(){
     </tr>`;
   }).join('');
   openModal(`
-    <div class="modal-head"><div><div class="modal-step-label">Histórico</div><h3>Conciliações de caixa</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
-    <p class="modal-sub">Clique numa linha para ver o detalhe por forma de pagamento.</p>
+    <div class="modal-head"><div><div class="modal-step-label">Histórico</div><h3>${preAutorizado ? 'Corrigir fechamento' : 'Conciliações de caixa'}</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
+    <p class="modal-sub">${preAutorizado ? 'Escolha o caixa fechado para ajustar — a senha master já foi validada.' : 'Clique numa linha para ver o detalhe por forma de pagamento.'}</p>
     <div class="ped-list-wrap">
       <table class="ped-table">
         <tr><th>Data</th><th>Caixa</th><th>Gerado (sistema)</th><th>Lançado (real)</th><th>Diferença</th><th></th></tr>
@@ -11560,7 +12152,7 @@ function mostrarListaConciliacoes(){
     btn.addEventListener('click', e=>{
       e.stopPropagation();
       const f = conciliacoesCaixa[+btn.dataset.corrigir];
-      if(f) corrigirFechamentoCaixa(f);
+      if(f) preAutorizado ? abrirPedidosCorrecaoCaixa(f, _motivoCorrecaoLogin) : corrigirFechamentoCaixa(f);
     });
   });
 }
@@ -11571,6 +12163,18 @@ function corrigirFechamentoCaixa(f){
     'Corrigir caixa ' + (f.numero ? 'nº ' + f.numero : 'fechado'),
     'Este caixa já está fechado. Informe a senha master e o motivo para ajustar os pedidos, o relatório e refechar.',
     (_senha, motivo)=> abrirPedidosCorrecaoCaixa(f, motivo)
+  );
+}
+
+function abrirCorrecaoPeloLogin(){
+  if(!conciliacoesCaixa.length){ mostrarListaConciliacoes(true); return; }
+  askSenhaMotivo(
+    'Corrigir fechamento anterior',
+    'Escolha o caixa fechado, informe a senha master e o motivo. Não é preciso abrir um caixa novo.',
+    (_senha, motivo)=>{
+      _motivoCorrecaoLogin = motivo;
+      mostrarListaConciliacoes(true);
+    }
   );
 }
 
@@ -12030,6 +12634,7 @@ async function abrirTelaFechamento(){
     if(!d) return 'Sem devolução registrada';
     if(d.forma === 'dinheiro') return `Devolvido em dinheiro — ${fmt(d.valor)} (sangria registrada)`;
     if(d.forma === 'cartao') return `Estornado no cartão — ${fmt(d.valor)}`;
+    if(d.forma === 'pix') return `Devolvido via PIX — ${fmt(d.valor)} (sem sangria, fora da gaveta)`;
     return 'Não devolvido ao cliente';
   };
   const canceladosHtml = canceladosDoCaixa.length ? `
@@ -12257,6 +12862,12 @@ async function abrirTelaFechamento(){
     const diferencaTotal = +porFormaResultado.reduce((s,r)=>s+r.diferenca,0).toFixed(2);
 
     const executarFechamento = async (justificativa, autorizadoPor)=>{
+      const btnFechar = document.getElementById('fc-confirmar');
+      // Guarda de duplo clique: o segundo clique recebia 400 ("caixa não está
+      // aberto") e re-renderizava a tela, apagando o comprovante do fechamento.
+      if(btnFechar && btnFechar.disabled) return;
+      if(btnFechar){ btnFechar.disabled = true; btnFechar.textContent = 'Fechando...'; }
+      const liberarBtn = ()=>{ if(btnFechar){ btnFechar.disabled = false; btnFechar.textContent = 'Confirmar fechamento'; } };
       /* PRODUÇÃO: concilia o caixa no sidecar (meios declarados) antes de registrar na tela.
          O sidecar compara o dinheiro TOTAL da gaveta (fundo + recebido − sangrias); por isso
          soma o fundo só na hora de enviar; a tela mostra apenas o que foi digitado. */
@@ -12272,7 +12883,7 @@ async function abrirTelaFechamento(){
         ? +(fundoTrocoCaixa + dinheiroRecebido - valorEnvelope).toFixed(2)
         : +(parseFloat(saldoInput.value)||0).toFixed(2);
       const leituraFim = lerLeiturasPapel('fc-papel-10x15', 'fc-papel-15x20');
-      if(leituraFim.error){ toast('⚠ ' + leituraFim.error); return; }
+      if(leituraFim.error){ liberarBtn(); toast('⚠ ' + leituraFim.error); return; }
       const fechado = await natalApi.caixaFechar({
         meios,
         observacoes: 'Fechamento pelo PDV',
@@ -12284,6 +12895,7 @@ async function abrirTelaFechamento(){
         papelFim: leituraFim.papel,
       });
       if(!fechado || !fechado.success){
+        liberarBtn();
         toast('⚠ ' + ((fechado && fechado.error) || 'Não foi possível fechar o caixa'));
         if(fechado && fechado.codigo === 'TESTES_PENDENTES') await carregarTestesStatus();
         abrirTelaFechamento();
@@ -12293,7 +12905,10 @@ async function abrirTelaFechamento(){
       enfileirarCaixaPortal(caixaReal);
       try{
         const rel = (fechado && fechado.papelRelatorio) || (caixaReal && caixaReal.papelRelatorio) || null;
-        if(rel && rel.data) await enfileirarPortal('vendas', rel.data, montarSnapshotDia(rel.data, rel));
+        if(rel && rel.data){
+          const contagem = await contarSessoesDia(rel.data);
+          await enfileirarPortal('vendas', rel.data, montarSnapshotDia(rel.data, rel, contagem));
+        }
       }catch(e){ console.warn('[sync] não consegui atualizar o snapshot com o papel do dia', e); }
 
       const caixaEntry = caixasHoje.find(c=>c.aberto);
@@ -12444,8 +13059,15 @@ async function abrirTesteFotografo(){
   abrirTesteEscolherSessao();
 }
 
-function abrirTesteEscolherSessao(){
-  const sessoesHtml = sessions.filter(s => s.fotos && s.fotos.length).map(s=>{
+async function abrirTesteEscolherSessao(){
+  let base = (sessions || []).filter(s => s.fotos && s.fotos.length);
+  if(!base.length){
+    try{
+      const res = await natalApi.listarSessoes({ limite: 20, resumo: false });
+      base = (res && res.success ? (res.sessoes || []) : []).map(mapSessao).filter(s => s.fotos.length);
+    }catch{ }
+  }
+  const sessoesHtml = base.map(s=>{
     const t = tagInfo(s);
     return `<div class="conf-item" data-id="${s.id}" style="cursor:pointer;">
       <div class="conf-info">
@@ -12465,8 +13087,8 @@ function abrirTesteEscolherSessao(){
   });
 }
 
-function abrirTesteEscolherFoto(sessionId){
-  const s = sessions.find(x=>x.id===sessionId);
+async function abrirTesteEscolherFoto(sessionId){
+  const s = await carregarDetalheSessao(sessionId) || sessions.find(x=>x.id===sessionId);
   if(!s) return;
   const gridHtml = s.fotos.map(f=>`
     <div class="reopen-thumb" data-seed="${f.seed}" style="cursor:pointer;">
@@ -12718,6 +13340,7 @@ async function INIT(){
   _operadorRestauradoSessao = restaurarOperadorSessao();
   setupOptionTabs();
   document.getElementById('login-entrar').addEventListener('click', ()=>tentarLogin(()=>loginSelecionado));
+  document.getElementById('login-corrigir').addEventListener('click', abrirCorrecaoPeloLogin);
   document.getElementById('login-senha').addEventListener('keydown', e=>{
     if(e.key==='Enter') tentarLogin(()=>loginSelecionado);
   });
@@ -12732,6 +13355,13 @@ async function INIT(){
   document.getElementById('login-peer').addEventListener('click', abrirRecebimento);
   document.getElementById('login-camera').addEventListener('click', abrirCamera);
   document.getElementById('camera-chip').addEventListener('click', abrirCamera);
+document.getElementById('dslr-fechar').addEventListener('click', fecharSessaoDslr);
+document.getElementById('dslr-descartar').addEventListener('click', descartarDslr);
+const _dslrChip = document.getElementById('dslr-chip');
+if(_dslrChip) _dslrChip.addEventListener('click', () => {
+  if(_dslrInfo && (_dslrInfo.online || _dslrInfo.closing || _dslrAberto)) pararCameraDslr();
+  else iniciarCameraDslr();
+});
   document.getElementById('camera-close').addEventListener('click', fecharCamera);
   document.getElementById('camera-scan').addEventListener('click', cameraScan);
   document.getElementById('camera-capture').addEventListener('click', cameraCapture);
@@ -12757,6 +13387,7 @@ async function INIT(){
   setTimeout(emparelharKiosk, 0); // identifica o kiosk no portal (não bloqueia o boot)
   setTimeout(carregarPrecosPortal, 0); // preços da loja vêm do portal (fallback: catálogo local)
   setTimeout(carregarOverlaysPortal, 0); // overlays 10x15/15x20 da loja (cache local p/ offline)
+  setTimeout(carregarDslr, 0); // câmera DSLR direta (só age quando o modo está ligado)
   setInterval(() => {
     if(!window.kioskPair || !window.kioskPair.ok) emparelharKiosk(); // re-tenta até o admin cadastrar o código
   }, 30000);
@@ -12765,8 +13396,11 @@ async function INIT(){
   setInterval(() => {
     if(window.kioskPair && window.kioskPair.ok) emparelharKiosk();
   }, 300000);
+  let _buscaTimer = null;
   document.getElementById('busca-sessao').addEventListener('input', e=>{
     buscaSessao = e.target.value;
+    clearTimeout(_buscaTimer);
+    _buscaTimer = setTimeout(()=>{ recarregarPainelSessoes(); }, 250);
     renderPainel();
   });
   document.getElementById('session-filters').addEventListener('click', e=>{
@@ -12784,8 +13418,9 @@ async function INIT(){
     if(_operadorRestauradoSessao) reconciliarOperadorSessao();
     document.getElementById('user-chip').textContent = currentUser ? ('👤 ' + currentUser.nome) : '👤 Selecione seu usuário';
   });
-  try{ await Promise.all([carregarSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon(), carregarAuditoria(), carregarTestesStatus()]); }
+  try{ await Promise.all([carregarSessoes({ data: selectedDate }), carregarDatasSessoes(), carregarPedidos(), carregarCaixa(), carregarCaixasHistorico(), carregarRibbon(), carregarAuditoria(), carregarTestesStatus()]); }
   catch{ /* logs no console do sidecar */ }
+  renderLoginUsers();
   finalizarRestauracaoOperador();
   try{ await _sincronizarEstadoFila(); }catch{} // fila persistida de boot anterior → chip correto
   agendarSnapshotVendas(4000); // snapshot inicial após o boot (se já emparelhado)
@@ -12807,8 +13442,7 @@ async function INIT(){
   setInterval(async ()=>{
     try{
       // mantém o painel fresco mesmo se um evento SSE passar despercebido
-      await carregarSessoes();
-      renderDateSelect(); // datas novas (ex.: sessão de dias atrás) entram no seletor sozinhas
+      await recarregarPainelSessoes();
       const ativo = (document.querySelector('.screen.active') || {}).id;
       if(ativo === 'screen-painel') renderPainel();
       if(ativo === 'screen-pedidos') renderPedidosScreen();
@@ -12816,12 +13450,17 @@ async function INIT(){
     }catch{ /* sidecar no boot ainda */ }
   }, 15000); // sessões importadas da pasta chegam sozinhas
   setInterval(carregarPrecosPortal, 60000); // preço muda no portal → PDV aberto atualiza sozinho
+  setInterval(atualizarEquipeSilenciosa, 60000);
   setInterval(carregarOverlaysPortal, 60000); // overlay muda no portal → PDV aberto atualiza sozinho
   setInterval(verificarCancelamentosPortal, 60000); // aprovação/recusa do ADM volta para o PDV
   setTimeout(verificarCancelamentosPortal, 8000);
   // Internet voltou: não espera o ciclo de 60s para subir as fotos digitais.
   window.addEventListener('online', ()=>{
     carregarEquipe().catch(()=>{});
+    carregarPrecosPortal().catch(()=>{});
+    verificarCancelamentosPortal().catch(()=>{});
+    natalApi.filaPortalReativar().catch(()=>{});
+    sincronizarComPortal().catch(()=>{});
     natalApi.sincronizarGaleria().then(()=>{
       renderDigitalConfigPanel();
       renderSyncChip();
@@ -12829,7 +13468,19 @@ async function INIT(){
   });
   /* eventos em tempo real: mudança em sessão/pedido/caixa re-renderiza a tela ativa */
   connectSSE((key, data) => {
-    carregarSessoes().then(()=> renderDateSelect()); // mantém o seletor por dia sincronizado
+    // Recarregar TODAS as sessões a cada evento (inclusive printer:progress, um
+    // por foto) travava a composição das imagens no meio da impressão. Só as
+    // eventos que mudam sessão pedem recarga.
+    if(['sessao:criada','sessao:status','sessao:concluida','pedido:criado','pedido:pago','pedido:atualizado','print-complete'].includes(key)){
+      if(['sessao:criada','sessao:status','sessao:concluida'].includes(key)){
+        _idleMarqueeFetchAt = 0;
+        if(data && data.id) _detalhesSessoes.delete(data.id);
+      }
+      if(key === 'sessao:criada'){
+        carregarDatasSessoes().then(()=> renderDateSelect()).catch(()=>{});
+      }
+      recarregarPainelSessoes().catch(()=>{});
+    }
     if(key==='print-start'){ printando = true; _printFinalizadoEm = 0; _printPedidoId = data && data.pedidoId ? String(data.pedidoId) : null; _printFila = 0; _printFilaUltimoAviso = 0; if(data && data.total) _printProgress = { current: 0, total: data.total }; toast(data && data.reimpressao ? '🖨️ Reimpressão iniciada — aguardando terminar...' : '🖨️ Impressão iniciada — aguardando terminar...'); }
     if(key==='print-waiting'){
       /* impressora desligada: trabalho fica na fila persistente do sidecar e

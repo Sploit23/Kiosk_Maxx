@@ -25,7 +25,7 @@ test('main baixa o instalador da release correta do GitHub', () => {
   assert.match(main, /function baixarInstalador\(versao\)/);
   assert.match(main, /0x4d/);
   assert.match(main, /0x5a/);
-  assert.match(main, /function garantirRollbackCache\(\)/);
+  assert.match(main, /function garantirRollbackCache\(opts = \{\}\)/);
 });
 
 test('rollback so aceita versao anterior e roda o instalador em silencio', () => {

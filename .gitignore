@@ -13,3 +13,9 @@ __pycache__/
 tools/pegar-fotos/build/
 tools/pegar-fotos/config.json
 
+digicam/
+release-teste-*/
+
+# Config do SploitForge é por PC (token local) -- nunca entra no git.
+opencode.json
+.mcp.json

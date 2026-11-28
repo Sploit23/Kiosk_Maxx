@@ -60,7 +60,13 @@ require_once __DIR__ . '/config.php';
 function respond(array $data, int $code = 200): void
 {
     http_response_code($code);
-    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($json)) {
+        http_response_code(500);
+        echo '{"ok":false,"error":"RESPOSTA_INVALIDA"}';
+        exit;
+    }
+    echo $json;
     exit;
 }
 
@@ -112,6 +118,14 @@ function saveJson(string $name, array $data): bool
     $fp = @fopen($path . '.lock', 'c');
     if ($fp) flock($fp, LOCK_EX);
     $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    // json_encode devolve false em float não finito (INF/NAN) ou string UTF-8
+    // inválida. Sem esta guarda, file_put_contents($tmp, false) grava "" e o
+    // rename substituía o arquivo inteiro por vazio, reportando sucesso.
+    if (!is_string($json)) {
+        if ($fp) { flock($fp, LOCK_UN); fclose($fp); }
+        error_log('[natalcontroler] json_encode falhou em ' . $name . '; arquivo preservado');
+        return false;
+    }
     $tmp = $path . '.' . getmypid() . '.tmp';
     $ok = @file_put_contents($tmp, $json, LOCK_EX) !== false;
     if ($ok) $ok = @rename($tmp, $path); // mesmo diretório ⇒ atômico (substitui o existente)
@@ -604,7 +618,7 @@ function conexaoPorLoja(): array
     return $out;
 }
 
-function userVisible(array $u, bool $withSenha = false): array
+function userVisible(array $u, bool $withSenha = false, bool $withHash = false): array
 {
     $lojas = is_array($u['lojas'] ?? null) ? array_values(array_unique(array_map('strval', $u['lojas']))) : [];
     if (!$lojas && isset($u['lojaId']) && $u['lojaId'] !== '') {
@@ -620,6 +634,7 @@ function userVisible(array $u, bool $withSenha = false): array
         'ativo' => !empty($u['ativo']),
     ];
     if ($withSenha) $out['senha'] = $u['senha'] ?? '';
+    if ($withHash) $out['senhaHash'] = hash('sha256', (string) ($u['senha'] ?? ''));
     return $out;
 }
 
@@ -1535,6 +1550,25 @@ $action = $_REQUEST['action'] ?? ($input['action'] ?? '');
 $p = array_merge($input, $_REQUEST);
 $token = $_SERVER['HTTP_X_TOKEN'] ?? ($p['token'] ?? null);
 
+/* Serializa as escritas: os pushes são read-modify-write de arquivos JSON; dois
+   PDVs enviando ao mesmo tempo (ou um admin salvando) podiam perder um registro.
+   O lock é liberado no fim do request (exit/shutdown), nunca numa exceção. */
+$__writeLock = null;
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
+    $__writeLock = @fopen(dataFile('.write.lock'), 'c');
+    if ($__writeLock) {
+        if (!flock($__writeLock, LOCK_EX)) {
+            fclose($__writeLock);
+            $__writeLock = null;
+        } else {
+            register_shutdown_function(static function () use ($__writeLock) {
+                @flock($__writeLock, LOCK_UN);
+                @fclose($__writeLock);
+            });
+        }
+    }
+}
+
 try {
     switch ($action) {
         // ── Públicas ────────────────────────────────────────
@@ -1593,7 +1627,7 @@ try {
                 'ok' => true,
                 'loja' => ['id' => $loja['id'], 'nome' => $loja['nome'], 'pdv' => $loja['pdv']],
                 'usuarios' => array_map(function ($u) {
-                    return userVisible($u);
+                    return userVisible($u, false, true);
                 }, $users),
             ]);
         }
@@ -1912,7 +1946,7 @@ try {
             }
             if ($found === null && $legado !== null) $found = $legado; // adota snapshot antigo sem machineId
             if ($found !== null) $vendas[$found] = $snap; else $vendas[] = $snap;
-            saveJson('vendas.json', $vendas);
+            if (!saveJson('vendas.json', $vendas)) fail('GRAVACAO_FALHOU', 500);
             respond(['ok' => true, 'snapshot' => $snap]);
         }
 
@@ -1944,6 +1978,7 @@ try {
                     $unidadesRibbon += $unidades;
                 }
                 $itens[] = [
+                    'chave' => trim((string) ($it['chave'] ?? '')),
                     'tipo' => $tipo,
                     'produtoId' => $produtoId,
                     'label' => trim((string) ($it['label'] ?? '')),
@@ -1988,9 +2023,10 @@ try {
                 ];
             }
             $devolucao = null;
-            if (is_array($pd['devolucao'] ?? null)) {
+            $temDevolucao = array_key_exists('devolucao', $pd);
+            if ($temDevolucao && is_array($pd['devolucao'])) {
                 $formaDev = strtolower(trim((string) ($pd['devolucao']['forma'] ?? '')));
-                if (in_array($formaDev, ['dinheiro', 'cartao', 'nao'], true)) {
+                if (in_array($formaDev, ['dinheiro', 'cartao', 'pix', 'nao'], true)) {
                     $devolucao = [
                         'forma' => $formaDev,
                         'valor' => round(max(0, (float) ($pd['devolucao']['valor'] ?? 0)), 2),
@@ -2004,6 +2040,9 @@ try {
             foreach ($todos as $i => $r) {
                 if (($r['id'] ?? '') === $id) { $found = $i; $anterior = $r; break; }
             }
+            if (!$temDevolucao && is_array($anterior['devolucao'] ?? null)) {
+                $devolucao = $anterior['devolucao'];
+            }
 
             // Cancelamento pelo portal: o PDV só SOLICITA (sem motivo) e o admin
             // decide. A decisão fica no pedido e um push atrasado do PDV não
@@ -2012,7 +2051,7 @@ try {
             $temFlag = array_key_exists('cancelamentoSolicitado', $pd);
             $solicitado = !empty($pd['cancelamentoSolicitado']);
             $cancelStatus = is_array($cancel) ? (string) ($cancel['status'] ?? '') : '';
-            if ($solicitado && !in_array($cancelStatus, ['pendente', 'aprovado'], true)) {
+            if ($solicitado && !in_array($cancelStatus, ['pendente', 'aprovado', 'recusado'], true)) {
                 $cancel = [
                     'status' => 'pendente',
                     'solicitadoEm' => gmdate('c'),
@@ -2029,7 +2068,9 @@ try {
             $registro = [
                 'id' => $id,
                 'numero' => (string) ($pd['numero'] ?? $id),
-                'lojaId' => $loja['id'],
+                // Preserva a loja do registro original: um kiosk pareado não pode
+                // "mover" pedido de outra loja só enviando o mesmo id.
+                'lojaId' => (is_array($anterior) && !empty($anterior['lojaId'])) ? $anterior['lojaId'] : $loja['id'],
                 'lojaNome' => lojaNomePush($p, $loja),
                 'pdvNome' => resolverPdvNome($pd['pdvNome'] ?? '', $loja),
                 'machineId' => trim((string) ($p['machineId'] ?? '')),
@@ -2053,12 +2094,21 @@ try {
                 'origemPedidoId' => (string) ($pd['origemPedidoId'] ?? ''),
                 'devolucao' => $devolucao,
                 'cancelamento' => $cancel,
+                'cancelamentoDecisao' => is_array($pd['cancelamentoDecisao'] ?? null)
+                    ? $pd['cancelamentoDecisao']
+                    : (is_array($anterior['cancelamentoDecisao'] ?? null) ? $anterior['cancelamentoDecisao'] : null),
+                'itensDevolvidos' => is_array($pd['itensDevolvidos'] ?? null)
+                    ? array_values(array_map('strval', $pd['itensDevolvidos']))
+                    : (is_array($anterior['itensDevolvidos'] ?? null) ? $anterior['itensDevolvidos'] : []),
+                'itensPerdidos' => is_array($pd['itensPerdidos'] ?? null)
+                    ? array_values(array_map('strval', $pd['itensPerdidos']))
+                    : (is_array($anterior['itensPerdidos'] ?? null) ? $anterior['itensPerdidos'] : []),
                 'guiaImpressa' => !empty($pd['guiaImpressa']),
                 'enviadoEm' => gmdate('c'),
             ];
 
             if ($found !== null) $todos[$found] = $registro; else $todos[] = $registro;
-            saveJson('pedidos.json', $todos);
+            if (!saveJson('pedidos.json', $todos)) fail('GRAVACAO_FALHOU', 500);
             respond(['ok' => true, 'pedido' => $registro]);
         }
 
@@ -2089,6 +2139,8 @@ try {
                         'forma' => (string) ($re['forma'] ?? 'nao'),
                         'valor' => round(max(0, (float) ($re['valor'] ?? 0)), 2),
                     ],
+                    'itens' => is_array($c['itens'] ?? null) ? $c['itens'] : [],
+                    'pagamentoOriginal' => is_array($c['pagamentoOriginal'] ?? null) ? $c['pagamentoOriginal'] : [],
                     'decididoEm' => $decididoEm,
                 ];
             }
@@ -2180,8 +2232,12 @@ try {
             foreach ($caixas as $i => $r) {
                 if (($r['id'] ?? '') === $id) { $found = $i; break; }
             }
-            if ($found !== null) $caixas[$found] = $registro; else $caixas[] = $registro;
-            saveJson('caixas.json', $caixas);
+            if ($found !== null) {
+                // Não permite "mover" caixa de outra loja reenviando o mesmo id.
+                if (!empty($caixas[$found]['lojaId'])) $registro['lojaId'] = $caixas[$found]['lojaId'];
+                $caixas[$found] = $registro;
+            } else $caixas[] = $registro;
+            if (!saveJson('caixas.json', $caixas)) fail('GRAVACAO_FALHOU', 500);
             respond(['ok' => true, 'caixa' => $registro]);
         }
 
@@ -2216,8 +2272,11 @@ try {
             foreach ($todos as $i => $r) {
                 if (($r['id'] ?? '') === $id) { $found = $i; break; }
             }
-            if ($found !== null) $todos[$found] = $registro; else $todos[] = $registro;
-            saveJson('auditoria.json', $todos);
+            if ($found !== null) {
+                if (!empty($todos[$found]['lojaId'])) $registro['lojaId'] = $todos[$found]['lojaId'];
+                $todos[$found] = $registro;
+            } else $todos[] = $registro;
+            if (!saveJson('auditoria.json', $todos)) fail('GRAVACAO_FALHOU', 500);
             respond(['ok' => true, 'uso' => $registro]);
         }
 
@@ -2947,7 +3006,7 @@ try {
         }
 
         // Aprova ou recusa o cancelamento. Ao aprovar, o admin escolhe o que
-        // acontece com o estoque (volta/perda) e o reembolso (não/dinheiro/cartão).
+        // acontece com o estoque (por item) e o reembolso (não/dinheiro/cartão/PIX).
         // A decisão volta ao PDV em cancelamento.decisoes.
         case 'cancelamento.decidir': {
             $pedidoId = trim((string) ($p['pedidoId'] ?? ''));
@@ -2958,8 +3017,15 @@ try {
             if (!in_array($estoque, ['voltar', 'perder'], true)) $estoque = 'voltar';
             $reIn = is_array($p['reembolso'] ?? null) ? $p['reembolso'] : [];
             $reForma = strtolower(trim((string) ($reIn['forma'] ?? 'nao')));
-            if (!in_array($reForma, ['nao', 'dinheiro', 'cartao'], true)) $reForma = 'nao';
+            if (!in_array($reForma, ['nao', 'dinheiro', 'cartao', 'pix'], true)) $reForma = 'nao';
             $reValor = round(max(0, (float) ($reIn['valor'] ?? 0)), 2);
+            $itensDecisao = [];
+            foreach ((array) ($p['itens'] ?? []) as $itemDec) {
+                if (!is_array($itemDec)) continue;
+                $chave = trim((string) ($itemDec['chave'] ?? ''));
+                if ($chave === '') continue;
+                $itensDecisao[] = ['chave' => $chave, 'volta' => !empty($itemDec['volta'])];
+            }
 
             $todos = loadJson('pedidos.json', []);
             if (!is_array($todos)) $todos = [];
@@ -2978,20 +3044,52 @@ try {
                 $total = round(max(0, (float) ($r['total'] ?? 0)), 2);
                 if ($reForma !== 'nao' && $reValor <= 0) $reValor = $total;
                 if ($reValor > $total) $reValor = $total;
+                $pagamentoOriginal = [];
+                foreach ((is_array($r['pagamentos'] ?? null) ? $r['pagamentos'] : []) as $pg) {
+                    if (!is_array($pg)) continue;
+                    $pagamentoOriginal[] = [
+                        'meio' => (string) ($pg['meio'] ?? ''),
+                        'forma' => (string) ($pg['forma'] ?? ''),
+                        'valor' => round((float) ($pg['valor'] ?? 0), 2),
+                    ];
+                }
                 $c['status'] = 'aprovado';
-                $c['estoque'] = $estoque;
+                $c['estoque'] = $itensDecisao ? 'itens' : $estoque;
+                $c['itens'] = $itensDecisao ?: null;
+                $c['pagamentoOriginal'] = $pagamentoOriginal;
                 $c['reembolso'] = ['forma' => $reForma, 'valor' => $reForma === 'nao' ? 0 : $reValor];
                 $r['status'] = 'cancelado';
                 $r['canceladoEm'] = gmdate('c');
                 $r['devolucao'] = $c['reembolso'];
+                $r['cancelamentoDecisao'] = $c;
+                $r['itensDevolvidos'] = array_values(array_filter(array_map(function ($item) use ($itensDecisao) {
+                    if (!$itensDecisao) return null;
+                    foreach ($itensDecisao as $dec) {
+                        if (($dec['chave'] ?? '') === (string) ($item['chave'] ?? '')) {
+                            return !empty($dec['volta']) ? (string) ($item['label'] ?? $item['produtoId'] ?? '') : null;
+                        }
+                    }
+                    return null;
+                }, is_array($r['itens'] ?? null) ? $r['itens'] : [])));
+                $r['itensPerdidos'] = array_values(array_filter(array_map(function ($item) use ($itensDecisao) {
+                    if (!$itensDecisao) return null;
+                    foreach ($itensDecisao as $dec) {
+                        if (($dec['chave'] ?? '') === (string) ($item['chave'] ?? '')) {
+                            return empty($dec['volta']) ? (string) ($item['label'] ?? $item['produtoId'] ?? '') : null;
+                        }
+                    }
+                    return null;
+                }, is_array($r['itens'] ?? null) ? $r['itens'] : [])));
             } else {
                 $c['status'] = 'recusado';
                 $c['estoque'] = '';
+                $c['itens'] = null;
+                $c['pagamentoOriginal'] = null;
                 $c['reembolso'] = null;
             }
             $r['cancelamento'] = $c;
             $todos[$idx] = $r;
-            saveJson('pedidos.json', $todos);
+            if (!saveJson('pedidos.json', $todos)) fail('GRAVACAO_FALHOU', 500);
             respond(['ok' => true, 'pedido' => $r]);
         }
 
